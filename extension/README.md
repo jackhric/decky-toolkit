@@ -7,6 +7,10 @@ Bazzite, …) and gives you, inside VS Code or VSCodium:
 - a **Decky** sidebar (Activity Bar icon) that lists your devices; connect to one and its actions
   (grouped by Screen, Plugin, Loader, Steam and MCP), plugins, controllers and a small live preview
   appear, so you never need the command palette,
+- a **Games** view: every installed title with its save data, install folder, Proton prefix, Steam
+  Cloud folder, shader cache and Proton log, one click from opening a save file in the editor,
+- a remote file system (`decky://<host>/<path>`): device folders open in the Explorer and files
+  open and save in place,
 - controller management: every controller Steam Input sees, virtual Xbox 360 pads you add or
   remove with one click, and a choice of which pad your local gamepad drives,
 - Steam UI navigation (any page, a game's details, a plugin's panel, Back, Quick Access),
@@ -27,7 +31,7 @@ The Decky-MCP plugin must already be installed and enabled on the device.
    the **+** in the view title to add another (see [Adding a device](#adding-a-device)).
 2. **Click the device** (or its plug icon). If it is not paired yet, pairing starts at once; see
    [Pairing](#pairing). If it is paired, it connects in a second.
-3. **Work.** When it is connected, the **Actions**, **Plugins**, **Controllers** and **Preview** views appear below
+3. **Work.** When it is connected, the **Actions**, **Plugins**, **Games**, **Controllers** and **Preview** views appear below
    the list, with the device's name in their title bars. The screen panel opens automatically after
    the first connect of a session (setting `decky-mcp.openScreenOnConnect`). If your workspace is a
    Decky plugin, you are offered to deploy it; afterwards use the `$(rocket) Deploy <name>` button in
@@ -92,6 +96,8 @@ you expand or collapse.
     **Plugins** (pages plugins registered) and **Menus** (main menu, Quick Access and each Quick
     Access tab). An entry with a placeholder such as `/library/app/{appid}` asks for the value
     first (digits only for ids). The pick is sent as `POST /ui/navigate`.
+  - **Open save data…**: picks a game and opens its save folder in the Explorer (see
+    [Games](#games)).
   - **Open plugin panel…**: picks an installed plugin (`/plugins`) and opens its Quick Access
     panel (`{action: "plugin"}`). Also in the right-click menu of a row in the Plugins view.
   - **Back**, **Quick Access**, **Close menus**: one click each.
@@ -112,6 +118,81 @@ Lists the device's plugins (`GET /plugins`, falling back to the `list_plugins` t
 plugin's backend (`POST /plugins/{dir}/reload`) or open its log. The title bar has **Install
 plugin zip…** (pick a `.zip`, upload to `/plugins/install?restart=loader`, wait for the loader) and
 Refresh.
+
+### Games
+
+Every installed title on the device (`GET /apps`: Steam games and non-Steam shortcuts), most recently
+played first. The view starts collapsed; libraries are large, so the title bar has **Find game…**
+(`$(search)`): a picker over all titles that fuzzy-matches the name (and runtime), shows the app id,
+when it was last played and its size, and reveals and expands the game you pick. The title bar
+also has **Open device path…** and Refresh.
+
+| Row | Description |
+| --- | --- |
+| a Proton title | `Proton 11` (`Proton Experimental`, or the tool's name for GE-Proton and others) |
+| a native title on the Steam Linux Runtime | `Linux runtime` |
+| a title without a compatibility tool (most shortcuts) | `native` |
+| a running title | green play icon, `· running` |
+
+The inline icons launch the game (`app_launch`) or, while it runs, terminate it (`app_terminate`,
+after a modal *Terminate X?* confirmation, since unsaved progress is lost), and open its save data.
+Expanding a game loads `/apps/{appid}/dirs` and `/apps/{appid}/saves` and shows:
+
+- **Save data** (expanded): one row per save location, best first: the folders holding the files
+  Steam Cloud tracks (cloud icon), then folders Steam Auto-Cloud marked and folders found by name.
+  Paths are shortened (`AppData/Local/<Game>/Saved/SaveGames` inside a prefix, `~/.local/share/...`
+  in the home), the description says how many saves and how recent the newest is. Expanding a
+  location lists the folder (folders first; save files get a save icon, every file shows its size
+  and age). **Click a file to open it in an editor tab**; saving writes it back to the device.
+- **Game data** (native titles): the matching `~/.local/share`, `~/.config` folders.
+- **Install folder**, **Steam Cloud (userdata)** (`userdata/<account>/<appid>`) and **Shader
+  cache**, each a browsable folder.
+- **Proton prefix** (Proton titles): shortcuts to `drive_c/users/steamuser` `AppData/Local`,
+  `AppData/Roaming`, `AppData/LocalLow`, `Documents`, `Saved Games` (whichever exist; the
+  description names the game's own folder in it) and the whole `drive_c`.
+- **Proton log** (**Launch log** for native titles): opens `~/steam-<appid>.log` (written when the
+  game runs with the launch option `PROTON_LOG=1 %command%`, otherwise a hint saying so) plus every
+  line of Steam's `logs/` that mentions the app id, in an editor tab.
+
+Right-click a folder or file for **Open in Explorer** (also the inline icon on folders) and **Copy
+path**; right-click a game for **Open save data**, **Launch**/**Terminate**, **Show Proton log**
+and **Copy path** (the install folder). A device whose plugin predates the library routes shows one
+greyed-out row, *update Decky-MCP on the device*.
+
+#### Jump into a game's saves
+
+1. Open the **Games** view and click **Find game…** (or run **Decky: Open save data…** from the
+   palette or **Actions → Steam**).
+2. Type part of the name, for example `vvv`.
+3. **Open save data…** adds the best save folder as a workspace folder named like
+   `VVVVVV saves (10.0.70.18)` (`decky://10.0.70.18/home/jackh/.local/share/VVVVVV/saves`) and shows
+   the Explorer. Or expand the game in the Games view and click a save file to open it directly.
+
+### Remote files (`decky://`)
+
+The extension registers a file system for the scheme `decky`: `decky://<host>/<absolute path>`
+(`<host>:<port>` when the port is not 8765). It serves any saved, paired device, also when it is
+not the connected one; the token comes from secret storage.
+
+- **Read**: `stat` and directory listings use `GET /fs` (a stat lists the parent with an exact
+  glob), files `GET /fs/read` (up to 64 MiB). Symlinks are resolved to file or folder.
+- **Write**: saving uses `PUT /fs/write`; new folders `POST /fs/mkdir`, rename/move
+  `POST /fs/rename`, delete `DELETE /fs?...&confirm=1` (VS Code asks before deleting). The device
+  only writes inside a game's install folder, a Proton prefix (`compatdata/<appid>/...`),
+  `userdata/<account>/<appid>/...`, the Decky-MCP data folder, and `~/.local/share` / `~/.config`
+  folders named after an installed game; deleting follows `fs_delete`'s rules (not the
+  `~/.local/share` game folders). New files and folders get the owner of their parent, so the game
+  can still write its saves.
+- **Errors**: a refused path (outside those folders, or Steam's login files such as
+  `config/loginusers.vdf`) shows as *permission denied* with the device's reason; a device that is
+  not reachable, not paired or not saved shows as *unavailable* with the reason; a device whose
+  plugin predates these routes asks you to update it.
+- **Open device path…** (Games title bar, palette) asks for a path (`/…` or `~/…`): folders open in
+  the Explorer, files in the editor.
+- Changes on the device are not watched; use the Explorer's Refresh.
+
+Adding a workspace folder to a window without one reopens the window as a workspace (VS Code
+restarts extensions); the extension activates again on `onFileSystem:decky` and reconnects.
 
 ### Controllers
 
@@ -316,6 +397,12 @@ All of these are also in the command palette under the `Decky:` category.
 | Decky: Navigate Steam UI to… | Picker of official pages, plugin pages and menus from `/ui/routes`; asks for template values such as the app id |
 | Decky: Open plugin panel… | Opens an installed plugin's Quick Access panel |
 | Decky: Steam UI: Back / Quick Access / Close menus | `POST /ui/navigate` with `back`, `quick_access` or `close_menus` |
+| Decky: Find game… | Picker over the installed titles (fuzzy match); reveals the game in the Games view |
+| Decky: Open save data… | Picks a game and adds its best save folder to the Explorer (`decky://`) |
+| Decky: Open device path… | Opens a device folder in the Explorer or a device file in the editor |
+| Decky: Launch game / Terminate game | `app_launch`; `app_terminate` after a confirmation |
+| Decky: Show Proton log | `proton_log` for a game in an editor tab |
+| Decky: Refresh games | Reloads the Games view |
 | Decky: Install plugin zip… | Uploads a plugin zip from disk to `/plugins/install?restart=loader` |
 | Decky: Restart loader | `POST /loader/restart` (falls back to the `restart_loader` tool) |
 | Decky: Reload plugin | `POST /plugins/{dir}/reload` for one plugin backend |
@@ -418,7 +505,12 @@ the 409 and Steam Input refusals shown as-is, the poll fallback and recovery aft
 screen panel's `pads` message and, in `media/screen.js`, the **Forward to** select (`pad` field,
 neutral state on switch, **New virtual pad…**, fallback to Auto); the Navigate to… picker
 (sections, current page, template prompt), Open plugin panel, Back / Quick Access / Close menus,
-a 400 and a 404; and the browser viewer's Controllers popover (`static/viewer.html` in a minimal
+a 400 and a 404; the Games view (a Proton title with saves and prefix shortcuts, a native title, a
+shortcut whose saves fail, a 404 device, errors), the Find game picker, Open save data adding a
+`decky://` workspace folder, launch, terminate with its confirmation, the Proton log tab and Open
+device path; the `decky:` file system against a fake `/fs*` server (stat, listings, symlinks,
+write/read round trip, mkdir, rename, delete with `confirm=1`, refused and sensitive paths as
+`NoPermissions`, unreachable / unpaired / unknown devices as `Unavailable`); and the browser viewer's Controllers popover (`static/viewer.html` in a minimal
 DOM).
 
 ### Deploy check (device)
@@ -454,5 +546,7 @@ through the client, opens a WebSocket to `/input` through the proxy and expects 
 (input must be off on the Deck; the check never turns it on), opens `/audio` through the proxy and
 expects the format frame and at least 10 PCM chunks within 1 s (audio must be on; the check never
 changes it), probes the newer routes (including `/controllers`, `/ui/routes` and
-`/controllers/events` through the proxy, read-only and passing on 404), and validates a staged zip with `unzip -t`. The
+`/controllers/events` through the proxy, read-only and passing on 404), validates a staged zip with `unzip -t`,
+and prints `INFO` lines (never failures) for `/fs?path=/home/jackh/.local/share/VVVVVV`,
+`/apps/70300/saves` and a read-only `/fs/read` of the best VVVVVV save. The
 stream checks need a screen that changes: gamescope sends no frames while the screen is static.

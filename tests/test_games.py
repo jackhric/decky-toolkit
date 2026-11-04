@@ -290,3 +290,136 @@ def test_fs_route(tree, monkeypatch):
         async with s.get(f"{base}/fs?path=/&depth=x", headers=H) as r:
             assert r.status == 400
     asyncio.run(with_server(run))
+
+
+def fs_env(tree, tmp_path):
+    root = tree["root"]
+    runtime = tmp_path / "runtime"
+    runtime.mkdir(exist_ok=True)
+    libs = games.library_folders(root)
+    return games.write_roots(root, libs, str(runtime)), games.installed_name_keys(libs), runtime
+
+
+def test_fs_read_write_mkdir_rename(tree, tmp_path):
+    home, root, lib2 = tree["home"], tree["root"], tree["lib2"]
+    roots, keys, runtime = fs_env(tree, tmp_path)
+    assert "vvvvvv" in keys and "chainedtogether" in keys
+
+    assert games.fs_read("~/.local/share/VVVVVV/saves/tsave.vvv", home=home) == b"s"
+    with pytest.raises(SensitivePath):
+        games.fs_read(f"{root}/config/loginusers.vdf", home=home)
+    with pytest.raises(IsADirectoryError):
+        games.fs_read("~/.local/share/VVVVVV", home=home)
+    with pytest.raises(FileNotFoundError):
+        games.fs_read("~/nope", home=home)
+    with pytest.raises(games.TooLarge):
+        games.fs_read("~/.local/share/VVVVVV/saves/tsave.vvv", home=home, max_bytes=0)
+
+    new = str(runtime / "a/b/new.txt")
+    assert games.fs_write(new, b"hi", roots, keys, home=home) == {"path": new, "bytes": 2, "created": True}
+    assert Path(new).read_bytes() == b"hi" and oct(Path(new).stat().st_mode & 0o777) == "0o644"
+    with pytest.raises(FileExistsError):
+        games.fs_write(new, b"x", roots, keys, home=home, overwrite=False)
+    with pytest.raises(FileNotFoundError):
+        games.fs_write(str(runtime / "missing.txt"), b"x", roots, keys, home=home, create=False)
+    os.chmod(new, 0o600)
+    assert games.fs_write(new, b"again", roots, keys, home=home)["created"] is False
+    assert Path(new).read_bytes() == b"again" and oct(Path(new).stat().st_mode & 0o777) == "0o600"
+    assert not [p for p in os.listdir(runtime / "a/b") if p.endswith(".tmp")]
+
+    save = f"{home}/.local/share/VVVVVV/saves/tsave.vvv"
+    pfx_file = f"{tree['pfx_user']}/AppData/Local/ChainedTogether/Saved/SaveGames/New.sav"
+    for ok in (save, pfx_file, f"{root}/userdata/{ACCOUNT}/{NATIVE_APP}/remote/x", f"{root}/steamapps/common/vvvvvv/x.cfg"):
+        assert games.writable(ok, roots, home, keys), ok
+    for bad in (f"{home}/.bashrc", f"{home}/.local/share/Unrelated/save.dat", f"{home}/.local/share/VVVVVV",
+                f"{root}/steamapps/common/x", f"{lib2}/steamapps/compatdata/{PROTON_APP}", f"{root}/userdata/{ACCOUNT}/config/x",
+                f"{root}/config/x.vdf", f"{home}/.config/x", "/etc/passwd", str(runtime)):
+        assert not games.writable(bad, roots, home, keys), bad
+        with pytest.raises(PermissionError):
+            games.fs_write(bad, b"x", roots, keys, home=home)
+    with pytest.raises(SensitivePath):
+        games.fs_write(f"{root}/config/loginusers.vdf", b"x", roots, keys, home=home)
+    with pytest.raises(PermissionError):
+        games.fs_write(f"{root}/steamapps/common/vvvvvv/steamapps/libraryfolders.vdf", b"x", roots, keys, home=home)
+
+    escape = tmp_path / "outside"
+    escape.mkdir()
+    link = runtime / "link"
+    link.symlink_to(escape)
+    with pytest.raises(PermissionError):
+        games.fs_write(str(link / "f"), b"x", roots, keys, home=home)
+    assert not (escape / "f").exists()
+
+    d = str(runtime / "dir")
+    assert games.fs_mkdir(d, roots, keys, home=home)["created"]
+    with pytest.raises(FileExistsError):
+        games.fs_mkdir(d, roots, keys, home=home)
+    with pytest.raises(FileNotFoundError):
+        games.fs_mkdir(str(runtime / "x/y"), roots, keys, home=home)
+    assert games.fs_mkdir(str(runtime / "x/y"), roots, keys, home=home, parents=True)["created"]
+
+    dst = str(runtime / "dir/moved.txt")
+    assert games.fs_rename(new, dst, roots, keys, home=home) == {"from": new, "to": dst}
+    assert Path(dst).read_bytes() == b"again" and not Path(new).exists()
+    games.fs_write(new, b"1", roots, keys, home=home)
+    with pytest.raises(FileExistsError):
+        games.fs_rename(new, dst, roots, keys, home=home)
+    games.fs_rename(new, dst, roots, keys, home=home, overwrite=True)
+    with pytest.raises(PermissionError):
+        games.fs_rename(dst, f"{home}/moved.txt", roots, keys, home=home)
+    with pytest.raises(PermissionError):
+        games.fs_rename(f"{home}/.local/share/Unrelated/save.dat", str(runtime / "s.dat"), roots, keys, home=home)
+
+
+def test_fs_write_routes(tree, tmp_path, monkeypatch):
+    from decky_mcp.auth import TOKEN_COOKIE
+    home, root = tree["home"], tree["root"]
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    monkeypatch.setenv("DECKY_USER_HOME", home)
+    monkeypatch.setenv("DECKY_PLUGIN_RUNTIME_DIR", str(runtime))
+    cookie = {"Cookie": f"{TOKEN_COOKIE}=test-token"}
+    q = "path=" + str(runtime / "sub/f.bin")
+
+    async def run(s, base):
+        async with s.get(f"{base}/fs/read?path=~/.local/share/VVVVVV/saves/tsave.vvv", headers=H) as r:
+            assert r.status == 200 and r.content_type == "application/octet-stream" and await r.read() == b"s"
+        for method, url in (("GET", "/fs/read?path=~/.local/share/VVVVVV/saves/tsave.vvv"), ("PUT", f"/fs/write?{q}"),
+                            ("POST", "/fs/mkdir"), ("POST", "/fs/rename"), ("DELETE", f"/fs?{q}&confirm=1")):
+            async with s.request(method, base + url, headers=cookie) as r:
+                assert r.status == 401, url
+        async with s.get(f"{base}/fs/read?path=~/.local/share/Steam/config/loginusers.vdf", headers=H) as r:
+            assert r.status == 403
+        async with s.get(f"{base}/fs/read?path=~/nope", headers=H) as r:
+            assert r.status == 404 and (await r.json())["code"] == "ENOENT"
+        async with s.get(f"{base}/fs/read?path=~/.local/share/VVVVVV", headers=H) as r:
+            assert r.status == 409 and (await r.json())["code"] == "EISDIR"
+        async with s.put(f"{base}/fs/write?{q}", data=b"\x00\x01binary", headers=H) as r:
+            assert r.status == 200 and (await r.json())["created"] is True
+        assert (runtime / "sub/f.bin").read_bytes() == b"\x00\x01binary"
+        async with s.put(f"{base}/fs/write?{q}&overwrite=0", data=b"x", headers=H) as r:
+            assert r.status == 409 and (await r.json())["code"] == "EEXIST"
+        async with s.put(f"{base}/fs/write?path={home}/.bashrc", data=b"x", headers=H) as r:
+            assert r.status == 403
+        async with s.put(f"{base}/fs/write?path={root}/config/loginusers.vdf", data=b"x", headers=H) as r:
+            assert r.status == 403
+        async with s.post(f"{base}/fs/mkdir", json={"path": str(runtime / "d")}, headers=H) as r:
+            assert r.status == 200
+        async with s.post(f"{base}/fs/mkdir", json={"path": str(runtime / "d")}, headers=H) as r:
+            assert r.status == 409
+        async with s.post(f"{base}/fs/rename", json={"from": str(runtime / "sub/f.bin"), "to": str(runtime / "d/g.bin")}, headers=H) as r:
+            assert r.status == 200
+        async with s.post(f"{base}/fs/rename", json={"from": str(runtime / "d/g.bin")}, headers=H) as r:
+            assert r.status == 400
+        async with s.delete(f"{base}/fs?path={runtime}/d/g.bin", headers=H) as r:
+            assert r.status == 400 and "confirm=1" in (await r.json())["error"]
+        async with s.delete(f"{base}/fs?path={runtime}/d/g.bin&confirm=1", headers=H) as r:
+            assert r.status == 200 and (await r.json())["files"] == 1
+        async with s.delete(f"{base}/fs?path=~/.local/share/VVVVVV/saves/tsave.vvv&confirm=1", headers=H) as r:
+            assert r.status == 403
+        async with s.delete(f"{base}/fs?path=~/.local/share/Steam/config/loginusers.vdf&confirm=1", headers=H) as r:
+            assert r.status == 403
+        async with s.delete(f"{base}/fs?path={runtime}/nope&confirm=1", headers=H) as r:
+            assert r.status == 404
+    asyncio.run(with_server(run))
+    assert (Path(home) / ".local/share/VVVVVV/saves/tsave.vvv").exists()

@@ -18,7 +18,8 @@ await esbuild.build({
   stdin: {
     contents: "export * from './src/extension'; export * from './src/actionsTree'; export * from './src/pluginsTree'; " +
       "export * from './src/pluginDeploy'; export * from './src/stage'; export { AUTO_DEPLOY_DEBOUNCE_MS } from './src/deploy'; " +
-      "export * from './src/controllers'; export * from './src/navigation'; export { HttpError } from './src/client';",
+      "export * from './src/controllers'; export * from './src/navigation'; export { HttpError } from './src/client'; " +
+      "export * from './src/games'; export * from './src/remoteFs';",
     resolveDir: root,
     loader: 'ts',
   },
@@ -33,7 +34,7 @@ await esbuild.build({
 const calls = {
   treeViews: [], treeProviders: [], webviewProviders: [], commands: new Map(), context: new Map(), statusItems: [],
   panels: [], progress: [], messages: [], statusMessages: [], clipboard: [], unexpectedErrors: [], opened: [], written: [], saveDialogs: [],
-  watchers: [], output: [],
+  watchers: [], output: [], fsProviders: [], folderUpdates: [], docs: [], revealed: [],
 };
 
 class EventEmitter {
@@ -51,6 +52,14 @@ class EventEmitter {
 class Disposable { constructor(fn) { this.fn = fn; } dispose() { this.fn?.(); } }
 class TreeItem { constructor(label, collapsibleState = 0) { this.label = label; this.collapsibleState = collapsibleState; } }
 class ThemeIcon { constructor(id, color) { this.id = id; this.color = color; } }
+ThemeIcon.Folder = new ThemeIcon('folder');
+ThemeIcon.File = new ThemeIcon('file');
+class FileSystemError extends Error {
+  constructor(m, code = 'Unknown') { super(String(m)); this.code = code; }
+}
+for (const code of ['FileNotFound', 'FileExists', 'FileNotADirectory', 'FileIsADirectory', 'NoPermissions', 'Unavailable']) {
+  FileSystemError[code] = m => new FileSystemError(m, code);
+}
 class ThemeColor { constructor(id) { this.id = id; } }
 class MarkdownString { value = ''; appendMarkdown(s) { this.value += s; return this; } }
 class RelativePattern { constructor(base, pattern) { this.base = base; this.pattern = pattern; } }
@@ -58,6 +67,7 @@ const Uri = {
   parse: s => ({ toString: () => s, path: new URL(s).pathname }),
   file: p => ({ toString: () => `file://${p}`, path: p, fsPath: p }),
   joinPath: (u, ...p) => ({ toString: () => [u.toString(), ...p].join('/'), path: [u.path ?? '', ...p].join('/') }),
+  from: ({ scheme, authority = '', path: p = '' }) => ({ scheme, authority, path: p, toString: () => `${scheme}://${authority}${p}` }),
 };
 const files = new Map();
 
@@ -88,7 +98,9 @@ const vscode = {
   ViewColumn: { Beside: -2 },
   QuickPickItemKind: { Separator: -1, Default: 0 },
   ConfigurationTarget: { Global: 1, Workspace: 2 },
-  FileSystemError: class extends Error {},
+  FileSystemError,
+  FileType: { Unknown: 0, File: 1, Directory: 2, SymbolicLink: 64 },
+  FileChangeType: { Changed: 1, Created: 2, Deleted: 3 },
   CancellationError: class extends Error {},
   window: {
     createStatusBarItem: () => {
@@ -101,7 +113,10 @@ const vscode = {
     }),
     createTreeView: (id, opts) => {
       const visibility = new EventEmitter();
-      const view = { id, visible: true, title: undefined, description: undefined, onDidChangeVisibility: visibility.event, dispose() {}, _visibility: visibility };
+      const view = {
+        id, visible: true, title: undefined, description: undefined, onDidChangeVisibility: visibility.event, dispose() {}, _visibility: visibility,
+        reveal: async (node, opts) => { calls.revealed.push({ id, node, opts }); },
+      };
       calls.treeViews.push({ id, provider: opts.treeDataProvider, view });
       return view;
     },
@@ -127,6 +142,7 @@ const vscode = {
     showQuickPick: async (items, opts) => ui.quickPick(await items, opts),
     showOpenDialog: noop,
     showSaveDialog: async opts => { calls.saveDialogs.push(opts); return ui.saveDialog(opts); },
+    showTextDocument: async (doc, opts) => { calls.docs.push({ doc, opts }); return {}; },
     setStatusBarMessage: m => { calls.statusMessages.push(m); return new Disposable(); },
     withProgress: (o, fn) => {
       const entry = { title: o.title, messages: [] };
@@ -167,6 +183,9 @@ const vscode = {
       return w;
     },
     workspaceFolders: undefined,
+    registerFileSystemProvider: (scheme, provider, options) => { calls.fsProviders.push({ scheme, provider, options }); return new Disposable(); },
+    updateWorkspaceFolders: (start, deleteCount, ...folders) => { calls.folderUpdates.push({ start, deleteCount, folders }); return true; },
+    openTextDocument: async opts => ({ ...opts, uri: Uri.parse('untitled:Untitled-1') }),
     fs: {
       readFile: async u => { if (files.has(u.toString())) return files.get(u.toString()); throw new vscode.FileSystemError('nope'); },
       writeFile: async (u, data) => { calls.written.push({ uri: u.toString(), data }); },
@@ -227,6 +246,154 @@ const uiRoutes = {
   quick_access_tabs: ['Notifications', 'Decky'],
 };
 const uiDevice = { missing: false, posts: [] };
+// Library and game folders as the device reports them (Bazzite: Steam paths under /var/home, ~ is /home).
+const ago = s => new Date(Date.now() - s * 1000).toISOString().replace(/\.\d+Z$/, '+00:00');
+const STEAM = '/var/home/jackh/.local/share/Steam';
+const CT_USER = `${STEAM}/steamapps/compatdata/2567870/pfx/drive_c/users/steamuser`;
+const appVVVVVV = {
+  appid: 70300, name: 'VVVVVV', type: 'game', installed: true, running: true, install_dir: `${STEAM}/steamapps/common/vvvvvv`,
+  compat_tool: 'steamlinuxruntime_sniper', compat_tool_display: 'Steam Linux Runtime 3.0', size_on_disk: 75883262, library: STEAM, last_played: ago(300),
+};
+const appChained = {
+  appid: 2567870, name: 'Chained Together', type: 'game', installed: true, running: false, install_dir: `${STEAM}/steamapps/common/ChainedTogether`,
+  compat_tool: 'proton_11', compat_tool_display: 'Proton 11.0-2', size_on_disk: 8493964009, library: STEAM, last_played: ago(3700),
+};
+const appRom = {
+  appid: 4289220546, name: '1080° Avalanche', type: 'shortcut', installed: true, running: false, install_dir: '/home/jackh/.local/share/romm-tender/bin',
+  compat_tool: null, compat_tool_display: null, size_on_disk: 0, library: null, last_played: null,
+};
+const appRemote = { ...appChained, appid: 220, name: 'Half-Life 2', installed: false, last_played: ago(10) };
+const entry = (path, exists = true) => ({ path, exists, ...(exists ? { mtime: ago(9000) } : {}) });
+const userDirs = (base, present, matches = {}) => Object.fromEntries([
+  ['appdata_roaming', 'AppData/Roaming'], ['appdata_local', 'AppData/Local'], ['appdata_locallow', 'AppData/LocalLow'],
+  ['documents', 'Documents'], ['saved_games', 'Saved Games'],
+].map(([k, rel]) => [k, { ...entry(`${base}/${rel}`, present.includes(k)), matches: matches[k] ?? [] }]));
+const dirsChained = {
+  appid: 2567870, name: 'Chained Together', platform: 'proton', compat_tool: 'proton_11', steam_root: STEAM,
+  install_dir: entry(`${STEAM}/steamapps/common/ChainedTogether`), compatdata: entry(`${STEAM}/steamapps/compatdata/2567870`),
+  prefix: entry(`${STEAM}/steamapps/compatdata/2567870/pfx`),
+  prefix_user_dirs: userDirs(CT_USER, ['appdata_roaming', 'appdata_local', 'documents', 'saved_games'], { appdata_local: [`${CT_USER}/AppData/Local/ChainedTogether`] }),
+  account_id: '95599472', userdata: entry(`${STEAM}/userdata/95599472/2567870`), cloud_remote: entry(`${STEAM}/userdata/95599472/2567870/remote`, false),
+  shader_cache: entry(`${STEAM}/steamapps/shadercache/2567870`), xdg: [],
+};
+const savesChained = {
+  appid: 2567870, name: 'Chained Together', steam_cloud: [], notes: [],
+  candidates: [
+    { path: `${CT_USER}/AppData/Local/ChainedTogether/Saved/SaveGames/Progress.sav`, size: 30519, mtime: ago(3650), found_by: 'steam_cloud remotecache (root 3)', rank: 0, score: 0 },
+    { path: `${CT_USER}/AppData/Local/ChainedTogether/Saved/SaveGames/Save.sav`, size: 2348, mtime: ago(20000), found_by: 'steam_cloud remotecache (root 3)', rank: 0, score: 0 },
+    { path: `${CT_USER}/AppData/Local/ChainedTogether/Saved/Config/Windows/GameUserSettings.ini`, size: 900, mtime: ago(20000), found_by: 'heuristic: under a dir named after the game', rank: 2, score: 3 },
+  ],
+};
+const dirsVVVVVV = {
+  appid: 70300, name: 'VVVVVV', platform: 'native', compat_tool: 'steamlinuxruntime_sniper', steam_root: STEAM,
+  install_dir: entry(`${STEAM}/steamapps/common/vvvvvv`), compatdata: entry(`${STEAM}/steamapps/compatdata/70300`),
+  prefix: entry(`${STEAM}/steamapps/compatdata/70300/pfx`, false), prefix_user_dirs: userDirs(`${STEAM}/steamapps/compatdata/70300/pfx/drive_c/users/steamuser`, []),
+  account_id: '95599472', userdata: entry(`${STEAM}/userdata/95599472/70300`), cloud_remote: entry(`${STEAM}/userdata/95599472/70300/remote`, false),
+  shader_cache: entry(`${STEAM}/steamapps/shadercache/70300`), xdg: [{ ...entry('/home/jackh/.local/share/VVVVVV'), base: '/home/jackh/.local/share' }],
+};
+const savesVVVVVV = {
+  appid: 70300, name: 'VVVVVV', steam_cloud: [], notes: [],
+  candidates: [
+    { path: '/home/jackh/.local/share/VVVVVV/saves/unlock.vvv', size: 2214, mtime: ago(320), found_by: 'steam_cloud remotecache (root 2)', rank: 0, score: 0 },
+    { path: '/home/jackh/.local/share/VVVVVV/saves/tsave.vvv', size: 2523, mtime: ago(400000), found_by: 'steam_cloud remotecache (root 2)', rank: 0, score: 0 },
+    { path: '/home/jackh/.local/share/VVVVVV/saves/settings.vvv', size: 1675, mtime: ago(320), found_by: 'steam_autocloud.vdf marker in dir', rank: 1, score: 0 },
+  ],
+};
+const games = {
+  missing: false, toolCalls: [],
+  apps: [appRom, appChained, appVVVVVV, appRemote],
+  dirs: { 70300: dirsVVVVVV, 2567870: dirsChained },
+  saves: { 70300: savesVVVVVV, 2567870: savesChained },
+  tools: {
+    app_launch: a => ({ appid: a.appid, name: 'Chained Together', launched: true, running: true }),
+    app_terminate: a => ({ appid: a.appid, name: 'VVVVVV', terminated: true, running: false }),
+    proton_log: a => ({
+      appid: a.appid,
+      proton_log: { path: `/home/jackh/steam-${a.appid}.log`, exists: false, hint: 'set the launch option PROTON_LOG=1 %command% and run the game to create it' },
+      steam_logs: [{ file: `${STEAM}/logs/compat_log.txt`, mtime: ago(60), lines: [`StartSession: appID ${a.appid}`] }],
+    }),
+  },
+};
+
+// In-memory device file system behind the /fs routes, with the server's guards: login files are refused,
+// writes only under ~/.local/share/VVVVVV, DELETE needs confirm=1.
+const fakeFs = { missing: false, nodes: new Map(), log: [] };
+const fsDir = p => (p.lastIndexOf('/') <= 0 ? '/' : p.slice(0, p.lastIndexOf('/')));
+const fsBase = p => p.slice(p.lastIndexOf('/') + 1);
+const fsPut = (p, type, data, extra = {}) => fakeFs.nodes.set(p, { type, data: data === undefined ? undefined : new TextEncoder().encode(data), mtime: '2026-11-04T09:35:42+00:00', ...extra });
+for (const d of ['/', '/home', '/home/jackh', '/home/jackh/.local', '/home/jackh/.local/share', '/home/jackh/.local/share/VVVVVV',
+  '/home/jackh/.local/share/VVVVVV/saves', '/home/jackh/.local/share/Steam', '/home/jackh/.local/share/Steam/config']) fsPut(d, 'dir');
+fsPut('/home/jackh/.local/share/VVVVVV/saves/tsave.vvv', 'file', '<Save/>');
+fsPut('/home/jackh/.local/share/VVVVVV/saves/unlock.vvv', 'file', '<Unlock/>');
+fsPut('/home/jackh/.local/share/VVVVVV/current', 'symlink', undefined, { target: 'saves' });
+fsPut('/home/jackh/.local/share/Steam/config/loginusers.vdf', 'file', 'secret');
+const fsSensitive = p => /loginusers\.vdf$/.test(p ?? '');
+const fsWritable = p => p.startsWith('/home/jackh/.local/share/VVVVVV/');
+async function fsRoute(u, init, json) {
+  const method = init.method ?? 'GET';
+  fakeFs.log.push(`${method} ${u.pathname}${u.search}`);
+  if (fakeFs.missing) return new Response('404: Not Found', { status: 404 });
+  const fail = (status, code, error) => json({ error, code }, status);
+  const nodes = fakeFs.nodes;
+  const p = u.searchParams.get('path')?.replace(/^~(?=\/|$)/, '/home/jackh');
+  const body = typeof init.body === 'string' ? JSON.parse(init.body) : undefined;
+  const refused = x => fail(403, 'EACCES', fsSensitive(x) ? `refused: ${x} holds Steam login credentials` : `refused: ${x} is not inside a game install dir`);
+  if (u.pathname === '/fs' && method === 'GET') {
+    let real = p, n = nodes.get(p);
+    if (n?.type === 'symlink') { real = `${fsDir(p)}/${n.target}`; n = nodes.get(real); }
+    if (fsSensitive(p)) return refused(p);
+    if (!n || n.type !== 'dir') return fail(404, 'ENOENT', `not a directory: ${p}`);
+    const glob = u.searchParams.get('glob');
+    let entries = [...nodes].filter(([k]) => k !== real && fsDir(k) === real).map(([k, v]) => ({
+      path: fsBase(k), type: v.type, size: v.data?.length ?? 0, mtime: v.mtime, ...(v.target ? { target: v.target } : {}), ...(fsSensitive(k) ? { sensitive: true } : {}),
+    }));
+    if (glob) entries = entries.filter(e => e.path === glob.replace(/\[(.)\]/g, '$1'));
+    return json({ path: p, depth: 1, glob, entries, count: entries.length, truncated: false });
+  }
+  if (u.pathname === '/fs/read') {
+    const n = nodes.get(p);
+    if (fsSensitive(p)) return refused(p);
+    if (!n) return fail(404, 'ENOENT', `no such file: ${p}`);
+    if (n.type === 'dir') return fail(409, 'EISDIR', `is a directory: ${p}`);
+    return new Response(n.data, { headers: { 'content-type': 'application/octet-stream' } });
+  }
+  if (u.pathname === '/fs/write' && method === 'PUT') {
+    const n = nodes.get(p);
+    if (fsSensitive(p) || !fsWritable(p)) return refused(p);
+    if (n?.type === 'dir') return fail(409, 'EISDIR', `is a directory: ${p}`);
+    if (n && u.searchParams.get('overwrite') === '0') return fail(409, 'EEXIST', `exists: ${p}`);
+    if (!n && u.searchParams.get('create') === '0') return fail(404, 'ENOENT', p);
+    for (let d = fsDir(p); !nodes.has(d); d = fsDir(d)) fsPut(d, 'dir');
+    nodes.set(p, { type: 'file', data: new Uint8Array(init.body), mtime: '2026-11-04T10:00:00+00:00' });
+    return json({ path: p, bytes: init.body.length, created: !n });
+  }
+  if (u.pathname === '/fs/mkdir' && method === 'POST') {
+    if (!fsWritable(body.path)) return refused(body.path);
+    if (nodes.has(body.path)) return fail(409, 'EEXIST', `exists: ${body.path}`);
+    if (!nodes.has(fsDir(body.path))) return fail(404, 'ENOENT', 'parent directory does not exist');
+    fsPut(body.path, 'dir');
+    return json({ path: body.path, created: true });
+  }
+  if (u.pathname === '/fs/rename' && method === 'POST') {
+    if (!fsWritable(body.from)) return refused(body.from);
+    if (!fsWritable(body.to)) return refused(body.to);
+    if (!nodes.has(body.from)) return fail(404, 'ENOENT', body.from);
+    if (nodes.has(body.to) && !body.overwrite) return fail(409, 'EEXIST', `exists: ${body.to}`);
+    for (const [k, v] of [...nodes]) {
+      if (k === body.from || k.startsWith(`${body.from}/`)) { nodes.delete(k); nodes.set(body.to + k.slice(body.from.length), v); }
+    }
+    return json({ from: body.from, to: body.to });
+  }
+  if (u.pathname === '/fs' && method === 'DELETE') {
+    if (u.searchParams.get('confirm') !== '1') return json({ error: 'deleting is destructive: add confirm=1' }, 400);
+    if (fsSensitive(p) || !fsWritable(p)) return refused(p);
+    if (!nodes.has(p)) return fail(404, 'ENOENT', p);
+    for (const k of [...nodes.keys()]) if (k === p || k.startsWith(`${p}/`)) nodes.delete(k);
+    return json({ deleted: p, files: 1, bytes: 0 });
+  }
+  return new Response('405: Method Not Allowed', { status: 405 });
+}
+
 const fetched = [];
 globalThis.fetch = async (url, init = {}) => {
   let u = new URL(url);
@@ -340,6 +507,23 @@ globalThis.fetch = async (url, init = {}) => {
     if (body.path) uiRoutes.current = body.path;
     return json({ ok: true, current: body.path ?? (body.action === 'plugin' ? `/quickaccess/${body.plugin}` : uiRoutes.current) });
   }
+  if (u.pathname === '/apps' || u.pathname.startsWith('/apps/')) {
+    if (games.missing) return new Response('404: Not Found', { status: 404 });
+    if (u.pathname === '/apps') return json({ count: games.apps.length, apps: games.apps });
+    const m = /^\/apps\/(\d+)\/(dirs|saves)$/.exec(u.pathname);
+    const body = m && games[m[2]][m[1]];
+    return body ? json(body) : json({ error: 'app is not in this Steam library' }, 404);
+  }
+  if (u.pathname === '/mcp' && init.method === 'POST') {
+    const { id, params } = JSON.parse(init.body);
+    games.toolCalls.push(params);
+    const reply = games.tools[params.name]?.(params.arguments);
+    const result = reply === undefined
+      ? { content: [{ type: 'text', text: `unknown tool ${params.name}` }], isError: true }
+      : { content: [{ type: 'text', text: JSON.stringify(reply) }], isError: false };
+    return json({ jsonrpc: '2.0', id, result });
+  }
+  if (u.pathname === '/fs' || u.pathname.startsWith('/fs/')) return fsRoute(u, init, json);
   if (u.pathname === '/frame.jpg') return new Response(frameJpeg, { headers: { 'content-type': 'image/jpeg' } });
   const reload = /^\/plugins\/([^/]+)\/reload$/.exec(u.pathname);
   if (reload && init.method === 'POST') return json({ ok: true, dir: decodeURIComponent(reload[1]) });
@@ -420,7 +604,7 @@ const EXPECTED_ACTIONS = {
   Loader: ['server', 2, [
     ['Restart loader', 'decky-mcp.restartLoader'], ['Show loader logs', 'decky-mcp.loaderLogs'], ['Install plugin zip…', 'decky-mcp.installZip']]],
   Steam: ['game', 1, [
-    ['Navigate to…', 'decky-mcp.navigate'], ['Open plugin panel…', 'decky-mcp.openPluginPanel'], ['Back', 'decky-mcp.uiBack'],
+    ['Navigate to…', 'decky-mcp.navigate'], ['Open save data…', 'decky-mcp.openGameSaves'], ['Open plugin panel…', 'decky-mcp.openPluginPanel'], ['Back', 'decky-mcp.uiBack'],
     ['Quick Access', 'decky-mcp.uiQuickAccess'], ['Close menus', 'decky-mcp.uiCloseMenus'],
     ['Evaluate JS in Steam UI', 'decky-mcp.evaluate'], ['Toast on device', 'decky-mcp.toast']]],
   MCP: ['server-process', 1, [
@@ -455,24 +639,29 @@ async function actionsTree() {
   return { roots, kids };
 }
 
-await check('activate() registers the five views', async () => {
+await check('activate() registers the six views and the decky: file system', async () => {
   const trees = [...calls.treeViews.map(t => t.id), ...calls.treeProviders.map(t => t.id)].sort();
-  assert.deepEqual(trees, ['decky-mcp.actions', 'decky-mcp.controllers', 'decky-mcp.devices', 'decky-mcp.plugins']);
+  assert.deepEqual(trees, ['decky-mcp.actions', 'decky-mcp.controllers', 'decky-mcp.devices', 'decky-mcp.games', 'decky-mcp.plugins']);
+  assert.deepEqual(calls.fsProviders.map(f => [f.scheme, f.options]), [['decky', { isCaseSensitive: true }]]);
   assert.deepEqual(calls.webviewProviders.map(w => w.id), ['decky-mcp.preview']);
   const declared = pkg.contributes.views['decky-mcp'].map(v => [v.id, v.name]);
   assert.deepEqual(declared, [
-    ['decky-mcp.devices', 'Devices'], ['decky-mcp.actions', 'Actions'], ['decky-mcp.plugins', 'Plugins'], ['decky-mcp.controllers', 'Controllers'], ['decky-mcp.preview', 'Preview']]);
+    ['decky-mcp.devices', 'Devices'], ['decky-mcp.actions', 'Actions'], ['decky-mcp.plugins', 'Plugins'], ['decky-mcp.games', 'Games'],
+    ['decky-mcp.controllers', 'Controllers'], ['decky-mcp.preview', 'Preview']]);
+  const games = pkg.contributes.views['decky-mcp'].find(v => v.id === 'decky-mcp.games');
+  assert.equal(games.visibility, 'collapsed', 'Games starts collapsed like Plugins and Controllers');
   return `createTreeView(${trees.join(', ')}), registerWebviewViewProvider(decky-mcp.preview)`;
 });
 
 await check('package.json: container, activation, commands, menus, version', async () => {
-  assert.equal(pkg.version, '0.6.0');
+  assert.equal(pkg.version, '0.7.0');
   const container = pkg.contributes.viewsContainers.activitybar[0];
   assert.equal(container.id, 'decky-mcp');
   assert.equal(container.title, 'Decky');
   assert.equal(readFileSync(path.join(root, container.icon), 'utf8').includes('currentColor'), true);
   for (const v of pkg.contributes.views['decky-mcp']) assert.ok(pkg.activationEvents.includes(`onView:${v.id}`), v.id);
-  assert.equal(pkg.activationEvents.length, 8);
+  assert.equal(pkg.activationEvents.length, 10);
+  assert.ok(pkg.activationEvents.includes('onFileSystem:decky'), 'restored decky:// folders activate the extension');
   for (const glob of ['plugin.json', '*/plugin.json', '*/*/plugin.json']) assert.ok(pkg.activationEvents.includes(`workspaceContains:${glob}`), glob);
   assert.deepEqual(pkg.contributes.keybindings, [{ command: 'decky-mcp.deploy', key: 'ctrl+alt+d', mac: 'cmd+alt+d' }]);
   for (const v of pkg.contributes.views['decky-mcp']) {
@@ -501,12 +690,14 @@ await check('package.json: container, activation, commands, menus, version', asy
     'decky-mcp.devices': ['decky-mcp.addDevice', 'decky-mcp.refresh'],
     'decky-mcp.actions': ['decky-mcp.openScreen', 'decky-mcp.refresh'],
     'decky-mcp.plugins': ['decky-mcp.installZip', 'decky-mcp.refreshPlugins'],
+    'decky-mcp.games': ['decky-mcp.findGame', 'decky-mcp.openDeckyPath', 'decky-mcp.refreshGames'],
     'decky-mcp.controllers': ['decky-mcp.addVirtualController', 'decky-mcp.refreshControllers'],
     'decky-mcp.preview': ['decky-mcp.openScreen'],
   };
   for (const [view, want] of Object.entries(titles)) assert.deepEqual(titleMenu(view), want, `${view} title`);
   for (const view of Object.keys(titles)) {
-    for (const viewItem of ['plugin', 'deck.unpaired', 'deck.paired', 'deck.session', 'deck.busy', 'action', 'group.screen', 'controller.virtual', 'controller.physical', 'controller.unsupported']) {
+    for (const viewItem of ['plugin', 'deck.unpaired', 'deck.paired', 'deck.session', 'deck.busy', 'action', 'group.screen', 'controller.virtual', 'controller.physical', 'controller.unsupported',
+      'game', 'game.running', 'game.unsupported', 'deckyDir', 'deckyFile', 'gameGroup', 'gameLog']) {
       for (const inline of [true, false]) assert.deepEqual(dupes(itemMenu(view, viewItem, inline)), [], `${view} ${viewItem}`);
     }
   }
@@ -610,7 +801,7 @@ await check('Connect on an unpaired device files a pairing request, waits for ap
 
 await check('connected: views, device row, titles and status bar', async () => {
   await settle(100);
-  assert.deepEqual(visibleViews(), ['decky-mcp.devices', 'decky-mcp.actions', 'decky-mcp.plugins', 'decky-mcp.controllers', 'decky-mcp.preview']);
+  assert.deepEqual(visibleViews(), ['decky-mcp.devices', 'decky-mcp.actions', 'decky-mcp.plugins', 'decky-mcp.games', 'decky-mcp.controllers', 'decky-mcp.preview']);
   const [r] = devicesProvider().getChildren();
   assert.equal(r.label, '10.1.2.3');
   assert.equal(r.description, 'connected');
@@ -1607,6 +1798,257 @@ await check('browser viewer (static/viewer.html): Controllers popover, live upda
   assert.equal(el('ctl-wrap').hidden, true, '404 hides the button');
   assert.equal(el('pad-fwd').hidden, true, '404 hides "Forward to"');
   return requests.filter(r => r.includes('controllers')).join(', ');
+});
+
+await check('Games view with fake clients: Proton title with saves, native title, shortcut, 404 device, errors', async () => {
+  const device = { id: 'g', name: 'Deck', host: '10.0.70.18', port: 8765 };
+  const fakeConn = client => ({ connectedDevice: device, authedClient: () => client, onDidChangeTarget: new EventEmitter().event, label: 'Deck' });
+  const listings = {
+    [`${CT_USER}/AppData/Local/ChainedTogether/Saved/SaveGames`]: [
+      { path: 'Save.sav', type: 'file', size: 2348, mtime: ago(20000) }, { path: 'Backup', type: 'dir', size: 0, mtime: ago(20000) },
+      { path: 'Progress.sav', type: 'file', size: 30519, mtime: ago(3650) }, { path: 'notes.txt', type: 'file', size: 12, mtime: ago(20000) },
+    ],
+  };
+  const fsCalls = [];
+  const client = {
+    apps: async () => ({ count: games.apps.length, apps: games.apps }),
+    appDirs: async id => { if (!games.dirs[id]) throw new Error('app 4289220546 has no folders'); return games.dirs[id]; },
+    appSaves: async id => { if (id === 4289220546) throw new Error('Steam is busy'); return games.saves[id]; },
+    fsList: async p => { fsCalls.push(p); return { path: p, depth: 1, glob: null, entries: listings[p] ?? [], count: 0, truncated: false }; },
+  };
+  const tree = new ext.GamesTreeProvider(fakeConn(client));
+  const rows = await tree.getChildren();
+  assert.deepEqual(rows.map(r => [r.label, r.description, r.iconPath.id, r.contextValue, r.collapsibleState]), [
+    ['VVVVVV', 'Linux runtime · running', 'play-circle', 'game.running', 1],
+    ['Chained Together', 'Proton 11', 'game', 'game', 1],
+    ['1080° Avalanche', 'native', 'game', 'game', 1],
+  ], 'installed only, last played first');
+  const inline = r => itemMenu('decky-mcp.games', r.contextValue, true);
+  assert.deepEqual(rows.map(inline), [
+    ['decky-mcp.gameTerminate', 'decky-mcp.openGameSaves'], ['decky-mcp.gameLaunch', 'decky-mcp.openGameSaves'], ['decky-mcp.gameLaunch', 'decky-mcp.openGameSaves']]);
+  assert.deepEqual(itemMenu('decky-mcp.games', 'game', false),
+    ['decky-mcp.openGameSaves', 'decky-mcp.gameLaunch', 'decky-mcp.gameProtonLog', 'decky-mcp.copyDeckyPath']);
+  assert.match(rows[1].tooltip.value, /Proton 11\.0-2/);
+
+  const proton = await tree.getChildren(rows[1]);
+  assert.deepEqual(proton.map(c => [c.label, c.description]), [
+    ['Save data', '3 files'], ['Install folder', '~/.local/share/Steam/steamapps/common/ChainedTogether'], ['Proton prefix', 'Proton 11'],
+    ['Steam Cloud (userdata)', 'userdata/95599472/2567870'], ['Shader cache', undefined], ['Proton log', undefined]]);
+  const [saveGroup, install, prefix, , , log] = proton;
+  assert.equal(saveGroup.collapsibleState, 2, 'Save data starts expanded');
+  assert.deepEqual(log.command, { command: 'decky-mcp.gameProtonLog', title: 'Show log', arguments: [rows[1]] });
+  assert.equal(install.resourceUri.toString(), `decky://10.0.70.18${STEAM}/steamapps/common/ChainedTogether`);
+  assert.deepEqual(itemMenu('decky-mcp.games', install.contextValue, true), ['decky-mcp.openInExplorer']);
+  assert.deepEqual(itemMenu('decky-mcp.games', install.contextValue, false), ['decky-mcp.openInExplorer', 'decky-mcp.copyDeckyPath']);
+  const locs = await tree.getChildren(saveGroup);
+  assert.deepEqual(locs.map(l => [l.label, l.description, l.iconPath.id, l.collapsibleState]), [
+    ['AppData/Local/ChainedTogether/Saved/SaveGames', '2 saves · 1 h ago', 'cloud', 2],
+    ['AppData/Local/ChainedTogether/Saved/Config/Windows', '1 save · 5 h ago', 'folder', 1]]);
+  assert.equal(locs[0].explorerName, 'Chained Together saves');
+  const files = await tree.getChildren(locs[0]);
+  assert.deepEqual(files.map(f => [f.label, f.contextValue, f.iconPath.id, f.description]), [
+    ['Backup', 'deckyDir', 'folder', undefined], ['notes.txt', 'deckyFile', 'file', '12 B · 5 h ago'],
+    ['Progress.sav', 'deckyFile', 'save', '30 KB · 1 h ago'], ['Save.sav', 'deckyFile', 'save', '2.3 KB · 5 h ago']], 'folders first, saves marked');
+  assert.deepEqual(files[2].command, { command: 'vscode.open', title: 'Open', arguments: [files[2].resourceUri] });
+  assert.equal(files[2].resourceUri.toString(), `decky://10.0.70.18${CT_USER}/AppData/Local/ChainedTogether/Saved/SaveGames/Progress.sav`);
+  assert.equal(tree.getParent(files[2]), locs[0]);
+  assert.equal(tree.getParent(rows[1]), undefined);
+  assert.deepEqual((await tree.getChildren(files[0])).map(e => e.label), ['Empty folder']);
+  const shortcuts = await tree.getChildren(prefix);
+  assert.deepEqual(shortcuts.map(s => [s.label, s.description]), [
+    ['AppData/Local', 'ChainedTogether'], ['AppData/Roaming', undefined], ['Documents', undefined], ['Saved Games', undefined], ['drive_c', undefined]]);
+  assert.equal(shortcuts[0].devicePath, `${CT_USER}/AppData/Local`);
+  assert.equal(prefix.devicePath, CT_USER);
+
+  const native = await tree.getChildren(rows[0]);
+  assert.deepEqual(native.map(c => [c.label, c.description]), [
+    ['Save data', '3 files'], ['Game data', '~/.local/share/VVVVVV'], ['Install folder', '~/.local/share/Steam/steamapps/common/vvvvvv'],
+    ['Steam Cloud (userdata)', 'userdata/95599472/70300'], ['Shader cache', undefined], ['Launch log', undefined]], 'no prefix for a native title');
+  const nativeLocs = await tree.getChildren(native[0]);
+  assert.deepEqual(nativeLocs.map(l => [l.label, l.description]), [['~/.local/share/VVVVVV/saves', '3 saves · 5 min ago']]);
+
+  const rom = await tree.getChildren(rows[2]);
+  assert.deepEqual(rom.map(c => [c.label, c.description]), [
+    ['Save data', 'unavailable'], ['Could not load folders: app 4289220546 has no folders', undefined], ['Launch log', undefined]]);
+  assert.deepEqual((await tree.getChildren(rom[0])).map(c => c.label), ['Could not load saves: Steam is busy']);
+
+  const old = new ext.GamesTreeProvider(fakeConn({ apps: async () => { throw new ext.HttpError(404, '404: Not Found', '/apps'); } }));
+  const [o] = await old.getChildren();
+  assert.deepEqual([o.label, o.description, o.contextValue], ['Games', 'update Decky-MCP on the device', 'game.unsupported']);
+  assert.deepEqual(itemMenu('decky-mcp.games', o.contextValue, true), []);
+  let fail = true;
+  const flaky = new ext.GamesTreeProvider(fakeConn({ apps: async () => { if (fail) throw new Error('boom'); return { count: 0, apps: [] }; } }));
+  const [e] = await flaky.getChildren();
+  assert.equal(e.label, 'Could not load games: boom');
+  assert.equal(e.command.command, 'decky-mcp.refreshGames');
+  fail = false;
+  assert.deepEqual(labels(await flaky.getChildren()), ['No installed games'], 'an error is not cached');
+  const unpaired = new ext.GamesTreeProvider({ ...fakeConn(undefined), connectedDevice: undefined });
+  assert.deepEqual(await unpaired.getChildren(), []);
+  return `${rows.map(r => `${r.label} — ${r.description}`).join(' | ')}; Proton children ${proton.map(c => c.label).join(', ')}`;
+});
+
+await check('Find game QuickPick builder and labels', async () => {
+  const now = Date.now();
+  const picks = ext.buildGamePicks(games.apps, now);
+  assert.deepEqual(picks.map(p => [p.label, p.description, p.detail]), [
+    ['$(play-circle) VVVVVV', 'Linux runtime', '70300 · running · 72 MB'],
+    ['$(game) Chained Together', 'Proton 11', '2567870 · played 1 h ago · 7.9 GB'],
+    ['$(game) 1080° Avalanche', 'native · non-Steam', '4289220546 · never played'],
+  ]);
+  assert.equal(picks[1].app.appid, 2567870);
+  const many = Array.from({ length: 124 }, (_, i) => ({ ...appRom, appid: i + 1, name: `ROM ${i}`, last_played: i % 3 ? ago(i * 100) : null }));
+  const big = ext.buildGamePicks(many, now);
+  assert.equal(big.length, 124);
+  assert.deepEqual(big.slice(0, 2).map(p => p.label), ['$(game) ROM 1', '$(game) ROM 2']);
+  assert.equal(big.at(-1).detail.endsWith('never played'), true);
+  assert.deepEqual(['proton_experimental', 'proton_9', 'steamlinuxruntime', 'GE-Proton9-20', null].map(t => ext.runtimeLabel({ compat_tool: t, compat_tool_display: t === 'GE-Proton9-20' ? 'GE-Proton9-20' : null })),
+    ['Proton Experimental', 'Proton 9', 'Linux runtime', 'GE-Proton9-20', 'native']);
+  assert.deepEqual([0, 1023, 2048, 30519, 8493964009].map(ext.formatSize), ['0 B', '1023 B', '2.0 KB', '30 KB', '7.9 GB']);
+  assert.equal(ext.bestSaveFolder(savesVVVVVV, dirsVVVVVV), '/home/jackh/.local/share/VVVVVV/saves');
+  assert.equal(ext.bestSaveFolder({ ...savesChained, candidates: [] }, dirsChained), `${CT_USER}/AppData/Local/ChainedTogether`);
+  assert.equal(ext.bestSaveFolder({ ...savesVVVVVV, candidates: [] }, dirsVVVVVV), '/home/jackh/.local/share/VVVVVV');
+  return picks.map(p => `${p.label} — ${p.description} — ${p.detail}`).join(' | ');
+});
+
+await check('Games commands: Find game reveals, Open save data adds a decky:// workspace folder, launch / terminate (confirm) / Proton log', async () => {
+  await run('decky-mcp.connect', seedId());
+  await settle();
+  run('decky-mcp.refreshGames');
+  let offered;
+  ui.quickPick = (items, opts) => { offered = { items, opts }; return items.find(i => i.label.includes('VVVVVV')); };
+  await run('decky-mcp.findGame');
+  assert.equal(offered.opts.matchOnDescription, true);
+  assert.deepEqual(offered.items.map(i => i.label), ['$(play-circle) VVVVVV', '$(game) Chained Together', '$(game) 1080° Avalanche']);
+  const rev = calls.revealed.at(-1);
+  assert.equal(rev.id, 'decky-mcp.games');
+  assert.equal(rev.node.app.appid, 70300);
+  assert.deepEqual(rev.opts, { select: true, focus: true, expand: true });
+
+  await run('decky-mcp.openGameSaves');
+  assert.deepEqual(calls.folderUpdates.map(f => [f.start, f.deleteCount, f.folders.map(x => [x.uri.toString(), x.name])]), [
+    [0, 0, [['decky://10.1.2.3/home/jackh/.local/share/VVVVVV/saves', 'VVVVVV saves (10.1.2.3)']]]]);
+  const gameRow = (await tree('decky-mcp.games').provider.getChildren()).find(r => r.app?.appid === 2567870);
+  await run('decky-mcp.openGameSaves', gameRow);
+  assert.equal(calls.folderUpdates.at(-1).folders[0].uri.toString(), `decky://10.1.2.3${CT_USER}/AppData/Local/ChainedTogether/Saved/SaveGames`);
+  assert.equal(calls.folderUpdates.at(-1).folders[0].name, 'Chained Together saves (10.1.2.3)');
+
+  await run('decky-mcp.gameLaunch', gameRow);
+  assert.deepEqual(games.toolCalls.at(-1), { name: 'app_launch', arguments: { appid: 2567870 } });
+  assert.match(lastMessage('info').m, /Chained Together is running/);
+
+  const vRow = (await tree('decky-mcp.games').provider.getChildren()).find(r => r.app?.appid === 70300);
+  const before = games.toolCalls.length;
+  ui.warning = () => undefined;
+  await run('decky-mcp.gameTerminate', vRow);
+  assert.equal(games.toolCalls.length, before, 'cancelled confirm sends nothing');
+  assert.match(lastMessage('warning').m, /Terminate VVVVVV on/);
+  ui.warning = (_m, buttons) => buttons[0];
+  await run('decky-mcp.gameTerminate', vRow);
+  assert.deepEqual(games.toolCalls.at(-1), { name: 'app_terminate', arguments: { appid: 70300, confirm: true } });
+
+  await run('decky-mcp.gameProtonLog', gameRow);
+  const doc = calls.docs.at(-1).doc;
+  assert.equal(doc.language, 'log');
+  assert.match(doc.content, /^# Chained Together \(2567870\) on /);
+  assert.match(doc.content, /PROTON_LOG=1/);
+  assert.match(doc.content, /StartSession: appID 2567870/);
+
+  ui.inputBox = () => '~/.local/share/VVVVVV/saves/tsave.vvv';
+  const opened = [];
+  const realExec = vscode.commands.executeCommand;
+  vscode.commands.executeCommand = async (id, ...args) => { opened.push([id, ...args.map(String)]); return realExec(id, ...args); };
+  try {
+    await run('decky-mcp.openDeckyPath');
+    assert.deepEqual(opened.at(-1), ['vscode.open', 'decky://10.1.2.3/home/jackh/.local/share/VVVVVV/saves/tsave.vvv']);
+    ui.inputBox = () => '/home/jackh/.local/share/VVVVVV/current/';
+    await run('decky-mcp.openDeckyPath');
+    assert.equal(calls.folderUpdates.at(-1).folders[0].uri.toString(), 'decky://10.1.2.3/home/jackh/.local/share/VVVVVV/current', 'symlink to a folder opens as a folder');
+  } finally {
+    vscode.commands.executeCommand = realExec;
+  }
+  await run('decky-mcp.copyDeckyPath', gameRow);
+  assert.equal(calls.clipboard.at(-1), `${STEAM}/steamapps/common/ChainedTogether`);
+  return `revealed ${rev.node.label}; folders ${calls.folderUpdates.map(f => f.folders[0].name).join(', ')}; tools ${games.toolCalls.map(t => t.name).join(', ')}`;
+});
+
+await check('remote FS provider against a fake /fs* server: stat, readDirectory, read/write round trip, mkdir, rename, delete (confirm), errors', async () => {
+  const devices = [
+    { id: 'd1', name: 'Deck', host: '10.1.2.3', port: 8765 },
+    { id: 'd2', name: 'Gone', host: '10.9.9.9', port: 8765 },
+    { id: 'd3', name: 'Fresh', host: '10.1.2.4', port: 8765 },
+  ];
+  const fs = new ext.DeckyFileSystemProvider({ devices, tokenFor: async d => (d.host === '10.1.2.4' ? undefined : 'fake-token') });
+  const events = [];
+  fs.onDidChangeFile(e => events.push(...e.map(x => [x.type, x.uri.path])));
+  const U = p => ext.deckyUri({ host: '10.1.2.3', port: 8765 }, p);
+  const code = async p => { try { await p; } catch (e) { assert.ok(e instanceof vscode.FileSystemError, String(e)); return [e.code, e.message]; } assert.fail('expected an error'); };
+  const dec = b => new TextDecoder().decode(b);
+  const VV = '/home/jackh/.local/share/VVVVVV';
+
+  assert.equal(ext.deckyUri({ host: '10.1.2.3', port: 9000 }, '/x').toString(), 'decky://10.1.2.3:9000/x');
+  assert.equal(ext.globEscape('a[1]*?.sav'), 'a[[]1][*][?].sav');
+  assert.equal((await fs.stat(U('/'))).type, vscode.FileType.Directory);
+  assert.deepEqual(await fs.stat(U(`${VV}/saves`)), { type: 2, size: 0, mtime: Date.parse('2026-11-04T09:35:42+00:00'), ctime: Date.parse('2026-11-04T09:35:42+00:00') });
+  assert.deepEqual([(await fs.stat(U(`${VV}/saves/tsave.vvv`))).type, (await fs.stat(U(`${VV}/saves/tsave.vvv`))).size], [1, 7]);
+  assert.equal((await fs.stat(U(`${VV}/current`))).type, 64 | 2, 'symlink to a dir');
+  assert.deepEqual(await code(fs.stat(U(`${VV}/nope`))), ['FileNotFound', `decky://10.1.2.3${VV}/nope`]);
+  assert.ok(fakeFs.log.includes(`GET /fs?path=${encodeURIComponent(`${VV}/saves`)}&glob=tsave.vvv`), 'stat lists the parent with an exact glob');
+
+  assert.deepEqual(await fs.readDirectory(U(VV)), [['saves', 2], ['current', 64 | 2]]);
+  assert.deepEqual(await fs.readDirectory(U(`${VV}/saves`)), [['tsave.vvv', 1], ['unlock.vvv', 1]]);
+  const n = fakeFs.log.length;
+  await fs.stat(U(`${VV}/saves/unlock.vvv`));
+  assert.equal(fakeFs.log.length, n, 'stat right after readDirectory uses the listing');
+  assert.equal(dec(await fs.readFile(U(`${VV}/saves/tsave.vvv`))), '<Save/>');
+
+  await fs.writeFile(U(`${VV}/saves/new/edited.vvv`), new TextEncoder().encode('v1'), { create: true, overwrite: true });
+  assert.equal(dec(await fs.readFile(U(`${VV}/saves/new/edited.vvv`))), 'v1');
+  await fs.writeFile(U(`${VV}/saves/new/edited.vvv`), new TextEncoder().encode('v2 ✓'), { create: false, overwrite: true });
+  assert.equal(dec(await fs.readFile(U(`${VV}/saves/new/edited.vvv`))), 'v2 ✓', 'round trip keeps UTF-8 bytes');
+  assert.equal((await fs.stat(U(`${VV}/saves/new/edited.vvv`))).size, 6, 'stat after a write is not served from a stale listing');
+  assert.deepEqual((await code(fs.writeFile(U(`${VV}/saves/x.vvv`), new Uint8Array(1), { create: false, overwrite: true })))[0], 'FileNotFound');
+  assert.deepEqual((await code(fs.writeFile(U(`${VV}/saves/tsave.vvv`), new Uint8Array(1), { create: true, overwrite: false })))[0], 'FileExists');
+  assert.deepEqual((await code(fs.readFile(U(`${VV}/saves`))))[0], 'FileIsADirectory');
+
+  await fs.createDirectory(U(`${VV}/saves/slot2`));
+  assert.deepEqual((await code(fs.createDirectory(U(`${VV}/saves/slot2`))))[0], 'FileExists');
+  await fs.rename(U(`${VV}/saves/new/edited.vvv`), U(`${VV}/saves/slot2/edited.vvv`), { overwrite: false });
+  assert.equal(dec(await fs.readFile(U(`${VV}/saves/slot2/edited.vvv`))), 'v2 ✓');
+  assert.deepEqual((await code(fs.rename(U(`${VV}/saves/slot2/edited.vvv`), U(`${VV}/saves/tsave.vvv`), { overwrite: false })))[0], 'FileExists');
+  assert.deepEqual((await code(fs.rename(U(`${VV}/saves/tsave.vvv`), ext.deckyUri({ host: '10.9.9.9', port: 8765 }, '/x'), { overwrite: false })))[0], 'NoPermissions');
+
+  const raw = await fetch(`http://10.1.2.3:8765/fs?path=${encodeURIComponent(`${VV}/saves/slot2`)}`, { method: 'DELETE', headers: { Authorization: 'Bearer fake-token' } });
+  assert.equal(raw.status, 400, 'the fake server refuses a delete without confirm');
+  await fs.delete(U(`${VV}/saves/slot2`), { recursive: true });
+  assert.ok(fakeFs.log.includes(`DELETE /fs?path=${encodeURIComponent(`${VV}/saves/slot2`)}&confirm=1`), 'delete sends confirm=1');
+  assert.deepEqual((await code(fs.stat(U(`${VV}/saves/slot2`))))[0], 'FileNotFound');
+  assert.deepEqual(events, [
+    [2, `${VV}/saves/new/edited.vvv`], [1, `${VV}/saves/new/edited.vvv`], [2, `${VV}/saves/slot2`],
+    [3, `${VV}/saves/new/edited.vvv`], [2, `${VV}/saves/slot2/edited.vvv`], [3, `${VV}/saves/slot2`]]);
+
+  const login = '/home/jackh/.local/share/Steam/config/loginusers.vdf';
+  assert.deepEqual(await code(fs.readFile(U(login))), ['NoPermissions', `refused: ${login} holds Steam login credentials`]);
+  assert.deepEqual((await code(fs.writeFile(U(login), new Uint8Array(1), { create: true, overwrite: true })))[0], 'NoPermissions');
+  assert.deepEqual(await code(fs.writeFile(U('/home/jackh/.bashrc'), new Uint8Array(1), { create: true, overwrite: true })),
+    ['NoPermissions', 'refused: /home/jackh/.bashrc is not inside a game install dir']);
+  assert.deepEqual((await code(fs.delete(U(`${VV}/saves/nope`), { recursive: false })))[0], 'FileNotFound');
+
+  const [unreach, msg] = await code(fs.stat(ext.deckyUri({ host: '10.9.9.9', port: 8765 }, '/home')));
+  assert.equal(unreach, 'Unavailable');
+  assert.match(msg, /Decky device Gone is not reachable \(cannot reach the device/);
+  assert.deepEqual(await code(fs.readFile(ext.deckyUri({ host: '10.1.2.4', port: 8765 }, '/x'))),
+    ['Unavailable', 'not paired with Decky device Fresh; connect to it in the Decky view']);
+  assert.deepEqual(await code(fs.readDirectory(ext.deckyUri({ host: '10.5.5.5', port: 8765 }, '/'))),
+    ['Unavailable', 'no saved Decky device 10.5.5.5; add it in the Decky view']);
+  fakeFs.missing = true;
+  try {
+    assert.deepEqual(await code(fs.readFile(U(`${VV}/saves/tsave.vvv`))),
+      ['Unavailable', 'the Decky-MCP plugin on Deck has no remote file access yet; update it']);
+  } finally {
+    fakeFs.missing = false;
+  }
+  return `${fakeFs.log.length} /fs requests; events ${events.length}; errors map to FileNotFound / FileExists / FileIsADirectory / NoPermissions / Unavailable`;
 });
 
 await check('no unexpected error messages', async () => {

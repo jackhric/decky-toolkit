@@ -143,7 +143,18 @@ async def call_plugin_method(plugin: str, method: str, args: list[Any] | None = 
         if tb:
             out["traceback"] = tb
         return out
-    return {"plugin": plugin, "method": method, "ok": True, "result": res.get("result")}
+    return {"plugin": plugin, "method": method, "ok": True, "result": redact_secrets(res.get("result"))}
+
+
+def redact_secrets(value: Any) -> Any:
+    """Drop `token` keys (and viewer URLs carrying one): Decky-MCP's own get_status returns the bearer token,
+    which must not leak to an MCP client through a plugin call."""
+    if isinstance(value, dict):
+        return {k: redact_secrets(v) for k, v in value.items()
+                if k != "token" and not (k == "viewer_url" and isinstance(v, str) and "token=" in v)}
+    if isinstance(value, list):
+        return [redact_secrets(v) for v in value]
+    return value
 
 
 def register(reg: ToolRegistry) -> None:
