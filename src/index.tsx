@@ -6,7 +6,7 @@ import {
   ToggleField,
   staticClasses,
 } from "@decky/ui";
-import { callable, definePlugin, toaster } from "@decky/api";
+import { addEventListener, callable, definePlugin, removeEventListener, toaster } from "@decky/api";
 import { useEffect, useState } from "react";
 import { FaPlug } from "react-icons/fa";
 
@@ -18,6 +18,11 @@ type Status = {
   token: string;
   ip: string;
   url: string;
+  viewer_url: string;
+  pair_url: string;
+  pairing_seconds_left: number;
+  pairing_count: number;
+  stream: { running: boolean; fps: number; subscribers: number; available: boolean; error: string | null } | null;
   error: string | null;
 };
 
@@ -25,6 +30,8 @@ const getStatus = callable<[], Status>("get_status");
 const setEnabled = callable<[enabled: boolean], Status>("set_enabled");
 const regenerateToken = callable<[], Status>("regenerate_token");
 const restartServer = callable<[], Status>("restart_server");
+const startPairing = callable<[], Status>("start_pairing");
+const stopPairing = callable<[], Status>("stop_pairing");
 
 function Content() {
   const [status, setStatus] = useState<Status | null>(null);
@@ -33,11 +40,14 @@ function Content() {
 
   const refresh = async () => setStatus(await getStatus());
 
+  const pairing = (status?.pairing_seconds_left ?? 0) > 0;
+
   useEffect(() => {
     refresh();
-    const id = setInterval(refresh, 5000);
+    // Poll faster while the pairing countdown is showing.
+    const id = setInterval(refresh, pairing ? 1000 : 5000);
     return () => clearInterval(id);
-  }, []);
+  }, [pairing]);
 
   const run = async (fn: () => Promise<Status>, okMsg: string) => {
     setBusy(true);
@@ -81,11 +91,51 @@ function Content() {
           </Field>
         </PanelSectionRow>
         <PanelSectionRow>
+          <Field
+            label="Screen viewer"
+            description={
+              status.stream
+                ? status.stream.running
+                  ? `Streaming ${status.stream.fps} fps to ${status.stream.subscribers} viewer(s)`
+                  : status.stream.available
+                    ? "Idle (starts when a browser connects)"
+                    : status.stream.error ?? "Unavailable"
+                : "Unavailable"
+            }
+            focusable
+          >
+            <span style={{ fontFamily: "monospace", fontSize: "0.8em", wordBreak: "break-all" }}>
+              {showToken ? status.viewer_url : status.viewer_url.replace(/token=.*/, "token=••••")}
+            </span>
+          </Field>
+        </PanelSectionRow>
+        <PanelSectionRow>
           <Field label="Token" focusable onClick={() => setShowToken((s) => !s)}>
             <span style={{ fontFamily: "monospace", fontSize: "0.8em", wordBreak: "break-all" }}>
               {showToken ? status.token : "•••••••• (click to reveal)"}
             </span>
           </Field>
+        </PanelSectionRow>
+      </PanelSection>
+
+      <PanelSection title="Pairing">
+        <PanelSectionRow>
+          <ButtonItem
+            layout="below"
+            disabled={busy || !status.running}
+            description={
+              pairing
+                ? `Open ${status.pair_url} on any device on your network. ${status.pairing_seconds_left}s left, ${status.pairing_count} paired.`
+                : "Lets a browser on your network open the viewer without typing the token, for 120 seconds."
+            }
+            onClick={() =>
+              pairing
+                ? run(stopPairing, "Pairing closed")
+                : run(startPairing, `Pairing open for 120s: visit ${status.pair_url}`)
+            }
+          >
+            {pairing ? "Stop pairing" : "Pair a browser (120 s)"}
+          </ButtonItem>
         </PanelSectionRow>
       </PanelSection>
 
@@ -116,10 +166,17 @@ function Content() {
   );
 }
 
-export default definePlugin(() => ({
-  name: "Decky-MCP",
-  titleView: <div className={staticClasses.Title}>Decky-MCP</div>,
-  content: <Content />,
-  icon: <FaPlug />,
-  onDismount() {},
-}));
+export default definePlugin(() => {
+  const paired = addEventListener<[remote: string]>("decky_mcp_paired", (remote) => {
+    toaster.toast({ title: "Decky-MCP", body: `Browser paired from ${remote}` });
+  });
+  return {
+    name: "Decky-MCP",
+    titleView: <div className={staticClasses.Title}>Decky-MCP</div>,
+    content: <Content />,
+    icon: <FaPlug />,
+    onDismount() {
+      removeEventListener("decky_mcp_paired", paired);
+    },
+  };
+});

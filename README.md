@@ -20,8 +20,31 @@ protected by a bearer token shown in the plugin's Quick Access panel.
 | `cef_targets` | List Steam CEF DevTools tabs on `localhost:8080` |
 | `cef_evaluate` | Run JS in a Steam tab (default `SharedJSContext`, where `window.DeckyPluginLoader` lives) |
 | `cef_screenshot` | PNG screenshot of a Steam tab via `Page.captureScreenshot` |
+| `screen_capture` | JPEG of the full gamescope display (games included) from its PipeWire video node |
+| `stream_status` | Live stream state: running, fps, bitrate, resolution, viewer count |
 | `toast` | Show a Decky toast in the Steam UI |
 | `read_file` / `write_file` | Read or write files on the device (runs as root) |
+
+## Live screen viewer
+
+Easiest way in: press **Pair a browser (120 s)** in the Decky-MCP panel, then open
+`http://<deck-ip>:8765/viewer` on any device on your network within two minutes. The server hands
+that browser an HttpOnly cookie, the panel counts paired devices and shows a toast with each one's
+IP, and the window closes after 120 s or when you press **Stop pairing**. Alternatively open
+`/viewer?token=<token>` once; the token moves into the same cookie. Either way the page shows the full display at 30 fps (1080p, roughly 50 Mbit/s at the default JPEG
+quality 70) with fps, bitrate and resolution readouts, pause, fit/actual size, snapshot and
+fullscreen. Other endpoints, all behind the same token: `/stream.mjpeg` (multipart MJPEG),
+`/frame.jpg` (one current frame) and `/stream/stats` (JSON).
+
+Capture comes from gamescope's own PipeWire `Video/Source` node, read by a `gst-launch-1.0`
+subprocess (`pipewiresrc ! videoconvert ! videorate ! jpegenc ! multipartmux`). Every element is
+part of the stock Bazzite and SteamOS 3.8 images, so there is nothing to install. The pipeline only
+runs while a viewer or tool call is consuming frames and stops 10 s after the last one leaves.
+
+gamescope only pushes a frame when it repaints, so the plugin nudges it with
+`gamescopectl debug_force_repaint` when a stream starts, and `pipewiresrc keepalive-time=100`
+re-emits the last frame so static screens still stream. Frame rate, JPEG quality and output width
+are settings (`stream_fps`, `stream_quality`, `stream_width`); lower the width or quality on Wi-Fi.
 
 ## How it works
 
@@ -71,7 +94,11 @@ root) and is shown in the plugin panel.
 - `write_file`, `read_file` and `cef_evaluate` are intentionally powerful: anyone with the token
   has root on the device.
 
-## Target tested
+## Targets
 
-Bazzite `bazzite-deck-44.20261012` (Fedora 44), Decky Loader v3.3.1 (bundled CPython 3.14.8),
-SELinux enforcing, firewalld active.
+- Tested: Bazzite `bazzite-deck-44.20261012` (Fedora 44) on an AMD BC-250 board, Decky Loader
+  v3.3.1 (bundled CPython 3.14.8), SELinux enforcing, firewalld active.
+- Vetted from Valve's 3.8.14 recovery image, not yet run on hardware: stock SteamOS 3.8 ships
+  gstreamer 1.26 with `gst-plugin-pipewire`, `gst-plugins-good`, `gst-plugins-base`, ffmpeg 7.1
+  with `h264_vaapi`, and gamescope with the PipeWire node always on in Game Mode. No SELinux and
+  `/home` is mounted exec, so the same plugin zip should work unchanged.

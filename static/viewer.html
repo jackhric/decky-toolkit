@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Decky-MCP Screen</title>
+<link rel="icon" href="data:,">
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #0b0d10; color: #d7dbe0; font: 13px/1.4 system-ui, sans-serif; }
+  body { display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; gap: 12px; padding: 6px 10px; background: #15181d; border-bottom: 1px solid #262a31; flex-wrap: wrap; }
+  header b { color: #fff; }
+  .stat { font-variant-numeric: tabular-nums; color: #9aa3ad; }
+  .stat span { color: #e8ecf0; }
+  button { background: #262a31; color: #e8ecf0; border: 1px solid #353a43; border-radius: 4px; padding: 4px 10px; cursor: pointer; }
+  button:hover { background: #30353e; }
+  button.on { background: #2d6cdf; border-color: #2d6cdf; }
+  main { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; background: #000; position: relative; }
+  img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+  main.actual img { max-width: none; max-height: none; }
+  main.actual { overflow: auto; align-items: flex-start; justify-content: flex-start; }
+  #msg { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); background: rgba(20,22,26,.9); padding: 12px 16px; border-radius: 6px; max-width: 80%; white-space: pre-wrap; }
+  #msg[hidden] { display: none; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #666; display: inline-block; margin-right: 4px; }
+  .dot.live { background: #3ddc84; }
+</style>
+</head>
+<body>
+<header>
+  <b><span class="dot" id="dot"></span>Decky-MCP Screen</b>
+  <span class="stat">fps <span id="fps">–</span></span>
+  <span class="stat">Mbps <span id="mbps">–</span></span>
+  <span class="stat">res <span id="res">–</span></span>
+  <span class="stat">frames <span id="frames">0</span></span>
+  <span style="flex:1"></span>
+  <button id="pause">Pause</button>
+  <button id="fit" class="on">Fit</button>
+  <button id="snap">Snapshot</button>
+  <button id="full">Fullscreen</button>
+</header>
+<main id="main">
+  <img id="img" alt="Deck display">
+  <div id="msg">Connecting…</div>
+</main>
+<script>
+(() => {
+  const img = document.getElementById('img'), msg = document.getElementById('msg'), dot = document.getElementById('dot');
+  const el = id => document.getElementById(id);
+  let paused = false, abort = null, frames = 0, lastUrl = null;
+  let winFrames = [], winBytes = 0;
+
+  const show = t => { msg.textContent = t; msg.hidden = !t; };
+
+  function stats(bytes) {
+    const now = performance.now();
+    winFrames.push(now); winBytes += bytes;
+    while (winFrames.length && now - winFrames[0] > 2000) winFrames.shift();
+    el('fps').textContent = (winFrames.length / 2).toFixed(1);
+    el('frames').textContent = ++frames;
+    if (frames % 10 === 0) { el('mbps').textContent = (winBytes * 8 / 2 / 1e6).toFixed(1); winBytes = 0; }
+  }
+
+  function present(buf) {
+    const url = URL.createObjectURL(new Blob([buf], { type: 'image/jpeg' }));
+    img.onload = () => { if (lastUrl) URL.revokeObjectURL(lastUrl); lastUrl = url; el('res').textContent = img.naturalWidth + '×' + img.naturalHeight; };
+    img.src = url;
+  }
+
+  // Parse the multipart/x-mixed-replace stream ourselves so we can count frames and bytes.
+  async function run() {
+    abort = new AbortController();
+    try {
+      const res = await fetch('/stream.mjpeg', { signal: abort.signal, cache: 'no-store' });
+      if (res.status === 401) { show('Unauthorized. Reopen this page with ?token=<token> from the Decky-MCP panel.'); return; }
+      if (!res.ok || !res.body) { show('Stream error ' + res.status + ': ' + await res.text()); return; }
+      show(''); dot.classList.add('live');
+      const reader = res.body.getReader();
+      let buf = new Uint8Array(0);
+      const dec = new TextDecoder();
+      const concat = (a, b) => { const c = new Uint8Array(a.length + b.length); c.set(a); c.set(b, a.length); return c; };
+      const indexOf = (hay, needle, from) => { outer: for (let i = from; i <= hay.length - needle.length; i++) { for (let j = 0; j < needle.length; j++) if (hay[i + j] !== needle[j]) continue outer; return i; } return -1; };
+      const CRLF2 = [13, 10, 13, 10];
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf = concat(buf, value);
+        while (true) {
+          const h = indexOf(buf, CRLF2, 0);
+          if (h < 0) break;
+          const head = dec.decode(buf.subarray(0, h));
+          const m = /content-length:\s*(\d+)/i.exec(head);
+          if (!m) { buf = buf.subarray(h + 4); continue; }
+          const len = +m[1], start = h + 4;
+          if (buf.length < start + len) break;
+          const frame = buf.slice(start, start + len);
+          buf = buf.subarray(start + len);
+          stats(len);
+          if (!paused) present(frame);
+        }
+      }
+      show('Stream ended. Reconnecting…');
+    } catch (e) {
+      if (e.name !== 'AbortError') show('Disconnected: ' + e.message + '\nReconnecting…');
+    }
+    dot.classList.remove('live');
+    if (!abort.signal.aborted) setTimeout(run, 1500);
+  }
+
+  el('pause').onclick = () => { paused = !paused; el('pause').textContent = paused ? 'Resume' : 'Pause'; el('pause').classList.toggle('on', paused); };
+  el('fit').onclick = () => { const fit = el('main').classList.toggle('actual'); el('fit').classList.toggle('on', !fit); el('fit').textContent = fit ? 'Actual' : 'Fit'; };
+  el('snap').onclick = () => window.open('/frame.jpg?t=' + Date.now(), '_blank');
+  el('full').onclick = () => document.fullscreenElement ? document.exitFullscreen() : el('main').requestFullscreen();
+  document.addEventListener('keydown', e => { if (e.key === ' ') { e.preventDefault(); el('pause').click(); } if (e.key === 'f') el('full').click(); });
+  run();
+})();
+</script>
+</body>
+</html>

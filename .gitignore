@@ -59,3 +59,6 @@ cli/decky
 # Decky-MCP
 deploy.env
 out/
+
+# Playwright MCP output
+.playwright-mcp/

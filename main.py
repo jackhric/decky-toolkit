@@ -12,6 +12,7 @@ from aiohttp import web
 
 sys.path.append(decky.DECKY_PLUGIN_DIR + "/py_modules")  # the loader does this too; kept for IDE/type tooling parity
 
+from decky_mcp.capture import ScreenCapturer  # noqa: E402
 from decky_mcp.protocol import McpServer  # noqa: E402
 from decky_mcp.settings import Settings  # noqa: E402
 from decky_mcp.tools import build_registry  # noqa: E402
@@ -62,16 +63,26 @@ def _loader_watchdog() -> None:
     os._exit(0)
 
 
+PAIRING_SECONDS = 120
+
+
 class Plugin:
     settings: Settings
     runner: web.AppRunner | None = None
+    capturer: ScreenCapturer | None = None
     last_error: str | None = None
+    pairing_until: float = 0.0
+    pairing_count: int = 0
 
     async def _start_server(self) -> None:
         await self._stop_server()
         if not self.settings.enabled:
             return
-        server = McpServer(build_registry(), self.settings.token, decky.logger)
+        if self.capturer is None:
+            self.capturer = ScreenCapturer(lambda: self.settings, decky.logger)
+        server = McpServer(build_registry(self.capturer), self.settings.token, decky.logger,
+                           capturer=self.capturer, static_dir=os.path.join(decky.DECKY_PLUGIN_DIR, "static"),
+                           pairing_open=self._pairing_open, on_paired=self._on_paired)
         # The loader SIGKILLs a plugin 5s after SIGTERM, so never wait long for in-flight requests.
         runner = web.AppRunner(server.build_app(), access_log=None, shutdown_timeout=2)
         await runner.setup()
@@ -95,9 +106,34 @@ class Plugin:
         decky.logger.info("MCP server listening on http://%s:%s/mcp", self.settings.bind, self.settings.port)
 
     async def _stop_server(self) -> None:
+        if self.capturer is not None:
+            await self.capturer.stop()
         if self.runner is not None:
             await self.runner.cleanup()
             self.runner = None
+
+    # ---- pairing ----
+
+    def _pairing_open(self) -> bool:
+        return time.monotonic() < self.pairing_until
+
+    def _pairing_seconds_left(self) -> int:
+        return max(0, int(self.pairing_until - time.monotonic() + 0.999))
+
+    async def _on_paired(self, remote: str) -> None:
+        self.pairing_count += 1
+        decky.logger.info("browser paired from %s", remote)
+        await decky.emit("decky_mcp_paired", remote)
+
+    async def start_pairing(self) -> dict[str, Any]:
+        self.pairing_until = time.monotonic() + PAIRING_SECONDS
+        self.pairing_count = 0
+        decky.logger.info("pairing window open for %ss", PAIRING_SECONDS)
+        return await self.get_status()
+
+    async def stop_pairing(self) -> dict[str, Any]:
+        self.pairing_until = 0.0
+        return await self.get_status()
 
     # ---- methods callable from the frontend ----
 
@@ -111,8 +147,25 @@ class Plugin:
             "token": self.settings.token,
             "ip": ip,
             "url": f"http://{ip}:{self.settings.port}/mcp",
+            "viewer_url": f"http://{ip}:{self.settings.port}/viewer?token={self.settings.token}",
+            "pair_url": f"http://{ip}:{self.settings.port}/viewer",
+            "pairing_seconds_left": self._pairing_seconds_left(),
+            "pairing_count": self.pairing_count,
+            "stream": self.capturer.stats() if self.capturer else None,
             "error": self.last_error,
         }
+
+    async def set_stream_settings(self, fps: int | None = None, quality: int | None = None, width: int | None = None) -> dict[str, Any]:
+        if fps is not None:
+            self.settings.stream_fps = max(1, min(60, int(fps)))
+        if quality is not None:
+            self.settings.stream_quality = max(10, min(100, int(quality)))
+        if width is not None:
+            self.settings.stream_width = max(0, int(width))
+        self.settings.save(decky.DECKY_PLUGIN_SETTINGS_DIR)
+        if self.capturer is not None:
+            await self.capturer.restart()
+        return await self.get_status()
 
     async def set_enabled(self, enabled: bool) -> dict[str, Any]:
         self.settings.enabled = bool(enabled)

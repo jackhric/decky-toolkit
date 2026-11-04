@@ -12,6 +12,9 @@ class Settings:
     bind: str = "0.0.0.0"
     port: int = DEFAULT_PORT
     token: str = field(default_factory=lambda: secrets.token_urlsafe(32))
+    stream_fps: int = 30
+    stream_quality: int = 70
+    stream_width: int = 0  # 0 = native resolution
 
     @classmethod
     def load(cls, settings_dir: str) -> "Settings":

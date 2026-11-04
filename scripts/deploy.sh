@@ -18,7 +18,7 @@ fi
 
 STAGE="out/$PLUGIN_DIR_NAME"
 rm -rf out && mkdir -p "$STAGE"
-cp -r dist plugin.json package.json main.py LICENSE README.md defaults py_modules "$STAGE"/
+cp -r dist plugin.json package.json main.py LICENSE README.md defaults py_modules static "$STAGE"/
 find "$STAGE" -name __pycache__ -prune -exec rm -rf {} +
 
 REMOTE_STAGE=".cache/decky-mcp-stage"

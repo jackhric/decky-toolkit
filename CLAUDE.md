@@ -43,6 +43,31 @@ See README.md for the tool list and architecture.
 - Subprocesses inherit the PyInstaller `LD_LIBRARY_PATH`; `tools._run` strips it.
 - `"debug"` in `plugin.json` flags enables hot reload on `dist/index.js`/`main.py` changes.
 
+## Screen streaming facts (verified 2026-11-03)
+- gamescope publishes a PipeWire `Video/Source` node named `gamescope` (BGRx/NV12 1920x1080) that
+  delivers 60 fps while the screen changes and **nothing at all while it is static**. A fresh
+  consumer on a static screen gets zero frames; `gamescopectl debug_force_repaint` (DISPLAY=:1,
+  XDG_RUNTIME_DIR=/run/user/1000) or `gamescopectl screenshot` makes it paint once, and
+  `pipewiresrc keepalive-time=100` keeps re-emitting the last buffer afterwards.
+- Never force a caps format directly after `pipewiresrc` (a failed negotiation can kill the node
+  until gamescope restarts, gamescope #2508); keep `! video/x-raw ! videoconvert`.
+- `videorate` backfills gaps with duplicates; without `max-duplication-time` a long stall turns
+  into a burst of hundreds of frames.
+- 1080p JPEG q70 at 30 fps is ~50 Mbit/s; `gst-launch-1.0` as root with `env -i` plus
+  XDG_RUNTIME_DIR works. Port 8080 (CEF) drops for a few seconds after every loader restart because
+  Decky reloads the Steam UI.
+- Stock SteamOS 3.8.14 (Valve recovery image, inspected by a research agent) ships gstreamer 1.26.4,
+  gst-plugin-pipewire 1.6.4, gst-plugins-good/base, ffmpeg 7.1.1 (h264_vaapi), gamescope 3.16.23
+  with PipeWire always on, libturbojpeg.so.0, libjpeg.so.8 (not .62), libva.so.2, libx264.so.164.
+  No GStreamer VA/x264 encoders. `holo-base` Docker image lacks all of these and is not a proxy.
+
+## Pairing
+`start_pairing` (frontend method) opens a 120 s window during which an unauthenticated `GET /viewer`
+sets the token cookie and redirects. `/mcp` always requires the bearer token; pairing never affects it.
+Backend-to-frontend event `decky_mcp_paired` carries the remote IP for the toast. To drive frontend
+methods from a test, evaluate `window.DeckyBackend.call('loader/call_plugin_method', 'Decky-MCP', '<method>')`
+in SharedJSContext via the `cef_evaluate` tool.
+
 ## Conventions
 - Keep the MCP server dependency-free beyond the loader bundle (aiohttp + stdlib).
 - Tools return str/dict (serialised to text) or a list of MCP content blocks. Raise `ValueError`

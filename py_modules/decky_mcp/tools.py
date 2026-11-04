@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
 from . import cdp
+from .capture import CaptureUnavailable, ScreenCapturer
 
 ToolFn = Callable[..., Awaitable[Any]]
 
@@ -50,7 +51,7 @@ class ToolRegistry:
         except TypeError as e:
             # Bad/missing arguments surface as a tool error so the agent can self-correct.
             return _error_result(f"Invalid arguments for {name}: {e}")
-        except (ValueError, FileNotFoundError, cdp.CdpError) as e:
+        except (ValueError, FileNotFoundError, cdp.CdpError, CaptureUnavailable) as e:
             # Expected, user-facing failures: no traceback noise.
             return _error_result(f"{type(e).__name__}: {e}")
         except Exception as e:  # noqa: BLE001
@@ -110,7 +111,7 @@ def _tail(path: str, lines: int) -> str:
     return b"\n".join(data.splitlines()[-lines:]).decode(errors="replace")
 
 
-def build_registry() -> ToolRegistry:
+def build_registry(capturer: ScreenCapturer | None = None) -> ToolRegistry:
     reg = ToolRegistry()
 
     @reg.add("decky_status", "Report Decky Loader version, host OS, Python runtime and installed plugins.")
@@ -255,6 +256,27 @@ def build_registry() -> ToolRegistry:
             {"type": "text", "text": f"Screenshot of '{tab_title}' at scale {quality_scale}"},
             {"type": "image", "data": res["data"], "mimeType": "image/png"},
         ]
+
+    @reg.add(
+        "screen_capture",
+        "Capture the full gamescope display (Steam UI, games, overlays: exactly what the screen shows) as a JPEG. "
+        "Uses gamescope's PipeWire video node, so it works without a physical display attached.",
+    )
+    async def screen_capture() -> list[dict[str, Any]]:
+        if capturer is None:
+            raise CaptureUnavailable("screen capture not configured")
+        frame = await capturer.grab()
+        stats = capturer.stats()
+        return [
+            {"type": "text", "text": f"Display frame {stats.get('width')}x{stats.get('height')}, {len(frame)} bytes"},
+            {"type": "image", "data": base64.b64encode(frame).decode(), "mimeType": "image/jpeg"},
+        ]
+
+    @reg.add("stream_status", "Report the live screen stream state: running, fps, bitrate, resolution, viewer count, errors.")
+    async def stream_status() -> dict[str, Any]:
+        if capturer is None:
+            return {"available": False}
+        return capturer.stats()
 
     @reg.add(
         "toast",
