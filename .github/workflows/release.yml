@@ -12,7 +12,7 @@ permissions:
 jobs:
   check:
     name: Check tag
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     outputs:
       component: ${{ steps.tag.outputs.component }}
       version: ${{ steps.tag.outputs.version }}
@@ -52,7 +52,7 @@ jobs:
   release:
     name: GitHub Release
     needs: [check, ci]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: write
       id-token: write
@@ -97,7 +97,7 @@ jobs:
     name: Publish to Open VSX
     needs: [check, release]
     if: needs.check.outputs.component == 'extension' && !contains(needs.check.outputs.version, '-')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     environment: openvsx
     permissions:
       id-token: write
@@ -115,7 +115,7 @@ jobs:
     name: Publish to VS Code Marketplace
     needs: [check, release]
     if: needs.check.outputs.component == 'extension' && !contains(needs.check.outputs.version, '-')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     environment: marketplace
     permissions:
       id-token: write
