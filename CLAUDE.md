@@ -231,6 +231,8 @@ SharedJSContext via the `cef_evaluate` tool.
   releases to Open VSX by trusted publishing (OIDC, environment `openvsx`, no token secret).
 - Every third-party action is pinned to a full commit SHA with a `# vX.Y.Z` comment; Dependabot bumps them.
   Keep it that way. The release-please App key lives in the `release` environment (main only).
+- PRs are squash-merged with the PR title as the commit message, so the PR title is what release-please
+  reads; `pr-title.yml` enforces a conventional title (`feat:`, `fix:`, `feat!:` for breaking, ...).
 
 ## Conventions
 - Every setting is configurable remotely (approving a pairing request is not a setting): through an MCP tool, the HTTP API (for the extension) and

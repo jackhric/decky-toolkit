@@ -26,6 +26,7 @@ jobs:
             extension-v*) component=extension; version="${tag#extension-v}"; files=(extension/package.json) ;;
             *) echo "::error::unexpected tag $tag"; exit 1 ;;
           esac
+          export LC_ALL=C
           id='(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)'
           semver="^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-$id(\.$id)*)?(\+[0-9a-zA-Z-]+(\.[0-9a-zA-Z-]+)*)?$"
           if ! [[ "$version" =~ $semver ]]; then
@@ -79,9 +80,12 @@ jobs:
           esac
           prerelease=false
           if [[ "$VERSION" == *-* ]]; then prerelease=true; fi
-          if gh release view "$tag" > /dev/null 2>&1; then
+          if out=$(gh release view "$tag" --json isDraft 2>&1); then
             gh release upload "$tag" release/* --clobber
             gh release edit "$tag" --title "$title" --prerelease="$prerelease" --draft=false
+          elif [[ "$out" != *"release not found"* ]]; then
+            echo "::error::gh release view $tag failed: $out"
+            exit 1
           else
             args=(--verify-tag --title "$title" --generate-notes --prerelease="$prerelease")
             prev=$(git tag --list "$COMPONENT-v*" --sort=-v:refname | grep -vxF "$tag" | head -1 || true)
@@ -104,5 +108,5 @@ jobs:
           path: release
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 20
+          node-version: 22
       - run: npx --yes ovsx@1.3.0 publish release/*.vsix --trusted-publishing --skip-duplicate

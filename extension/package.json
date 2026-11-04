@@ -527,7 +527,7 @@
     "build": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
     "typecheck": "tsc --noEmit",
-    "package": "vsce package --no-dependencies",
+    "package": "vsce package --no-dependencies --baseContentUrl https://github.com/jackhric/decky-toolkit/blob/HEAD/extension --baseImagesUrl https://github.com/jackhric/decky-toolkit/raw/HEAD/extension",
     "smoke": "node scripts/smoke.mjs",
     "dev-check": "node scripts/dev-check.mjs"
   },
