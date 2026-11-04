@@ -1,58 +1,116 @@
 import * as vscode from 'vscode';
-import { DeckyClient, HttpError, describeError, isMissingRoute, sleep } from './client';
+import { DeckyClient, describeError, isMissingRoute } from './client';
 import { Connection } from './connection';
 import { deploy, findPluginFolders, pluginDirName } from './deploy';
-import { addDevice, changeHost, editDevice, removeDevice, setActiveDevice, switchDevice } from './devices';
+import {
+  addDevice, changeHost, copyViewerUrl, deviceActions, deviceFrom, editDevice, removeDevice, setActiveDevice, switchDevice,
+} from './devices';
+import { DevicesTreeProvider, UnifiedTreeProvider } from './devicesTree';
 import { DeviceTreeProvider } from './deviceTree';
+import { Layout, currentLayout, switchLayout } from './layout';
 import { LogManager } from './logs';
+import { connect, enterToken, pair } from './pairing';
 import { PluginsTreeProvider } from './pluginsTree';
 import { PreviewViewProvider } from './preview';
 import { ScreenPanel, StatusBar } from './screenPanel';
 
-const PAIR_TIMEOUT_MS = 120_000;
-const PAIR_POLL_MS = 2000;
+export { connectionTimings } from './connection';
+export { pairingTimings } from './pairing';
 
 let conn: Connection | undefined;
 
 export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   conn = new Connection(ctx);
   const c = conn;
+  let layout: Layout = currentLayout();
+  c.requireSession = layout !== 'classic';
   await c.initDevices();
   await c.refresh();
-  const status = new StatusBar(c);
+  const getLayout = () => layout;
+  const status = new StatusBar(c, getLayout);
   const logs = new LogManager(c);
   const deployOut = vscode.window.createOutputChannel('Decky-MCP Deploy');
   const consoleOut = vscode.window.createOutputChannel('Decky-MCP Console');
-  const deviceTree = new DeviceTreeProvider(c);
-  const pluginsTree = new PluginsTreeProvider(c);
+  const devicesTree = new DevicesTreeProvider(c);
+  const deviceTree = new DeviceTreeProvider(c, getLayout);
+  const pluginsTree = new PluginsTreeProvider(c, getLayout);
+  const unifiedTree = new UnifiedTreeProvider(c);
+  const preview = new PreviewViewProvider(ctx.extensionUri, c);
+  const devicesView = vscode.window.createTreeView('decky-mcp.devices', { treeDataProvider: devicesTree });
   const deviceView = vscode.window.createTreeView('decky-mcp.device', { treeDataProvider: deviceTree });
   const pluginsView = vscode.window.createTreeView('decky-mcp.plugins', { treeDataProvider: pluginsTree });
+  const unifiedView = vscode.window.createTreeView('decky-mcp.unified', { treeDataProvider: unifiedTree });
   ctx.subscriptions.push(
-    c, status, logs, deployOut, consoleOut, deviceTree, pluginsTree, deviceView, pluginsView,
-    vscode.window.registerWebviewViewProvider(PreviewViewProvider.viewId, new PreviewViewProvider(ctx.extensionUri, c)),
+    c, status, logs, deployOut, consoleOut, devicesTree, deviceTree, pluginsTree, unifiedTree,
+    devicesView, deviceView, pluginsView, unifiedView,
+    vscode.window.registerWebviewViewProvider(PreviewViewProvider.viewId, preview),
   );
+  const refreshPlugins = () => {
+    pluginsTree.refresh();
+    unifiedTree.refreshPlugins();
+  };
 
+  const contexts = new Map<string, unknown>();
+  const setContext = (key: string, value: unknown) => {
+    if (contexts.get(key) === value) return;
+    contexts.set(key, value);
+    void vscode.commands.executeCommand('setContext', key, value);
+  };
   let statsLease: vscode.Disposable | undefined;
+  let sessionId: string | undefined;
   const sync = () => {
-    void vscode.commands.executeCommand('setContext', 'decky-mcp.paired', c.paired);
-    deviceView.description = c.paired ? undefined : `${c.label} · not paired`;
-    if (deviceView.visible && c.paired) {
+    const connected = c.connectedDevice;
+    setContext('decky-mcp.layout', layout);
+    setContext('decky-mcp.paired', c.paired);
+    setContext('decky-mcp.connected', !!connected);
+    if (connected?.id !== sessionId) {
+      sessionId = connected?.id;
+      refreshPlugins();
+    }
+    if (layout === 'classic') {
+      deviceView.description = c.paired ? undefined : `${c.label} · not paired`;
+      pluginsView.description = undefined;
+      preview.setDescription(undefined);
+    } else {
+      const d = connected && (c.health.kind === 'unreachable' ? `${connected.name} · unreachable` : connected.name);
+      deviceView.description = d;
+      pluginsView.description = d;
+      preview.setDescription(d);
+    }
+    const wantStats = c.paired && (
+      layout === 'classic' ? deviceView.visible
+        : !!connected && (layout === 'unified' ? unifiedView.visible : deviceView.visible));
+    if (wantStats) {
       statsLease ??= c.watchStats();
     } else {
       statsLease?.dispose();
       statsLease = undefined;
     }
   };
+  const applyLayout = () => {
+    layout = currentLayout();
+    c.requireSession = layout !== 'classic';
+    sync();
+    devicesTree.refresh();
+    deviceTree.refresh();
+    pluginsTree.refresh();
+    unifiedTree.refresh();
+    status.render();
+  };
   ctx.subscriptions.push(
     deviceView.onDidChangeVisibility(sync),
-    c.onDidChangeTarget(sync),
+    unifiedView.onDidChangeVisibility(sync),
+    c.onDidChange(sync),
+    vscode.workspace.onDidChangeConfiguration(e => {
+      if (e.affectsConfiguration('decky-mcp.sidebarLayout')) applyLayout();
+    }),
     { dispose: () => statsLease?.dispose() },
   );
   sync();
 
   const afterDeviceChange = async () => {
     await c.checkHealth();
-    pluginsTree.refresh();
+    refreshPlugins();
   };
 
   const command = (id: string, fn: (arg?: unknown) => Promise<unknown>) =>
@@ -64,23 +122,41 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
       }
     }));
 
-  command('decky-mcp.pair', () => pair(c));
-  command('decky-mcp.enterToken', () => enterToken(c));
+  command('decky-mcp.connect', async arg => {
+    const d = deviceFrom(c, arg);
+    if (d) await connect(c, d);
+    else await addDevice(c);
+  });
+  command('decky-mcp.disconnectDevice', () => c.disconnect());
+  command('decky-mcp.pairAgain', async arg => {
+    const d = deviceFrom(c, arg);
+    if (d) await pair(c, d);
+  });
+  command('decky-mcp.pair', async () => {
+    const d = c.activeDevice;
+    if (d) await pair(c, d);
+    else await addDevice(c);
+  });
+  command('decky-mcp.enterToken', arg => enterToken(c, arg === undefined ? undefined : deviceFrom(c, arg)));
   command('decky-mcp.disconnect', async () => {
     await c.clearToken();
     void vscode.window.showInformationMessage(`Decky-MCP: forgot the token for ${c.label}.`);
   });
   command('decky-mcp.refresh', async () => {
     await c.refresh();
-    pluginsTree.refresh();
+    refreshPlugins();
+    await c.probeAll();
   });
-  command('decky-mcp.refreshPlugins', async () => pluginsTree.refresh());
+  command('decky-mcp.refreshPlugins', async () => refreshPlugins());
   command('decky-mcp.changeHost', () => changeHost(c));
   command('decky-mcp.addDevice', () => addDevice(c));
   command('decky-mcp.editDevice', arg => editDevice(c, arg));
   command('decky-mcp.removeDevice', arg => removeDevice(c, arg));
-  command('decky-mcp.setActiveDevice', arg => setActiveDevice(c, arg));
-  command('decky-mcp.switchDevice', () => switchDevice(c));
+  command('decky-mcp.setActiveDevice', arg => setActiveDevice(c, layout, arg));
+  command('decky-mcp.switchDevice', () => switchDevice(c, layout));
+  command('decky-mcp.deviceActions', arg => deviceActions(c, arg));
+  command('decky-mcp.copyViewerUrl', arg => copyViewerUrl(c, arg));
+  command('decky-mcp.switchLayout', arg => switchLayout(arg));
   command('decky-mcp.openScreen', async () => {
     if (await c.client()) await ScreenPanel.show(ctx, c);
   });
@@ -127,7 +203,7 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
       throw e;
     }
     void vscode.window.showInformationMessage(`Decky-MCP: reloaded ${dir}.`);
-    pluginsTree.refresh();
+    refreshPlugins();
   });
   command('decky-mcp.loaderLogs', async () => {
     if (await c.client()) logs.show('loader', 'Decky Loader', { source: 'loader' });
@@ -146,6 +222,10 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     await client.callToolText('toast', { title: 'VS Code', body });
   });
   command('decky-mcp.writeMcpConfig', () => writeMcpConfig(c));
+
+  const last = c.lastSessionDevice;
+  if (last && layout !== 'classic') void connect(c, last, false);
+  void c.probeAll();
 }
 
 export function deactivate(): void {
@@ -188,86 +268,6 @@ async function installZip(c: Connection): Promise<void> {
     const { name, version, dir } = result.installed;
     void vscode.window.showInformationMessage(`Decky-MCP: installed ${name}${version ? ` ${version}` : ''} as ${dir}.`);
   });
-}
-
-async function pair(c: Connection): Promise<void> {
-  const client = c.unauthenticatedClient();
-  try {
-    await client.health();
-  } catch (e) {
-    throw new Error(`cannot reach ${client.baseUrl} (${describeError(e)}). Use "Change host" or edit the device.`);
-  }
-  const offerManual = async (why: string) => {
-    const choice = await vscode.window.showWarningMessage(`Decky-MCP: ${why}`, 'Enter token manually');
-    if (choice) await enterToken(c);
-  };
-
-  const grant = await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: `Pairing with ${c.label}`, cancellable: true },
-    async (progress, token) => {
-      const start = Date.now();
-      const abort = new AbortController();
-      const cancelSub = token.onCancellationRequested(() => abort.abort());
-      const report = () => {
-        const left = Math.max(0, Math.ceil((PAIR_TIMEOUT_MS - (Date.now() - start)) / 1000));
-        progress.report({ message: `Waiting for the Deck… ${left} s left. Press "Pair a browser" in the Decky-MCP panel.` });
-      };
-      report();
-      const ticker = setInterval(report, 1000);
-      try {
-        while (!abort.signal.aborted && Date.now() - start < PAIR_TIMEOUT_MS) {
-          try {
-            const r = await client.pair();
-            if (r === 'unsupported') return 'unsupported' as const;
-            if (r !== 'closed') return r;
-          } catch {
-            // transient (loader restarting); keep polling
-          }
-          await sleep(PAIR_POLL_MS, abort.signal).catch(() => undefined);
-        }
-        return abort.signal.aborted ? 'cancelled' as const : 'timeout' as const;
-      } finally {
-        clearInterval(ticker);
-        cancelSub.dispose();
-      }
-    });
-
-  if (grant === 'cancelled') return;
-  if (grant === 'unsupported') {
-    return offerManual('this device has no /pair route yet (older Decky-MCP). Copy the token from the Decky-MCP panel instead.');
-  }
-  if (grant === 'timeout') return offerManual('no pairing window was opened within 120 s.');
-  await c.setToken(grant.token);
-  await announce(c, 'Paired with');
-}
-
-async function enterToken(c: Connection): Promise<void> {
-  const token = (await vscode.window.showInputBox({
-    prompt: `Bearer token for ${c.label} (shown in the Decky-MCP Quick Access panel)`,
-    password: true,
-    ignoreFocusOut: true,
-    validateInput: v => (v.trim() ? undefined : 'Token is empty'),
-  }))?.trim();
-  if (!token) return;
-  try {
-    await new DeckyClient(c.address, token).listTools();
-  } catch (e) {
-    if (e instanceof HttpError && e.status === 401) throw new Error('the device rejected that token.');
-    void vscode.window.showWarningMessage(`Decky-MCP: could not verify the token (${describeError(e)}); saved it anyway.`);
-  }
-  await c.setToken(token);
-  await announce(c, 'Connected to');
-}
-
-async function announce(c: Connection, verb: string): Promise<void> {
-  try {
-    const h = await c.unauthenticatedClient().health();
-    const choice = await vscode.window.showInformationMessage(
-      `Decky-MCP: ${verb} ${c.label}: ${h.name} ${h.version}, API v${h.api_version}, ${h.tools} tools.`, 'Open screen');
-    if (choice) await vscode.commands.executeCommand('decky-mcp.openScreen');
-  } catch (e) {
-    void vscode.window.showWarningMessage(`Decky-MCP: token saved, but /health failed: ${describeError(e)}`);
-  }
 }
 
 async function pickDeviceDir(client: DeckyClient, placeHolder: string): Promise<string | undefined> {
