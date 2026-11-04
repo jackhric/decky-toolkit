@@ -72,18 +72,10 @@ Open Quick Access (…) → **Decky Toolkit** on the device. The panel shows the
 1. Open the **Extensions** view (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>X</kbd>, or
    <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>X</kbd> on macOS), search for **Decky Toolkit** and click
    **Install**.
-
-   <img alt="Decky Toolkit in the Extensions view search results with its Install button" src="docs/images/install/step1-search.png" width="464">
-
 2. VS Code asks whether you trust the publisher the first time you install one of their
    extensions. Click **Trust Publisher & Install**.
-
-   <img alt="The Do you trust the publisher Jack Hric dialog with the Trust Publisher and Install button" src="docs/images/install/step2-trust.png" width="554">
-
 3. A **Decky** icon appears in the Activity Bar. Click it: the Devices view opens with an
    **Add device** button, which is where [pairing](#3-pair-your-editor-with-the-device) starts.
-
-   <img alt="The Decky Devices view showing No devices yet and an Add device button" src="docs/images/install/step3-add-device.png" width="464">
 
 The same steps work in **VSCodium** and other editors that install from Open VSX. You can also
 open the listing directly:
