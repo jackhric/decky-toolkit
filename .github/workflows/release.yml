@@ -72,8 +72,32 @@ jobs:
             plugin) title="Decky Toolkit plugin $VERSION" ;;
             extension) title="Decky Toolkit for VS Code $VERSION" ;;
           esac
-          args=(--verify-tag --title "$title" --generate-notes)
-          prev=$(git tag --list "$COMPONENT-v*" --sort=-v:refname | grep -vxF "$tag" | head -1 || true)
-          if [ -n "$prev" ]; then args+=(--notes-start-tag "$prev"); fi
-          if [[ "$VERSION" == *-* ]]; then args+=(--prerelease); fi
-          gh release create "$tag" release/* "${args[@]}"
+          prerelease=false
+          if [[ "$VERSION" == *-* ]]; then prerelease=true; fi
+          if gh release view "$tag" > /dev/null 2>&1; then
+            gh release upload "$tag" release/* --clobber
+            gh release edit "$tag" --title "$title" --prerelease="$prerelease" --draft=false
+          else
+            args=(--verify-tag --title "$title" --generate-notes --prerelease="$prerelease")
+            prev=$(git tag --list "$COMPONENT-v*" --sort=-v:refname | grep -vxF "$tag" | head -1 || true)
+            if [ -n "$prev" ]; then args+=(--notes-start-tag "$prev"); fi
+            gh release create "$tag" release/* "${args[@]}"
+          fi
+
+  openvsx:
+    name: Publish to Open VSX
+    needs: [check, release]
+    if: needs.check.outputs.component == 'extension' && !contains(needs.check.outputs.version, '-')
+    runs-on: ubuntu-latest
+    environment: openvsx
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: extension
+          path: release
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+      - run: npx --yes ovsx@1.3.0 publish release/*.vsix --trusted-publishing --skip-duplicate
