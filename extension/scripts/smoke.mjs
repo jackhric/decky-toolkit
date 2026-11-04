@@ -466,7 +466,7 @@ await check('activate() registers the five views', async () => {
 });
 
 await check('package.json: container, activation, commands, menus, version', async () => {
-  assert.equal(pkg.version, '0.6.0');
+  assert.match(pkg.version, /^\d+\.\d+\.\d+$/, 'Marketplace and Open VSX accept only major.minor.patch');
   const container = pkg.contributes.viewsContainers.activitybar[0];
   assert.equal(container.id, 'decky-toolkit');
   assert.equal(container.title, 'Decky');
