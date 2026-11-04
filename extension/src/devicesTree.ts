@@ -20,7 +20,9 @@ export function deviceRow(conn: ConnectionState, d: SavedDevice): DeviceNode {
   const n = new DeviceNode(nameIsHost && d.port === DEFAULT_PORT ? d.host : nameIsHost ? address : d.name);
   n.id = `deck:${d.id}`;
   n.device = d;
-  n.description = nameIsHost ? statusLabel(status) : `${address} · ${statusLabel(status)}`;
+  const code = status === 'pairing' ? conn.pairingCodeOf?.(d.id) : undefined;
+  const label = code ? `waiting for approval · code ${code}` : statusLabel(status);
+  n.description = nameIsHost ? label : `${address} · ${label}`;
   const color = status === 'connected' ? 'testing.iconPassed' : status === 'unreachable' ? 'problemsWarningIcon.foreground' : undefined;
   n.iconPath = new vscode.ThemeIcon(STATUS_ICON[status], color ? new vscode.ThemeColor(color) : undefined);
   const busy = status === 'connecting' || status === 'pairing';
@@ -30,7 +32,7 @@ export function deviceRow(conn: ConnectionState, d: SavedDevice): DeviceNode {
   const h = conn.health;
   if (session && h.kind === 'ok') md.appendMarkdown(`Connected · ${h.health.name} ${h.health.version}, API v${h.health.api_version}\n\n`);
   else if (session && h.kind === 'unreachable') md.appendMarkdown(`Connected, but not answering: ${h.error}\n\n`);
-  else md.appendMarkdown(`${statusLabel(status)}${busy ? '' : status === 'unpaired' ? ' · click to pair and connect' : ' · click to connect'}\n\n`);
+  else md.appendMarkdown(`${label}${busy ? '' : status === 'unpaired' ? ' · click to pair and connect' : ' · click to connect'}\n\n`);
   n.tooltip = md;
   if (!session && !busy) n.command = { command: 'decky-mcp.connect', title: 'Connect', arguments: [d.id] };
   return n;

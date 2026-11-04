@@ -1,6 +1,8 @@
 import {
   ButtonItem,
+  DialogButton,
   Field,
+  Focusable,
   PanelSection,
   PanelSectionRow,
   ToggleField,
@@ -19,12 +21,20 @@ type Status = {
   ip: string;
   url: string;
   viewer_url: string;
-  pair_url: string;
-  pairing_seconds_left: number;
-  pairing_count: number;
+  pair_requests: number;
   stream: { running: boolean; fps: number; subscribers: number; available: boolean; error: string | null } | null;
   input: InputSettings | null;
   error: string | null;
+};
+
+type PairRequest = {
+  id: string;
+  code: string;
+  client_name: string;
+  client_kind: string;
+  remote: string;
+  status: "pending" | "approved" | "denied";
+  age_s: number;
 };
 
 type InputSettings = { enabled: boolean; backend: "ei" | "uinput" | null; available: boolean; reason: string | null };
@@ -33,31 +43,60 @@ const getStatus = callable<[], Status>("get_status");
 const setEnabled = callable<[enabled: boolean], Status>("set_enabled");
 const regenerateToken = callable<[], Status>("regenerate_token");
 const restartServer = callable<[], Status>("restart_server");
-const startPairing = callable<[], Status>("start_pairing");
-const stopPairing = callable<[], Status>("stop_pairing");
+const listPairRequests = callable<[], PairRequest[]>("list_pair_requests");
+const approvePairRequest = callable<[id: string], PairRequest[]>("approve_pair_request");
+const denyPairRequest = callable<[id: string], PairRequest[]>("deny_pair_request");
 const getInputSettings = callable<[], InputSettings>("get_input_settings");
 const setInputEnabled = callable<[enabled: boolean], InputSettings>("set_input_enabled");
 
 function Content() {
   const [status, setStatus] = useState<Status | null>(null);
   const [showToken, setShowToken] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const refresh = async () => setStatus(await getStatus());
+  const [requests, setRequests] = useState<PairRequest[]>([]);
 
-  const pairing = (status?.pairing_seconds_left ?? 0) > 0;
+  const refresh = async () => setStatus(await getStatus());
+  const refreshRequests = async () => setRequests(await listPairRequests());
+
+  const pending = requests.filter((r) => r.status === "pending");
 
   useEffect(() => {
     const onInput = addEventListener<[enabled: boolean]>("decky_mcp_input_state", () => refresh());
-    return () => removeEventListener("decky_mcp_input_state", onInput);
+    const onRequest = addEventListener<[info: unknown]>("decky_mcp_pair_request", () => refreshRequests());
+    const onRequests = addEventListener<[list: PairRequest[]]>("decky_mcp_pair_requests", (list) => setRequests(list));
+    return () => {
+      removeEventListener("decky_mcp_input_state", onInput);
+      removeEventListener("decky_mcp_pair_request", onRequest);
+      removeEventListener("decky_mcp_pair_requests", onRequests);
+    };
   }, []);
 
   useEffect(() => {
     refresh();
-    // Poll faster while the pairing countdown is showing.
-    const id = setInterval(refresh, pairing ? 1000 : 5000);
+    const id = setInterval(refresh, 5000);
     return () => clearInterval(id);
-  }, [pairing]);
+  }, []);
+
+  useEffect(() => {
+    refreshRequests();
+    const id = setInterval(refreshRequests, pending.length ? 2000 : 10000);
+    return () => clearInterval(id);
+  }, [pending.length > 0]);
+
+  const decide = async (r: PairRequest, allow: boolean) => {
+    setBusy(true);
+    try {
+      setRequests(await (allow ? approvePairRequest(r.id) : denyPairRequest(r.id)));
+      toaster.toast({ title: "Decky-MCP", body: `${allow ? "Approved" : "Denied"} ${r.client_name}` });
+    } catch (e) {
+      toaster.toast({ title: "Decky-MCP error", body: String(e) });
+      refreshRequests();
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const run = async (fn: () => Promise<Status>, okMsg: string) => {
     setBusy(true);
@@ -71,6 +110,38 @@ function Content() {
     }
   };
 
+  // Oldest first; one at a time so the owner always sees which client the code belongs to.
+  const current = [...pending].sort((a, b) => b.age_s - a.age_s)[0];
+  if (current) {
+    return (
+      <PanelSection title="Approve pairing request?">
+        <PanelSectionRow>
+          <div style={{ fontSize: "0.95em", lineHeight: 1.4, padding: "4px 0 10px" }}>
+            {current.client_name} ({current.remote}) · code{" "}
+            <span style={{ fontFamily: "monospace", fontSize: "1.2em", fontWeight: "bold" }}>{current.code}</span>
+          </div>
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <Focusable style={{ display: "flex", gap: "8px" }}>
+            <DialogButton style={{ flex: 1, minWidth: 0 }} disabled={busy} onClick={() => decide(current, true)}>
+              Approve
+            </DialogButton>
+            <DialogButton style={{ flex: 1, minWidth: 0 }} disabled={busy} onClick={() => decide(current, false)}>
+              Deny
+            </DialogButton>
+          </Focusable>
+        </PanelSectionRow>
+        {pending.length > 1 && (
+          <PanelSectionRow>
+            <div style={{ fontSize: "0.75em", opacity: 0.7, textAlign: "center", paddingTop: "6px" }}>
+              1 of {pending.length}
+            </div>
+          </PanelSectionRow>
+        )}
+      </PanelSection>
+    );
+  }
+
   if (!status) {
     return (
       <PanelSection>
@@ -81,135 +152,95 @@ function Content() {
     );
   }
 
-  const state = !status.enabled ? "Disabled" : status.running ? "Running" : "Stopped";
+  const serverState = status.error ?? (!status.enabled ? "disabled" : status.running ? "running" : "stopped");
 
   return (
     <>
-      <PanelSection title="Server">
+      <PanelSection title="Connect from VS Code / VSCodium">
         <PanelSectionRow>
-          <ToggleField
-            label="Enable MCP server"
-            description={status.error ?? `${state} on ${status.bind}:${status.port}`}
-            checked={status.enabled}
-            disabled={busy}
-            onChange={(v) => run(() => setEnabled(v), v ? "Server enabled" : "Server disabled")}
-          />
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <Field label="Endpoint" focusable>
-            <span style={{ fontFamily: "monospace", fontSize: "0.8em", wordBreak: "break-all" }}>{status.url}</span>
-          </Field>
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <Field
-            label="Screen viewer"
-            description={
-              status.stream
-                ? status.stream.running
-                  ? `Streaming ${status.stream.fps} fps to ${status.stream.subscribers} viewer(s)`
-                  : status.stream.available
-                    ? "Idle (starts when a browser connects)"
-                    : status.stream.error ?? "Unavailable"
-                : "Unavailable"
-            }
-            focusable
-          >
-            <span style={{ fontFamily: "monospace", fontSize: "0.8em", wordBreak: "break-all" }}>
-              {showToken ? status.viewer_url : status.viewer_url.replace(/token=.*/, "token=••••")}
-            </span>
-          </Field>
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <Field label="Token" focusable onClick={() => setShowToken((s) => !s)}>
-            <span style={{ fontFamily: "monospace", fontSize: "0.8em", wordBreak: "break-all" }}>
-              {showToken ? status.token : "•••••••• (click to reveal)"}
-            </span>
-          </Field>
-        </PanelSectionRow>
-      </PanelSection>
-
-      <PanelSection title="Remote input">
-        <PanelSectionRow>
-          <ToggleField
-            label={status.input?.enabled ? "Input enabled" : "Allow remote input"}
-            description={
-              !status.input
-                ? "Unavailable"
-                : !status.input.available
-                  ? status.input.reason ?? "Unavailable"
-                  : status.input.enabled
-                    ? `Viewer and MCP clients can use keyboard, mouse and gamepad (${status.input.backend}).`
-                    : "Off: remote keyboard, mouse and gamepad input is refused."
-            }
-            checked={!!status.input?.enabled}
-            disabled={busy || !status.input?.available}
-            onChange={async (v) => {
-              setBusy(true);
-              try {
-                await setInputEnabled(v);
-                const input = await getInputSettings();
-                setStatus((s) => (s ? { ...s, input } : s));
-              } catch (e) {
-                toaster.toast({ title: "Decky-MCP error", body: String(e) });
-              } finally {
-                setBusy(false);
-              }
-            }}
-          />
-        </PanelSectionRow>
-      </PanelSection>
-
-      <PanelSection title="Pairing">
-        <PanelSectionRow>
-          <ButtonItem
-            layout="below"
-            disabled={busy || !status.running}
-            description={
-              pairing
-                ? `Open ${status.pair_url} on any device on your network. ${status.pairing_seconds_left}s left, ${status.pairing_count} paired.`
-                : "Lets a browser on your network open the viewer without typing the token, for 120 seconds."
-            }
-            onClick={() =>
-              pairing
-                ? run(stopPairing, "Pairing closed")
-                : run(startPairing, `Pairing open for 120s: visit ${status.pair_url}`)
-            }
-          >
-            {pairing ? "Stop pairing" : "Pair a browser (120 s)"}
-          </ButtonItem>
-        </PanelSectionRow>
-      </PanelSection>
-
-      <PanelSection title="Actions">
-        <PanelSectionRow>
-          <ButtonItem layout="below" disabled={busy} onClick={() => run(restartServer, "Server restarted")}>
-            Restart server
-          </ButtonItem>
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <ButtonItem layout="below" disabled={busy} onClick={() => run(regenerateToken, "New token generated")}>
-            Regenerate token
-          </ButtonItem>
-        </PanelSectionRow>
-      </PanelSection>
-
-      <PanelSection title="Connect">
-        <PanelSectionRow>
-          <div style={{ fontSize: "0.75em", opacity: 0.8 }}>
-            From your dev machine:
-            <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-all", fontSize: "0.9em" }}>
-              {`claude mcp add --transport http decky ${status.url} -H "Authorization: Bearer <token>"`}
-            </pre>
+          <div style={{ textAlign: "center", padding: "6px 0" }}>
+            <div style={{ fontFamily: "monospace", fontSize: "1.8em", fontWeight: "bold", wordBreak: "break-all" }}>
+              {status.ip}
+            </div>
+            <div style={{ fontSize: "0.85em", opacity: 0.7 }}>port {status.port}</div>
           </div>
         </PanelSectionRow>
+        <PanelSectionRow>
+          <div style={{ fontSize: "0.8em", opacity: 0.8 }}>Decky-MCP server: {serverState}</div>
+        </PanelSectionRow>
       </PanelSection>
+
+      <PanelSection>
+        <PanelSectionRow>
+          <ButtonItem layout="below" onClick={() => setShowAdvanced((s) => !s)}>
+            {showAdvanced ? "Hide advanced" : "Advanced"}
+          </ButtonItem>
+        </PanelSectionRow>
+      </PanelSection>
+
+      {showAdvanced && (
+        <PanelSection title="Advanced">
+          <PanelSectionRow>
+            <ToggleField
+              label="Enable MCP server"
+              checked={status.enabled}
+              disabled={busy}
+              onChange={(v) => run(() => setEnabled(v), v ? "Server enabled" : "Server disabled")}
+            />
+          </PanelSectionRow>
+          <PanelSectionRow>
+            <ToggleField
+              label="Allow remote input"
+              description={status.input && !status.input.available ? status.input.reason ?? "Unavailable" : undefined}
+              checked={!!status.input?.enabled}
+              disabled={busy || !status.input?.available}
+              onChange={async (v) => {
+                setBusy(true);
+                try {
+                  await setInputEnabled(v);
+                  const input = await getInputSettings();
+                  setStatus((s) => (s ? { ...s, input } : s));
+                } catch (e) {
+                  toaster.toast({ title: "Decky-MCP error", body: String(e) });
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            />
+          </PanelSectionRow>
+          <PanelSectionRow>
+            <ButtonItem layout="below" disabled={busy} onClick={() => run(restartServer, "Server restarted")}>
+              Restart server
+            </ButtonItem>
+          </PanelSectionRow>
+          <PanelSectionRow>
+            <ButtonItem layout="below" disabled={busy} onClick={() => run(regenerateToken, "New token generated")}>
+              Regenerate token
+            </ButtonItem>
+          </PanelSectionRow>
+          <PanelSectionRow>
+            <Field label="Viewer URL and token" focusable onClick={() => setShowToken((s) => !s)}>
+              <span style={{ fontFamily: "monospace", fontSize: "0.8em", wordBreak: "break-all" }}>
+                {showToken ? status.viewer_url : "•••••••• (click to reveal)"}
+              </span>
+            </Field>
+          </PanelSectionRow>
+        </PanelSection>
+      )}
     </>
   );
 }
 
 export default definePlugin(() => {
-  const paired = addEventListener<[remote: string]>("decky_mcp_paired", (remote) => {
-    toaster.toast({ title: "Decky-MCP", body: `Browser paired from ${remote}` });
+  const paired = addEventListener<[remote: string, clientName?: string]>("decky_mcp_paired", (remote, clientName) => {
+    toaster.toast({ title: "Decky-MCP", body: `${clientName ?? "Client"} paired from ${remote}` });
+  });
+  // Registered here rather than in the panel so the toast shows while Quick Access is closed.
+  const pairRequest = addEventListener<[info: { client_name: string; code: string }]>("decky_mcp_pair_request", (info) => {
+    toaster.toast({
+      title: "Decky-MCP pairing request",
+      body: `${info.client_name} wants to pair · code ${info.code}. Open Quick Access → Decky-MCP to approve.`,
+    });
   });
   const inputSession = addEventListener<[remote: string]>("decky_mcp_input_session", (remote) => {
     toaster.toast({ title: "Decky-MCP", body: `Remote input from ${remote}` });
@@ -221,6 +252,7 @@ export default definePlugin(() => {
     icon: <FaPlug />,
     onDismount() {
       removeEventListener("decky_mcp_paired", paired);
+      removeEventListener("decky_mcp_pair_request", pairRequest);
       removeEventListener("decky_mcp_input_session", inputSession);
     },
   };

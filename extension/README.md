@@ -51,7 +51,7 @@ row shows the host once and the state as the description; otherwise the descript
 | --- | --- | --- | --- | --- |
 | not paired | `key` | `not paired` | connect (pairs first) | Connect, `…` |
 | paired, not connected | `vm` | `paired` | connect | Connect, `…` |
-| connecting / pairing | spinner | `connecting…` / `pairing…` | none | none |
+| connecting / pairing | spinner | `connecting…` / `waiting for approval · code 4821` | none | none |
 | connected | `vm-connect` (green) | `connected` | none | Disconnect, `…` |
 | unreachable | `warning` (yellow) | `unreachable` | connect (retries) | Connect, `…` |
 
@@ -72,7 +72,8 @@ you expand or collapse.
   view is visible)
   - **Open screen panel**: the live screen in an editor tab.
   - **Open viewer in browser**: opens `http://host:port/viewer`. The browser is paired on its own:
-    press **Pair a browser** on the device, unless it still has the cookie from an earlier pairing.
+    it shows a **Request access** page and you allow it on the device, unless it still has the
+    cookie from an earlier pairing.
   - **Snapshot to file**: fetches `/frame.jpg` and saves it (default name `screen-<timestamp>.jpg`).
 - **Plugin** (description: `<name> v<version>` of the detected plugin; the tooltip names its folder
   and the directory it deploys to)
@@ -192,14 +193,24 @@ when you choose **Re-pair**.
 1. **Reachability.** The extension calls `GET /health` (no token). If the device does not answer, you
    get one error: *Can't reach <name> at host:port. Is the device on and Decky-MCP enabled?* with
    **Retry** and **Edit device**. Nothing else happens.
-2. **Waiting.** One progress notification: *Pairing with <name>: on the device, open Quick Access →
-   Decky-MCP → Pair a browser. Waiting… 118 s*, with a live countdown and **Cancel**. On the device,
-   open the Quick Access menu (…), choose Decky-MCP and press **Pair a browser**. The extension polls
-   `/pair` every 1.5 s. When the device grants the token, it is stored, the device becomes connected and
-   you see *Paired with <name>* with **Open screen** and **Deploy plugin**.
-3. **Timeout.** After 120 s without a press: *Pairing timed out* with **Try again** and **Enter token
-   manually**. A device whose plugin predates pairing gets **Enter token manually** at once; paste the
-   token shown in its Decky-MCP panel.
+2. **Request.** The extension files `POST /pair/request` with the name *VS Code on <hostname>*
+   (*VSCodium* or *Cursor* in those editors) and gets a 4-digit code.
+3. **Waiting, with no time limit.** One progress notification: *Decky-MCP: Waiting for approval on
+   <name> · code 4821. On the device: Quick Access → Decky-MCP → Approve.* with **Cancel**; the device
+   row says *waiting for approval · code 4821*. The device shows a toast *VS Code on <hostname> wants
+   to pair · code 4821*, and its Decky-MCP panel switches to an *Approve pairing request?* prompt with
+   **Approve** and **Deny**. The extension long-polls `GET /pair/request/{id}?wait=25`. Network errors (the device
+   sleeping, a loader restart) only show *Lost contact with <name>, retrying…*; it keeps trying until
+   you cancel. If the device forgot the request (plugin restarted), it files a new one and shows the
+   new code. **Cancel** withdraws the request (`DELETE /pair/request/{id}`).
+4. **Allowed.** The token is stored, the device becomes connected (the screen panel opens per
+   `decky-mcp.openScreenOnConnect`) and you see *Paired with <name>* with **Open screen** and
+   **Deploy plugin**.
+5. **Denied.** *Pairing denied on <name>* with **Try again**.
+
+A device whose plugin predates pairing requests gets *Update Decky-MCP on <name> to pair* with
+**Enter token manually**; paste the token shown in its Decky-MCP panel. Other failures (for example
+too many pending requests) offer **Try again** and **Enter token manually**.
 
 ### Adding a device
 
@@ -326,9 +337,10 @@ in the workspace). It detects plugins in a temporary workspace (with and without
 depth limit, `node_modules` skipped), checks the build decisions, the staged file set and the exec
 bit, the status bar button and the one-time prompt, and deploys against the fake device: first
 install (loader restart), fast deploy (`restart=plugin`), debug-flagged deploy (watcher reloads),
-full restart, a failing build and auto-deploy on change. It also checks that Connect on an unpaired device starts pairing (fake `/pair`
-answers 403, then a token), the reachability error with Retry, the pairing timeout (with a short
-timeout), the 15 s health check going unreachable and back, Add device, snapshot, Copy MCP URL /
+full restart, a failing build and auto-deploy on change. It also checks that Connect on an unpaired device files a pairing request
+(name, kind, the waiting message and the row's code, then approval), a denied request with Try
+again, waiting through a lost connection and a forgotten request (new code) and Cancel sending
+`DELETE`, the "Update Decky-MCP" path for an older device, the reachability error with Retry, the 15 s health check going unreachable and back, Add device, snapshot, Copy MCP URL /
 token and Open viewer, and the remote input toggle (screen panel message, palette command, status
 bar indicator, unavailable and unsupported devices).
 

@@ -34,7 +34,7 @@ def make_registry() -> ToolRegistry:
 
 async def with_server(fn):
     api = Api(auth=TokenAuth(TOKEN), mcp=McpServer(make_registry(), logging.getLogger("t")), capturer=None,
-              static_dir=None, logger=logging.getLogger("t"), pairing_open=lambda: with_server.pairing)
+              static_dir=None, logger=logging.getLogger("t"))
     runner = web.AppRunner(api.build_app())
     await runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", 0)
@@ -47,8 +47,6 @@ async def with_server(fn):
     finally:
         await runner.cleanup()
 
-
-with_server.pairing = False
 
 
 def rpc(method, params=None, msg_id=1):
@@ -103,7 +101,7 @@ def test_mcp_flow():
     asyncio.run(with_server(run))
 
 
-def test_viewer_token_cookie_and_pairing():
+def test_viewer_token_and_cookie():
     async def run(s, base):
         async with s.get(f"{base}/viewer") as r:
             assert r.status == 401
@@ -114,11 +112,6 @@ def test_viewer_token_cookie_and_pairing():
         # cookie now authorises token-protected routes too
         async with s.get(f"{base}/stream/stats") as r:
             assert r.status == 200
-        s.cookie_jar.clear()
-        with_server.pairing = True
-        async with s.get(f"{base}/viewer", allow_redirects=False) as r:
-            assert r.status == 302 and "decky_mcp_token" in r.headers.get("Set-Cookie", "")
-        with_server.pairing = False
         s.cookie_jar.clear()
         async with s.get(f"{base}/viewer") as r:
             assert r.status == 401

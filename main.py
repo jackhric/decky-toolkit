@@ -16,6 +16,7 @@ from decky_mcp.auth import TokenAuth  # noqa: E402
 from decky_mcp.capture import ScreenCapturer  # noqa: E402
 from decky_mcp.http import Api  # noqa: E402
 from decky_mcp.input.service import InputService  # noqa: E402
+from decky_mcp.pairing import PairingRequest, PairingRequests  # noqa: E402
 from decky_mcp.protocol import McpServer  # noqa: E402
 from decky_mcp.settings import Settings  # noqa: E402
 from decky_mcp.tools import build_registry  # noqa: E402
@@ -66,17 +67,14 @@ def _loader_watchdog() -> None:
     os._exit(0)
 
 
-PAIRING_SECONDS = 120
-
-
 class Plugin:
     settings: Settings
     runner: web.AppRunner | None = None
     capturer: ScreenCapturer | None = None
     input: InputService | None = None
+    pairing: PairingRequests
+    pruner: asyncio.Task | None = None
     last_error: str | None = None
-    pairing_until: float = 0.0
-    pairing_count: int = 0
 
     async def _start_server(self) -> None:
         await self._stop_server()
@@ -88,8 +86,7 @@ class Plugin:
             capturer=self.capturer,
             static_dir=os.path.join(decky.DECKY_PLUGIN_DIR, "static"),
             logger=decky.logger,
-            pairing_open=self._pairing_open,
-            on_paired=self._on_paired,
+            pairing=self.pairing,
             base_url=self._base_url,
             input_service=self.input,
         )
@@ -129,26 +126,26 @@ class Plugin:
 
     # ---- pairing ----
 
-    def _pairing_open(self) -> bool:
-        return time.monotonic() < self.pairing_until
+    def _on_pairing_change(self, event: str, req: PairingRequest | None) -> None:
+        if event == "create" and req is not None:
+            info = {"id": req.id, "code": req.code, "client_name": req.client_name, "client_kind": req.client_kind,
+                    "remote": req.remote}
+            asyncio.ensure_future(decky.emit("decky_mcp_pair_request", info))
+        asyncio.ensure_future(decky.emit("decky_mcp_pair_requests", self.pairing.list()))
 
-    def _pairing_seconds_left(self) -> int:
-        return max(0, int(self.pairing_until - time.monotonic() + 0.999))
+    async def list_pair_requests(self) -> list[dict[str, Any]]:
+        return self.pairing.list()
 
-    async def _on_paired(self, remote: str) -> None:
-        self.pairing_count += 1
-        decky.logger.info("browser paired from %s", remote)
-        await decky.emit("decky_mcp_paired", remote)
+    async def approve_pair_request(self, request_id: str) -> list[dict[str, Any]]:
+        req = self.pairing.approve(request_id)
+        decky.logger.info("pairing: approved %s (%s) from %s", req.client_name, req.client_kind, req.remote)
+        await decky.emit("decky_mcp_paired", req.remote, req.client_name)
+        return self.pairing.list()
 
-    async def start_pairing(self) -> dict[str, Any]:
-        self.pairing_until = time.monotonic() + PAIRING_SECONDS
-        self.pairing_count = 0
-        decky.logger.info("pairing window open for %ss", PAIRING_SECONDS)
-        return await self.get_status()
-
-    async def stop_pairing(self) -> dict[str, Any]:
-        self.pairing_until = 0.0
-        return await self.get_status()
+    async def deny_pair_request(self, request_id: str) -> list[dict[str, Any]]:
+        req = self.pairing.deny(request_id)
+        decky.logger.info("pairing: denied %s (%s) from %s", req.client_name, req.client_kind, req.remote)
+        return self.pairing.list()
 
     async def _on_input_session(self, remote: str) -> None:
         decky.logger.info("input session toast: remote input from %s", remote)
@@ -176,9 +173,7 @@ class Plugin:
             "ip": ip,
             "url": f"{base}/mcp",
             "viewer_url": f"{base}/viewer?token={self.settings.token}",
-            "pair_url": f"{base}/viewer",
-            "pairing_seconds_left": self._pairing_seconds_left(),
-            "pairing_count": self.pairing_count,
+            "pair_requests": len(self.pairing.pending()),
             "stream": self.capturer.stats() if self.capturer else None,
             "input": self.input.status() if self.input else None,
             "error": self.last_error,
@@ -221,6 +216,8 @@ class Plugin:
         decky.logger.info("Decky-MCP starting (python %s)", sys.version.split()[0])
         threading.Thread(target=_loader_watchdog, name="loader-watchdog", daemon=True).start()
         save = lambda: self.settings.save(decky.DECKY_PLUGIN_SETTINGS_DIR)  # noqa: E731
+        self.pairing = PairingRequests(on_change=self._on_pairing_change)
+        self.pruner = asyncio.create_task(self.pairing.run_pruner())
         self.capturer = ScreenCapturer(lambda: self.settings, decky.logger, save_settings=save)
         self.input = InputService(lambda: self.settings, save, decky.logger, on_session=self._on_input_session)
         # The panel mirrors a setting that remote clients usually change, so push changes to it.
@@ -228,6 +225,8 @@ class Plugin:
         await self._start_server()
 
     async def _unload(self) -> None:
+        if self.pruner is not None:
+            self.pruner.cancel()
         await self._stop_server()
         decky.logger.info("Decky-MCP stopped")
 

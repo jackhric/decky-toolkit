@@ -1,11 +1,20 @@
 import * as vscode from 'vscode';
+import { hostname } from 'os';
 import type { PairGrant } from './api';
 import { DeckyClient, HttpError, describeError, sleep } from './client';
 import type { Connection, SavedDevice } from './connection';
 import { editDevice } from './devices';
 
-/** Mutable so tests can shorten them. */
-export const pairingTimings = { timeoutMs: 120_000, pollMs: 1500 };
+/** Mutable so tests can shorten them. There is no overall timeout: pairing waits until approved, denied or cancelled. */
+export const pairingTimings = { waitS: 25, retryMs: 2000 };
+
+type PairOutcome = PairGrant | 'cancelled' | 'denied' | 'unsupported' | { error: string };
+
+function clientName(): string {
+  const app = vscode.env.appName ?? '';
+  const ide = /cursor/i.test(app) ? 'Cursor' : /vscodium/i.test(app) ? 'VSCodium' : 'VS Code';
+  return `${ide} on ${hostname()}`.slice(0, 64);
+}
 
 let screenOpenedThisSession = false;
 
@@ -102,62 +111,92 @@ export async function pair(c: Connection, device: SavedDevice, reachabilityCheck
   }
   c.setReachable(d.id, true);
   c.setBusy(d.id, 'pairing');
-  let grant: PairGrant | 'cancelled' | 'timeout' | 'unsupported';
+  let outcome: PairOutcome;
   try {
-    grant = await pollForGrant(d);
+    outcome = await waitForApproval(c, d);
   } finally {
+    c.setPairingCode(d.id, undefined);
     c.setBusy(d.id, undefined);
   }
-  if (grant === 'cancelled') return false;
-  if (grant === 'unsupported') {
+  if (outcome === 'cancelled') return false;
+  if (outcome === 'unsupported') {
     const choice = await vscode.window.showWarningMessage(
-      `Decky-MCP: ${d.name} runs an older Decky-MCP without pairing. Copy the token from its Decky-MCP panel instead.`,
+      `Decky-MCP: Update Decky-MCP on ${d.name} to pair. Until then, copy the token from its Decky-MCP panel.`,
       'Enter token manually');
     return choice ? enterToken(c, d) : false;
   }
-  if (grant === 'timeout') {
+  if (outcome === 'denied') {
+    const choice = await vscode.window.showWarningMessage(`Decky-MCP: Pairing denied on ${d.name}.`, 'Try again');
+    return choice === 'Try again' ? pair(c, d) : false;
+  }
+  if ('error' in outcome) {
     const choice = await vscode.window.showWarningMessage(
-      `Decky-MCP: Pairing timed out. Nobody pressed "Pair a browser" on ${d.name} within ${Math.ceil(pairingTimings.timeoutMs / 1000)} s.`,
-      'Try again', 'Enter token manually');
+      `Decky-MCP: Pairing with ${d.name} failed: ${outcome.error}`, 'Try again', 'Enter token manually');
     if (choice === 'Try again') return pair(c, d);
     if (choice === 'Enter token manually') return enterToken(c, d);
     return false;
   }
-  await c.setTokenFor(d, grant.token);
+  await c.setTokenFor(d, outcome.token);
   await c.markConnected(d.id);
   connected(c, d, 'Paired with');
   return true;
 }
 
-function pollForGrant(d: SavedDevice): Thenable<PairGrant | 'cancelled' | 'timeout' | 'unsupported'> {
+/** Files a pairing request and long-polls it; a request the device forgot is filed again (new code). */
+function waitForApproval(c: Connection, d: SavedDevice): Thenable<PairOutcome> {
   const client = new DeckyClient(d);
-  const { timeoutMs, pollMs } = pairingTimings;
   return vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: `Pairing with ${d.name}`, cancellable: true },
+    { location: vscode.ProgressLocation.Notification, title: 'Decky-MCP', cancellable: true },
     async (progress, token) => {
-      const start = Date.now();
       const abort = new AbortController();
       const cancelSub = token.onCancellationRequested(() => abort.abort());
-      const report = () => {
-        const left = Math.max(0, Math.ceil((timeoutMs - (Date.now() - start)) / 1000));
-        progress.report({ message: `on the device, open Quick Access → Decky-MCP → Pair a browser. Waiting… ${left} s` });
-      };
-      report();
-      const ticker = setInterval(report, 1000);
+      const pause = () => sleep(pairingTimings.retryMs, abort.signal).catch(() => undefined);
+      let id: string | undefined;
+      let code: string | undefined;
+      const waiting = () => `Waiting for approval on ${d.name} · code ${code}. On the device: Quick Access → Decky-MCP → Approve.`;
+      const lostContact = (e: unknown) =>
+        progress.report({ message: `Lost contact with ${d.name} (${describeError(e)}), retrying…${code ? ` Code ${code}.` : ''}` });
       try {
-        while (!abort.signal.aborted && Date.now() - start < timeoutMs) {
-          try {
-            const r = await client.pair();
-            if (r !== 'closed') return r;
-          } catch {
-            // transient (loader restarting); keep polling
+        while (!abort.signal.aborted) {
+          if (!id) {
+            let created;
+            try {
+              created = await client.requestPairing(clientName());
+            } catch (e) {
+              if (e instanceof HttpError) return { error: describeError(e) };
+              lostContact(e);
+              await pause();
+              continue;
+            }
+            if (created === 'unsupported') return 'unsupported';
+            ({ id, code } = created);
+            c.setPairingCode(d.id, code);
+            progress.report({ message: waiting() });
           }
-          await sleep(Math.min(pollMs, Math.max(0, timeoutMs - (Date.now() - start))), abort.signal).catch(() => undefined);
+          let r;
+          try {
+            r = await client.pollPairing(id, pairingTimings.waitS, abort.signal);
+          } catch (e) {
+            if (abort.signal.aborted) break;
+            lostContact(e);
+            await pause();
+            continue;
+          }
+          if (r === 'gone') {
+            id = undefined;
+            continue;
+          }
+          progress.report({ message: waiting() });
+          if (r.status === 'denied') return 'denied';
+          if (r.status === 'approved') {
+            if (r.token && r.url) return { token: r.token, url: r.url, api_version: r.api_version ?? 1 };
+            return { error: 'the device approved the request but the token was already handed out' };
+          }
         }
-        return abort.signal.aborted ? 'cancelled' as const : 'timeout' as const;
+        return 'cancelled';
       } finally {
-        clearInterval(ticker);
         cancelSub.dispose();
+        if (abort.signal.aborted && id) void client.cancelPairing(id).catch(() => undefined);
       }
     });
 }

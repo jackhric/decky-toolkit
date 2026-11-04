@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import tempfile
-from typing import Awaitable, Callable
+from typing import Callable
 
 from aiohttp import web
 
@@ -13,6 +13,7 @@ from .auth import TokenAuth
 from .capture import BOUNDARY, CaptureUnavailable, ScreenCapturer
 from .input.ei import EiError
 from .input.service import InputDisabled, InputService, InputUnavailable
+from .pairing import MAX_WAIT_SECONDS, POLL_AFTER_MS, PairingLimit, PairingRequests
 from .protocol import SERVER_INFO, McpServer
 from .tools import plugins
 from .tools.system import list_plugins, schedule_loader_restart
@@ -22,8 +23,6 @@ LOG_KEEPALIVE_SECONDS = 15.0
 INPUT_REFUSED = 4003
 FOCUS_REFRESH_SECONDS = 3.0
 
-PairingOpen = Callable[[], bool]
-OnPaired = Callable[[str], Awaitable[None]]
 BaseUrl = Callable[[], str]
 
 
@@ -33,16 +32,14 @@ def _error(status: int, message: str) -> web.Response:
 
 class Api:
     def __init__(self, *, auth: TokenAuth, mcp: McpServer, capturer: ScreenCapturer | None, static_dir: str | None,
-                 logger: logging.Logger, pairing_open: PairingOpen | None = None, on_paired: OnPaired | None = None,
-                 base_url: BaseUrl | None = None, log_keepalive: float = LOG_KEEPALIVE_SECONDS,
+                 logger: logging.Logger, pairing: PairingRequests | None = None, base_url: BaseUrl | None = None, log_keepalive: float = LOG_KEEPALIVE_SECONDS,
                  input_service: InputService | None = None):
         self.auth = auth
         self.mcp = mcp
         self.capturer = capturer
         self.static_dir = static_dir
         self.log = logger
-        self.pairing_open = pairing_open or (lambda: False)
-        self.on_paired = on_paired
+        self.pairing = pairing or PairingRequests()
         self.base_url = base_url
         self.log_keepalive = log_keepalive
         self.input = input_service
@@ -52,7 +49,10 @@ class Api:
         app.add_routes([
             web.get("/", self.handle_root),
             web.get("/health", self.handle_health),
-            web.get("/pair", self.handle_pair),
+            web.post("/pair/request", self.handle_pair_request),
+            web.get("/pair/request/{id}", self.handle_pair_poll),
+            web.delete("/pair/request/{id}", self.handle_pair_cancel),
+            web.get("/pair/requests", self.handle_pair_list),
             web.get("/viewer", self.handle_viewer),
             web.get("/stream.mjpeg", self.handle_stream),
             web.get("/frame.jpg", self.handle_frame),
@@ -80,20 +80,72 @@ class Api:
     async def handle_health(self, _request: web.Request) -> web.Response:
         return web.json_response({"ok": True, **SERVER_INFO, "api_version": API_VERSION, "tools": len(self.mcp.tools)})
 
-    async def handle_pair(self, request: web.Request) -> web.Response:
-        # Exempt from the auth middleware, so apply its Origin guard here: otherwise any web page a
-        # LAN browser has open during the window could fetch the token.
+    # ---- pairing ----
+
+    def _foreign_origin(self, request: web.Request) -> web.Response | None:
+        # The request routes skip the auth middleware, so apply its Origin guard here: otherwise any
+        # web page a LAN browser has open could file requests or read an approved token.
         origin = request.headers.get("Origin")
         if origin and not self.auth.origin_allowed(origin, request.host):
             return _error(403, "origin not allowed")
-        if not self.pairing_open():
-            return _error(403, "pairing closed")
-        self.log.info("pairing: granted token to %s", request.remote)
-        if self.on_paired:
-            await self.on_paired(request.remote or "?")
-        url = self.base_url() if self.base_url else f"{request.scheme}://{request.host}"
-        return web.json_response({"token": self.auth.token, "url": url, "api_version": API_VERSION},
+        return None
+
+    async def handle_pair_request(self, request: web.Request) -> web.Response:
+        if denied := self._foreign_origin(request):
+            return denied
+        try:
+            body = await request.json()
+        except ValueError:
+            return _error(400, "expected a JSON object")
+        if not isinstance(body, dict):
+            return _error(400, "expected a JSON object")
+        try:
+            req = self.pairing.create(body.get("client_name"), body.get("client_kind", "other"), request.remote or "?")
+        except ValueError as e:
+            return _error(400, str(e))
+        except PairingLimit as e:
+            return _error(429, str(e))
+        self.log.info("pairing: request %s from %s (%s, %s)", req.code, req.remote, req.client_name, req.client_kind)
+        return web.json_response({"id": req.id, "code": req.code, "poll_after_ms": POLL_AFTER_MS}, status=201,
                                  headers={"Cache-Control": "no-store"})
+
+    async def handle_pair_poll(self, request: web.Request) -> web.StreamResponse:
+        if denied := self._foreign_origin(request):
+            return denied
+        request_id = request.match_info["id"]
+        try:
+            wait = max(0.0, min(MAX_WAIT_SECONDS, float(request.query.get("wait", 0))))
+        except ValueError:
+            return _error(400, "wait must be a number of seconds")
+        req = self.pairing.touch(request_id)
+        if req is not None and wait:
+            await self.pairing.wait(req, wait)
+        req = self.pairing.touch(request_id)
+        if req is None:
+            return _error(404, "unknown or expired pairing request")
+        no_store = {"Cache-Control": "no-store"}
+        if request.query.get("cookie") == "1" and req.status == "approved":
+            if not self.pairing.claim_cookie(req):
+                return _error(410, "this approval was already used to set a cookie")
+            res = web.HTTPFound("/viewer", headers=no_store)
+            self.auth.grant_cookie(res)
+            raise res
+        if self.pairing.claim_token(req):
+            self.log.info("pairing: delivered token to %s (%s)", req.remote, req.client_name)
+            url = self.base_url() if self.base_url else f"{request.scheme}://{request.host}"
+            return web.json_response({"status": "approved", "token": self.auth.token, "url": url,
+                                      "api_version": API_VERSION}, headers=no_store)
+        return web.json_response({"status": req.status}, headers=no_store)
+
+    async def handle_pair_cancel(self, request: web.Request) -> web.Response:
+        if denied := self._foreign_origin(request):
+            return denied
+        if not self.pairing.cancel(request.match_info["id"]):
+            return _error(404, "no pending pairing request with that id")
+        return web.json_response({"cancelled": True})
+
+    async def handle_pair_list(self, _request: web.Request) -> web.Response:
+        return web.json_response(self.pairing.list())
 
     # ---- viewer ----
 
@@ -106,21 +158,12 @@ class Api:
             res = web.HTTPFound("/viewer")
             self.auth.grant_cookie(res)
             raise res
-        denied = self.auth.check(request)
-        if denied and self.pairing_open():
-            # Pairing window opened from the Decky panel: hand this browser the cookie, no token typing.
-            self.log.info("pairing: granted viewer cookie to %s", request.remote)
-            if self.on_paired:
-                await self.on_paired(request.remote or "?")
-            res = web.HTTPFound("/viewer")
-            self.auth.grant_cookie(res)
-            raise res
-        if denied:
-            return web.Response(
-                status=401, content_type="text/html",
-                text="<p>Unauthorized. Either open <code>/viewer?token=&lt;token&gt;</code> once, or press "
-                     "<b>Pair a browser</b> in the Decky-MCP panel and reload this page within 120 seconds.</p>",
-            )
+        if self.auth.check(request):
+            # Same URL either way, so a bookmark keeps working once this browser has been approved.
+            if self.static_dir:
+                return web.FileResponse(os.path.join(self.static_dir, "pair.html"), status=401,
+                                        headers={"Cache-Control": "no-store"})
+            return web.Response(status=401, text="Unauthorized: open /viewer?token=<token> or request access")
         if not self.static_dir:
             return web.Response(status=404, text="viewer not bundled")
         return web.FileResponse(os.path.join(self.static_dir, "viewer.html"))
@@ -213,9 +256,8 @@ class Api:
         ws = web.WebSocketResponse(heartbeat=20, max_msg_size=64 * 1024)
         await ws.prepare(request)
         # Refuse after the upgrade so browsers see the close code instead of a generic failure.
-        if not svc.enabled or self.pairing_open():
-            reason = "remote input is disabled" if not svc.enabled else "pairing window is open"
-            await ws.close(code=INPUT_REFUSED, message=reason.encode())
+        if not svc.enabled:
+            await ws.close(code=INPUT_REFUSED, message=b"remote input is disabled")
             return ws
         session = svc.open_session(request.remote or "?")
 

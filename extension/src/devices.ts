@@ -194,7 +194,7 @@ export async function copyViewerUrl(conn: Connection, arg?: unknown): Promise<vo
   if (!d) return;
   await vscode.env.clipboard.writeText(viewerUrl(d));
   void vscode.window.showInformationMessage(
-    `Decky-MCP: copied ${viewerUrl(d)}. Open it in a browser and press "Pair a browser" on the device to watch there.`);
+    `Decky-MCP: copied ${viewerUrl(d)}. Open it in a browser, press "Request access" and allow it on the device to watch there.`);
 }
 
 /** The `…` overflow of a device row: everything except the row's primary action. */

@@ -266,9 +266,9 @@ def test_gamepad_removed_after_idle(tmp_path):
     asyncio.run(run())
 
 
-async def with_server(fn, svc, pairing=False):
+async def with_server(fn, svc):
     api = Api(auth=TokenAuth(TOKEN), mcp=McpServer(ToolRegistry(), LOG), capturer=None, static_dir=None, logger=LOG,
-              pairing_open=lambda: pairing, input_service=svc)
+              input_service=svc)
     runner = web.AppRunner(api.build_app())
     await runner.setup()
     await web.TCPSite(runner, "127.0.0.1", 0).start()
@@ -304,7 +304,7 @@ def test_input_settings_bearer_and_cookie(tmp_path):
     asyncio.run(with_server(run, svc))
 
 
-def test_input_ws_refused_when_disabled_or_pairing(tmp_path):
+def test_input_ws_refused_when_disabled(tmp_path):
     svc = make_service(tmp_path, enabled=False)
 
     async def refused(s, base):
@@ -315,8 +315,6 @@ def test_input_ws_refused_when_disabled_or_pairing(tmp_path):
             msg = await ws.receive()
             assert msg.type == WSMsgType.CLOSE and msg.data == 4003
     asyncio.run(with_server(refused, svc))
-    svc.t.settings.input_enabled = True
-    asyncio.run(with_server(refused, svc, pairing=True))
 
 
 async def recv(ws):

@@ -5,7 +5,9 @@ import type {
   JsonRpcResponse,
   LogQuery,
   LogTail,
-  PairGrant,
+  PairClientKind,
+  PairPoll,
+  PairRequestCreated,
   PluginInfo,
   RestartMode,
   StreamStats,
@@ -124,15 +126,33 @@ export class DeckyClient {
     return this.json<Health>('/health', { timeoutMs });
   }
 
-  /** `closed` while no pairing window is open; `unsupported` when the device predates `/pair`. */
-  async pair(): Promise<PairGrant | 'closed' | 'unsupported'> {
-    const res = await this.fetch('/pair', { timeoutMs: 5000 });
+  /** `unsupported` when the device predates pairing requests. */
+  async requestPairing(clientName: string, clientKind: PairClientKind = 'vscode'): Promise<PairRequestCreated | 'unsupported'> {
+    const res = await this.fetch('/pair/request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_name: clientName, client_kind: clientKind }),
+      timeoutMs: 5000,
+    });
     const text = await res.text();
-    if (res.ok) return JSON.parse(text) as PairGrant;
-    if (res.status === 403) return 'closed';
-    // Without the route the auth middleware answers 401 before routing.
-    if (res.status === 404 || res.status === 401) return 'unsupported';
-    throw new HttpError(res.status, text, '/pair');
+    if (res.ok) return JSON.parse(text) as PairRequestCreated;
+    // Older plugins: the auth middleware answers 401 before routing; very old ones may 404/405.
+    if (res.status === 401 || res.status === 404 || res.status === 405) return 'unsupported';
+    throw new HttpError(res.status, text, '/pair/request');
+  }
+
+  /** Long-polls one request; `gone` once the device forgot it (expired, or the plugin restarted). */
+  async pollPairing(id: string, waitS = 25, signal?: AbortSignal): Promise<PairPoll | 'gone'> {
+    const path = `/pair/request/${encodeURIComponent(id)}?wait=${waitS}`;
+    const res = await this.fetch(path, { timeoutMs: (waitS + 10) * 1000, signal });
+    const text = await res.text();
+    if (res.status === 404) return 'gone';
+    if (!res.ok) throw new HttpError(res.status, text, path);
+    return JSON.parse(text) as PairPoll;
+  }
+
+  async cancelPairing(id: string): Promise<void> {
+    await (await this.fetch(`/pair/request/${encodeURIComponent(id)}`, { method: 'DELETE', timeoutMs: 5000 })).text();
   }
 
   streamStats(): Promise<StreamStats> {

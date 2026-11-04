@@ -111,7 +111,7 @@
     abort = new AbortController();
     try {
       const res = await fetch('/stream.mjpeg', { signal: abort.signal, cache: 'no-store' });
-      if (res.status === 401) { show('Unauthorized. Reopen this page with ?token=<token> from the Decky-MCP panel.'); return; }
+      if (res.status === 401) { show('Unauthorized. Reload this page to request access again.'); return; }
       if (!res.ok || !res.body) { show('Stream error ' + res.status + ': ' + await res.text()); return; }
       show(''); dot.classList.add('live');
       const reader = res.body.getReader();

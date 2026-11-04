@@ -1,4 +1,4 @@
-"""REST routes: /pair, /logs, /plugins, /stream/settings. Run with: ./scripts/test.sh"""
+"""REST routes: /pair/request, /viewer, /logs, /plugins, /stream/settings. Run with: ./scripts/test.sh"""
 import asyncio
 import io
 import json
@@ -13,11 +13,12 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
-from aiohttp import ClientSession, ClientTimeout, FormData, web  # noqa: E402
+from aiohttp import ClientSession, ClientTimeout, CookieJar, FormData, web  # noqa: E402
 
 from decky_mcp.auth import TOKEN_COOKIE, TokenAuth  # noqa: E402
 from decky_mcp.capture import ScreenCapturer  # noqa: E402
 from decky_mcp.http import Api  # noqa: E402
+from decky_mcp.pairing import PairingRequests  # noqa: E402
 from decky_mcp.protocol import McpServer  # noqa: E402
 from decky_mcp.settings import Settings  # noqa: E402
 from decky_mcp.tools import ToolRegistry, build_registry  # noqa: E402
@@ -34,26 +35,19 @@ def decky_home(tmp_path, monkeypatch):
     return tmp_path
 
 
-class State:
-    pairing = False
-    paired: list[str] = []
+STATIC = str(Path(__file__).resolve().parents[1] / "static")
 
 
 async def with_server(fn, capturer=None, **api_kwargs):
-    State.paired = []
-
-    async def on_paired(remote: str) -> None:
-        State.paired.append(remote)
-
-    api = Api(auth=TokenAuth(TOKEN), mcp=McpServer(ToolRegistry(), LOG), capturer=capturer, static_dir=None, logger=LOG,
-              pairing_open=lambda: State.pairing, on_paired=on_paired, base_url=lambda: "http://10.1.2.3:8765",
-              **api_kwargs)
+    api_kwargs.setdefault("static_dir", None)
+    api = Api(auth=TokenAuth(TOKEN), mcp=McpServer(ToolRegistry(), LOG), capturer=capturer, logger=LOG,
+              base_url=lambda: "http://10.1.2.3:8765", **api_kwargs)
     runner = web.AppRunner(api.build_app())
     await runner.setup()
     await web.TCPSite(runner, "127.0.0.1", 0).start()
     base = f"http://127.0.0.1:{runner.addresses[0][1]}"
     try:
-        async with ClientSession(timeout=ClientTimeout(total=10)) as s:
+        async with ClientSession(timeout=ClientTimeout(total=10), cookie_jar=CookieJar(unsafe=True)) as s:
             await fn(s, base)
     finally:
         await runner.cleanup()
@@ -69,23 +63,110 @@ def write_log(home: Path, plugin: str, name: str, lines: list[str], mtime: float
     return p
 
 
-def test_pair_open_and_closed():
+VS = {"client_name": "VS Code on box", "client_kind": "vscode"}
+
+
+def test_pair_request_approve_delivers_token_once():
+    pairing = PairingRequests()
+
     async def run(s, base):
-        State.pairing = False
         async with s.get(f"{base}/pair") as r:
-            assert r.status == 403 and await r.json() == {"error": "pairing closed"}
-        State.pairing = True
-        async with s.get(f"{base}/pair", headers={"Origin": "http://evil.example"}) as r:
+            assert r.status == 404, "the timed pairing window is gone"
+        async with s.post(f"{base}/pair/request", json=VS, headers={"Origin": "http://evil.example"}) as r:
             assert r.status == 403
-        async with s.get(f"{base}/pair") as r:
+        async with s.post(f"{base}/pair/request", json=VS) as r:
+            assert r.status == 201
+            body = await r.json()
+        assert set(body) == {"id", "code", "poll_after_ms"} and len(body["code"]) == 4
+        rid = body["id"]
+        async with s.get(f"{base}/pair/request/{rid}") as r:
+            assert await r.json() == {"status": "pending"}
+        async with s.get(f"{base}/pair/requests") as r:
+            assert r.status == 401
+        async with s.get(f"{base}/pair/requests", headers=H) as r:
+            [listed] = await r.json()
+        assert (listed["client_name"], listed["code"], listed["remote"]) == ("VS Code on box", body["code"], "127.0.0.1")
+
+        poll = asyncio.ensure_future(s.get(f"{base}/pair/request/{rid}?wait=5"))
+        await asyncio.sleep(0.2)
+        assert not poll.done(), "a long poll waits for the decision"
+        pairing.approve(rid)
+        async with await asyncio.wait_for(poll, 2) as r:
+            assert await r.json() == {"status": "approved", "token": TOKEN, "url": "http://10.1.2.3:8765", "api_version": 1}
+        async with s.get(f"{base}/pair/request/{rid}") as r:
+            assert await r.json() == {"status": "approved"}
+        async with s.get(f"{base}/pair/request/nope") as r:
+            assert r.status == 404
+        async with s.post(f"{base}/pair/request", json={"client_name": "", "client_kind": "vscode"}) as r:
+            assert r.status == 400
+        async with s.post(f"{base}/pair/request", json={"client_name": "x", "client_kind": "toaster"}) as r:
+            assert r.status == 400
+        async with s.post(f"{base}/pair/request", data=b"nope") as r:
+            assert r.status == 400
+        async with s.get(f"{base}/pair/request/{rid}?wait=soon") as r:
+            assert r.status == 400
+    asyncio.run(with_server(run, pairing=pairing))
+
+
+def test_pair_request_deny_cancel_and_limits():
+    pairing = PairingRequests()
+
+    async def run(s, base):
+        async with s.post(f"{base}/pair/request", json=VS) as r:
+            rid = (await r.json())["id"]
+        poll = asyncio.ensure_future(s.get(f"{base}/pair/request/{rid}?wait=5"))
+        await asyncio.sleep(0.1)
+        pairing.deny(rid)
+        async with await asyncio.wait_for(poll, 2) as r:
+            assert await r.json() == {"status": "denied"}
+        async with s.get(f"{base}/pair/request/{rid}?cookie=1", allow_redirects=False) as r:
+            assert await r.json() == {"status": "denied"}
+
+        async with s.post(f"{base}/pair/request", json=VS) as r:
+            rid = (await r.json())["id"]
+        poll = asyncio.ensure_future(s.get(f"{base}/pair/request/{rid}?wait=5"))
+        await asyncio.sleep(0.1)
+        async with s.delete(f"{base}/pair/request/{rid}") as r:
             assert r.status == 200
-            assert await r.json() == {"token": TOKEN, "url": "http://10.1.2.3:8765", "api_version": 1}
-        assert State.paired == ["127.0.0.1"]
-        State.pairing = False
-        async with s.get(f"{base}/pair") as r:
-            assert r.status == 403
-        assert len(State.paired) == 1
-    asyncio.run(with_server(run))
+        async with await asyncio.wait_for(poll, 2) as r:
+            assert r.status == 404, "cancelling wakes the long poll"
+        async with s.delete(f"{base}/pair/request/{rid}") as r:
+            assert r.status == 404
+
+        async with s.post(f"{base}/pair/request", json={**VS, "client_name": "a"}) as r:
+            assert r.status == 201
+        async with s.post(f"{base}/pair/request", json={**VS, "client_name": "b"}) as r:
+            assert r.status == 201
+        async with s.post(f"{base}/pair/request", json={**VS, "client_name": "c"}) as r:
+            assert r.status == 429
+        async with s.post(f"{base}/pair/request", json={**VS, "client_name": "b"}) as r:
+            assert r.status == 201, "the same client replaces its own request"
+        assert sorted(r.client_name for r in pairing.pending()) == ["a", "b"]
+    asyncio.run(with_server(run, pairing=pairing))
+
+
+def test_pair_request_page_and_cookie_redirect():
+    pairing = PairingRequests()
+
+    async def run(s, base):
+        async with s.get(f"{base}/viewer") as r:
+            assert r.status == 401
+            page = await r.text()
+        assert "/pair/request" in page and "<form" in page
+        async with s.post(f"{base}/pair/request", json={"client_name": "Firefox on Linux", "client_kind": "browser"}) as r:
+            rid = (await r.json())["id"]
+        async with s.get(f"{base}/pair/request/{rid}?cookie=1", allow_redirects=False) as r:
+            assert await r.json() == {"status": "pending"}
+        pairing.approve(rid)
+        async with s.get(f"{base}/pair/request/{rid}?cookie=1", allow_redirects=False) as r:
+            assert r.status == 302 and r.headers["Location"] == "/viewer"
+            assert TOKEN_COOKIE in r.headers.get("Set-Cookie", "")
+        async with s.get(f"{base}/viewer") as r:
+            assert r.status == 200 and "Decky-MCP Screen" in await r.text()
+        s.cookie_jar.clear()
+        async with s.get(f"{base}/pair/request/{rid}?cookie=1", allow_redirects=False) as r:
+            assert r.status == 410, "an approval sets a cookie only once"
+    asyncio.run(with_server(run, pairing=pairing, static_dir=STATIC))
 
 
 def test_logs_tail_plugin(decky_home):

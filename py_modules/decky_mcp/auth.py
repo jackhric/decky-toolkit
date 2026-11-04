@@ -6,8 +6,10 @@ from aiohttp import web
 
 TOKEN_COOKIE = "decky_mcp_token"
 COOKIE_MAX_AGE = 30 * 86400
-# Routes that are public or do their own token handling (viewer accepts ?token= and pairing).
-SELF_AUTH_PATHS = frozenset({"/", "/health", "/viewer", "/pair"})
+# Routes that are public or do their own token handling (viewer accepts ?token=). The removed
+# timed-window `/pair` stays listed so old clients get a plain 404 instead of a 401.
+SELF_AUTH_PATHS = frozenset({"/", "/health", "/viewer", "/pair", "/pair/request"})
+PAIR_REQUEST_PREFIX = "/pair/request/"
 
 
 class TokenAuth:
@@ -46,7 +48,7 @@ class TokenAuth:
     def middleware(self):
         @web.middleware
         async def auth_middleware(request: web.Request, handler):
-            if request.path not in SELF_AUTH_PATHS:
+            if request.path not in SELF_AUTH_PATHS and not request.path.startswith(PAIR_REQUEST_PREFIX):
                 denied = self.check(request)
                 if denied:
                     return denied

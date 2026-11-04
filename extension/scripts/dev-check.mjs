@@ -218,9 +218,10 @@ await check('MCP tools/call loader_log via client', async () => {
 await check('planned routes probe (informational)', async () => {
   const c = new DeckyClient({ host, port }, token);
   const probe = async (p, init) => (await c.fetch(p, { timeoutMs: 5000, ...init }).then(r => { r.body?.cancel(); return r.status; }));
-  const pair = await new DeckyClient({ host, port }).pair();
+  // Probes without filing a request, so nothing shows up under the device's Pairing requests.
+  const pair = await new DeckyClient({ host, port }).pollPairing('dev-check-unknown', 0);
   const stream = await probe('/logs/stream?tail=1', { headers: { Accept: 'text/event-stream' } });
-  return `/pair → ${typeof pair === 'string' ? pair : 'granted'}, /logs/stream → ${stream}, /logs/tail → ${await probe('/logs/tail?tail=1')}, /plugins → ${await probe('/plugins')}`;
+  return `/pair/request/<unknown> → ${typeof pair === 'string' ? pair : pair.status}, /pair/requests → ${await probe('/pair/requests')}, /logs/stream → ${stream}, /logs/tail → ${await probe('/logs/tail?tail=1')}, /plugins → ${await probe('/plugins')}`;
 });
 
 await check('SSE parser', async () => {
