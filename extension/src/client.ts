@@ -138,6 +138,12 @@ export class DeckyClient {
     return this.json<StreamStats>('/stream/stats', { timeoutMs: 5000 });
   }
 
+  async frame(): Promise<Uint8Array> {
+    const res = await this.fetch('/frame.jpg', { timeoutMs: 10000 });
+    if (!res.ok) throw new HttpError(res.status, await res.text(), '/frame.jpg');
+    return new Uint8Array(await res.arrayBuffer());
+  }
+
   async rpc<T>(method: string, params?: Record<string, unknown>, timeoutMs = 30000): Promise<T> {
     const id = ++this.rpcId;
     const reply = await this.json<JsonRpcResponse<T>>('/mcp', {

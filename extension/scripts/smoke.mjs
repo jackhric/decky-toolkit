@@ -14,7 +14,7 @@ const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
 const outfile = path.join(root, 'out', 'smoke.cjs');
 await esbuild.build({
   stdin: {
-    contents: "export * from './src/extension'; export * from './src/deviceTree'; export * from './src/pluginsTree';",
+    contents: "export * from './src/extension'; export * from './src/actionsTree'; export * from './src/pluginsTree';",
     resolveDir: root,
     loader: 'ts',
   },
@@ -28,7 +28,7 @@ await esbuild.build({
 
 const calls = {
   treeViews: [], treeProviders: [], webviewProviders: [], commands: new Map(), context: new Map(), statusItems: [],
-  panels: [], progress: [], messages: [], statusMessages: [], clipboard: [], unexpectedErrors: [],
+  panels: [], progress: [], messages: [], statusMessages: [], clipboard: [], unexpectedErrors: [], opened: [], written: [], saveDialogs: [],
 };
 
 class EventEmitter {
@@ -50,14 +50,17 @@ class ThemeColor { constructor(id) { this.id = id; } }
 class MarkdownString { value = ''; appendMarkdown(s) { this.value += s; return this; } }
 const Uri = {
   parse: s => ({ toString: () => s, path: new URL(s).pathname }),
+  file: p => ({ toString: () => `file://${p}`, path: p, fsPath: p }),
   joinPath: (u, ...p) => ({ toString: () => [u.toString(), ...p].join('/'), path: [u.path ?? '', ...p].join('/') }),
 };
+const files = new Map();
 
 // UI answers, replaced per check. Every message is logged; an unexpected error message fails the run.
 const ui = {};
 const resetUi = () => Object.assign(ui, {
   error: m => { calls.unexpectedErrors.push(m); },
   warning: () => undefined, info: () => undefined, quickPick: () => undefined, inputBox: () => undefined, onProgress: () => undefined,
+  saveDialog: () => undefined,
 });
 resetUi();
 const say = kind => async (m, ...rest) => {
@@ -69,6 +72,7 @@ const say = kind => async (m, ...rest) => {
 const settings = { host: '10.1.2.3', port: 8765, pluginDirName: '' };
 const configEmitter = new EventEmitter();
 const noop = async () => undefined;
+const noopEvent = () => new Disposable();
 const vscode = {
   EventEmitter, Disposable, TreeItem, ThemeIcon, ThemeColor, MarkdownString, Uri,
   TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
@@ -110,6 +114,7 @@ const vscode = {
     showInputBox: async opts => ui.inputBox(opts),
     showQuickPick: async (items, opts) => ui.quickPick(await items, opts),
     showOpenDialog: noop,
+    showSaveDialog: async opts => { calls.saveDialogs.push(opts); return ui.saveDialog(opts); },
     setStatusBarMessage: m => { calls.statusMessages.push(m); return new Disposable(); },
     withProgress: (o, fn) => {
       const entry = { title: o.title, messages: [] };
@@ -138,11 +143,16 @@ const vscode = {
       },
     }),
     onDidChangeConfiguration: configEmitter.event,
+    onDidChangeWorkspaceFolders: new EventEmitter().event,
+    createFileSystemWatcher: () => ({ onDidCreate: noopEvent, onDidDelete: noopEvent, onDidChange: noopEvent, dispose() {} }),
     workspaceFolders: undefined,
-    fs: { readFile: async () => { throw new vscode.FileSystemError('nope'); } },
+    fs: {
+      readFile: async u => { if (files.has(u.toString())) return files.get(u.toString()); throw new vscode.FileSystemError('nope'); },
+      writeFile: async (u, data) => { calls.written.push({ uri: u.toString(), data }); },
+    },
     asRelativePath: p => String(p),
   },
-  env: { asExternalUri: async u => u, openExternal: noop, clipboard: { writeText: async t => { calls.clipboard.push(t); } } },
+  env: { asExternalUri: async u => u, openExternal: async u => { calls.opened.push(u.toString()); return true; }, clipboard: { writeText: async t => { calls.clipboard.push(t); } } },
 };
 
 const realLoad = Module._load;
@@ -175,6 +185,7 @@ const plugins = [
   { dir: 'romm-tender', name: 'Tender', author: 'x', flags: [], api_version: 1, version: '0.33.0', has_backend: true },
 ];
 const device = { up: true, pairQueue: [] };
+const frameJpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 0xff, 0xd9]);
 const fetched = [];
 globalThis.fetch = async (url, init = {}) => {
   const u = new URL(url);
@@ -191,6 +202,9 @@ globalThis.fetch = async (url, init = {}) => {
   if (auth !== 'Bearer fake-token') return new Response('unauthorized', { status: 401 });
   if (u.pathname === '/stream/stats') return json(stats);
   if (u.pathname === '/plugins') return json(plugins);
+  if (u.pathname === '/frame.jpg') return new Response(frameJpeg, { headers: { 'content-type': 'image/jpeg' } });
+  const reload = /^\/plugins\/([^/]+)\/reload$/.exec(u.pathname);
+  if (reload && init.method === 'POST') return json({ ok: true, dir: decodeURIComponent(reload[1]) });
   return new Response('not found', { status: 404 });
 };
 
@@ -250,64 +264,106 @@ await ext.activate(ctx);
 await settle();
 
 const tree = id => calls.treeViews.find(t => t.id === id);
-const deviceProvider = () => tree('decky-mcp.device').provider;
+const actionsProvider = () => tree('decky-mcp.actions').provider;
 const pluginsProvider = () => tree('decky-mcp.plugins').provider;
 const devicesProvider = () => tree('decky-mcp.devices').provider;
-const unifiedProvider = () => tree('decky-mcp.unified').provider;
 const status = () => calls.statusItems[0].text;
 const seedId = () => globalState.get('decky-mcp.devices')[0].id;
+const titleMenu = view => pkg.contributes.menus['view/title'].filter(m => evalWhen(m.when, new Map([...calls.context, ['view', view]]))).map(m => m.command);
+const dupes = list => list.filter((x, i) => list.indexOf(x) !== i);
 
-const fired = new Map();
-for (const t of calls.treeViews) t.provider.onDidChangeTreeData(() => fired.set(t.id, (fired.get(t.id) ?? 0) + 1));
-async function switchTo(layout) {
-  fired.clear();
-  const contextSets = [];
-  ui.quickPick = items => { contextSets.push(items.map(i => i.id)); return items.find(i => i.id === layout); };
-  await run('decky-mcp.switchLayout');
-  await settle();
-  assert.equal(settings.sidebarLayout, layout);
-  assert.equal(calls.context.get('decky-mcp.layout'), layout);
-  assert.deepEqual(contextSets[0], ['devices-first', 'unified', 'classic']);
-  for (const t of calls.treeViews) assert.ok(fired.get(t.id) > 0, `${t.id} not refreshed`);
-  return `setting=${layout}, context decky-mcp.layout=${layout}, refreshed ${[...fired.keys()].join(', ')}`;
+const EXPECTED_ACTIONS = {
+  Screen: ['device-desktop', 2, [
+    ['Open screen panel', 'decky-mcp.openScreen'], ['Open viewer in browser', 'decky-mcp.openViewer'], ['Snapshot to file', 'decky-mcp.snapshot']]],
+  Plugin: ['package', 2, [
+    ['Deploy', 'decky-mcp.deploy'], ['Reload backend', 'decky-mcp.reloadPlugin'], ['Show plugin logs', 'decky-mcp.pluginLogs']]],
+  Loader: ['server', 2, [
+    ['Restart loader', 'decky-mcp.restartLoader'], ['Show loader logs', 'decky-mcp.loaderLogs'], ['Install plugin zip…', 'decky-mcp.installZip']]],
+  Steam: ['game', 1, [['Evaluate JS in Steam UI', 'decky-mcp.evaluate'], ['Toast on Deck', 'decky-mcp.toast']]],
+  MCP: ['server-process', 1, [
+    ['Write MCP config for this workspace', 'decky-mcp.writeMcpConfig'], ['Copy MCP URL', 'decky-mcp.copyMcpUrl'], ['Copy token', 'decky-mcp.copyToken']]],
+};
+
+/** Asserts the Actions tree shape and returns { roots, kids: { Screen: [...], ... } }. */
+async function actionsTree() {
+  const p = actionsProvider();
+  const roots = await p.getChildren();
+  assert.deepEqual(labels(roots), Object.keys(EXPECTED_ACTIONS));
+  const kids = {};
+  for (const r of roots) {
+    const [icon, state, leaves] = EXPECTED_ACTIONS[r.label];
+    assert.equal(r.iconPath.id, icon, r.label);
+    assert.equal(r.collapsibleState, state, `${r.label} collapsible state`);
+    assert.equal(r.command, undefined, `${r.label} group toggles instead of running a command`);
+    const children = await p.getChildren(r);
+    assert.deepEqual(children.map(c => [c.label, c.command.command]), leaves, r.label);
+    for (const c of children) {
+      assert.ok(c.iconPath.id, `${c.label} has an icon`);
+      assert.equal(c.collapsibleState, 0, `${c.label} is a single-click leaf`);
+      assert.ok(calls.commands.has(c.command.command), c.command.command);
+    }
+    kids[r.label] = children;
+  }
+  const leafCmds = Object.values(kids).flat().map(c => c.command.command);
+  assert.deepEqual(dupes(leafCmds), [], 'a command appears twice in the Actions tree');
+  for (const bad of ['decky-mcp.connect', 'decky-mcp.disconnectDevice', 'decky-mcp.pairAgain', 'decky-mcp.enterToken', 'decky-mcp.disconnect']) {
+    assert.ok(!leafCmds.includes(bad), `${bad} in the Actions view`);
+  }
+  return { roots, kids };
 }
 
-await check('activate() registers the five views', async () => {
+await check('activate() registers the four views', async () => {
   const trees = [...calls.treeViews.map(t => t.id), ...calls.treeProviders.map(t => t.id)].sort();
-  assert.deepEqual(trees, ['decky-mcp.device', 'decky-mcp.devices', 'decky-mcp.plugins', 'decky-mcp.unified']);
+  assert.deepEqual(trees, ['decky-mcp.actions', 'decky-mcp.devices', 'decky-mcp.plugins']);
   assert.deepEqual(calls.webviewProviders.map(w => w.id), ['decky-mcp.preview']);
-  const declared = pkg.contributes.views['decky-mcp'].map(v => v.id).sort();
-  assert.deepEqual(declared, ['decky-mcp.device', 'decky-mcp.devices', 'decky-mcp.plugins', 'decky-mcp.preview', 'decky-mcp.unified']);
+  const declared = pkg.contributes.views['decky-mcp'].map(v => [v.id, v.name]);
+  assert.deepEqual(declared, [
+    ['decky-mcp.devices', 'Devices'], ['decky-mcp.actions', 'Actions'], ['decky-mcp.plugins', 'Plugins'], ['decky-mcp.preview', 'Preview']]);
   return `createTreeView(${trees.join(', ')}), registerWebviewViewProvider(decky-mcp.preview)`;
 });
 
-await check('package.json: container, activation, commands, menus, layout setting', async () => {
+await check('package.json: container, activation, commands, menus, version', async () => {
+  assert.equal(pkg.version, '0.4.0');
   const container = pkg.contributes.viewsContainers.activitybar[0];
   assert.equal(container.id, 'decky-mcp');
   assert.equal(container.title, 'Decky');
   assert.equal(readFileSync(path.join(root, container.icon), 'utf8').includes('currentColor'), true);
   for (const v of pkg.contributes.views['decky-mcp']) assert.ok(pkg.activationEvents.includes(`onView:${v.id}`), v.id);
+  assert.equal(pkg.activationEvents.length, 5);
   assert.ok(pkg.activationEvents.includes('workspaceContains:plugin.json'));
+  for (const v of pkg.contributes.views['decky-mcp']) {
+    assert.ok(v.id === 'decky-mcp.devices' ? v.when === undefined : v.when === 'decky-mcp.connected', `${v.id} when: ${v.when}`);
+  }
   const declared = new Set(pkg.contributes.commands.map(c => c.command));
   const registered = new Set(calls.commands.keys());
   for (const id of declared) assert.ok(registered.has(id), `declared but not registered: ${id}`);
   for (const id of registered) assert.ok(declared.has(id), `registered but not declared: ${id}`);
-  const menuCmds = Object.values(pkg.contributes.menus).flat().map(m => m.command);
-  for (const id of menuCmds) assert.ok(declared.has(id), `menu refers to unknown command ${id}`);
-  for (const m of Object.values(pkg.contributes.menus).flat()) evalWhen(m.when, new Map());
-  const welcome = pkg.contributes.viewsWelcome.map(w => w.view).sort();
-  assert.deepEqual(welcome, ['decky-mcp.device', 'decky-mcp.devices', 'decky-mcp.plugins', 'decky-mcp.unified']);
-  const layoutSetting = pkg.contributes.configuration.properties['decky-mcp.sidebarLayout'];
-  assert.equal(layoutSetting.default, 'devices-first');
-  assert.deepEqual(layoutSetting.enum, ['devices-first', 'unified', 'classic']);
-  assert.equal(pkg.contributes.configuration.properties['decky-mcp.openScreenOnConnect'].default, true);
-  assert.equal(pkg.contributes.commands.find(c => c.command === 'decky-mcp.switchLayout').title, 'Switch sidebar layout');
-  for (const v of pkg.contributes.views['decky-mcp']) {
-    const gear = pkg.contributes.menus['view/title'].filter(m => m.command === 'decky-mcp.switchLayout' && evalWhen(m.when, new Map([['view', v.id]])));
-    assert.equal(gear.length, 1, `layout gear on ${v.id}`);
+  const menus = Object.values(pkg.contributes.menus).flat();
+  for (const m of menus) assert.ok(declared.has(m.command), `menu refers to unknown command ${m.command}`);
+  for (const m of menus) evalWhen(m.when, new Map());
+  const whens = [...menus.map(m => m.when), ...pkg.contributes.views['decky-mcp'].map(v => v.when), ...pkg.contributes.viewsWelcome.map(w => w.when)];
+  const allowedKeys = new Set(['view', 'viewItem', 'decky-mcp.connected', 'false']);
+  for (const w of whens.filter(Boolean)) {
+    for (const [, key] of w.replace(/\/(?:\\.|[^/])+\//g, '/re/').matchAll(/(?:^|&&|\|\||\(|!)\s*([A-Za-z][\w.-]*)/g)) assert.ok(allowedKeys.has(key), `context key ${key} in ${w}`);
   }
-  assert.deepEqual(visibleViews(new Map()), ['decky-mcp.devices'], 'before activation the default layout shows');
-  return `${declared.size} commands registered, ${menuCmds.length} menu entries resolve, gear on all 5 views`;
+  assert.deepEqual(pkg.contributes.viewsWelcome.map(w => w.view), ['decky-mcp.devices']);
+  assert.deepEqual(Object.keys(pkg.contributes.configuration.properties).sort(),
+    ['decky-mcp.host', 'decky-mcp.openScreenOnConnect', 'decky-mcp.pluginDirName', 'decky-mcp.port']);
+  assert.equal(pkg.contributes.configuration.properties['decky-mcp.openScreenOnConnect'].default, true);
+  const titles = {
+    'decky-mcp.devices': ['decky-mcp.addDevice', 'decky-mcp.refresh'],
+    'decky-mcp.actions': ['decky-mcp.openScreen', 'decky-mcp.refresh'],
+    'decky-mcp.plugins': ['decky-mcp.installZip', 'decky-mcp.refreshPlugins'],
+    'decky-mcp.preview': ['decky-mcp.openScreen'],
+  };
+  for (const [view, want] of Object.entries(titles)) assert.deepEqual(titleMenu(view), want, `${view} title`);
+  for (const view of Object.keys(titles)) {
+    for (const viewItem of ['plugin', 'deck.unpaired', 'deck.paired', 'deck.session', 'deck.busy', 'action', 'group.screen']) {
+      for (const inline of [true, false]) assert.deepEqual(dupes(itemMenu(view, viewItem, inline)), [], `${view} ${viewItem}`);
+    }
+  }
+  assert.deepEqual(visibleViews(new Map()), ['decky-mcp.devices'], 'before activation only Devices shows');
+  return `${declared.size} commands registered, ${menus.length} menu entries resolve, titles ${Object.values(titles).map(t => t.length).join('/')}`;
 });
 
 await check('first activation seeds one saved device from the settings', async () => {
@@ -318,9 +374,9 @@ await check('first activation seeds one saved device from the settings', async (
   return JSON.stringify({ name: list[0].name, host: list[0].host, port: list[0].port });
 });
 
-await check('devices-first (default), unpaired: only Devices visible, one row, Connect inline', async () => {
-  assert.equal(calls.context.get('decky-mcp.layout'), 'devices-first');
+await check('unpaired: only Devices visible, one row, Connect inline', async () => {
   assert.equal(calls.context.get('decky-mcp.connected'), false);
+  assert.deepEqual([...calls.context.keys()], ['decky-mcp.connected'], 'the only context key');
   assert.deepEqual(visibleViews(), ['decky-mcp.devices']);
   const rows = devicesProvider().getChildren();
   assert.equal(rows.length, 1);
@@ -332,73 +388,16 @@ await check('devices-first (default), unpaired: only Devices visible, one row, C
   assert.deepEqual(r.command, { command: 'decky-mcp.connect', title: 'Connect', arguments: [seedId()] });
   assert.deepEqual(itemMenu('decky-mcp.devices', r.contextValue, true), ['decky-mcp.connect', 'decky-mcp.deviceActions']);
   assert.ok(!itemMenu('decky-mcp.devices', r.contextValue, false).includes('decky-mcp.pairAgain'));
-  assert.deepEqual(deviceProvider().getChildren(), []);
+  assert.deepEqual(await actionsProvider().getChildren(), []);
+  assert.deepEqual(await pluginsProvider().getChildren(), []);
   assert.equal(status(), '$(vm) Decky: not connected');
   return `row "${r.label}" — "${r.description}" [$(${r.iconPath.id})], inline ${itemMenu('decky-mcp.devices', r.contextValue, true).join(', ')}; status "${status()}"`;
 });
 
-await check('switch to classic: setting written, context set, every provider refreshed', async () => {
-  const detail = await switchTo('classic');
-  assert.deepEqual(visibleViews(), ['decky-mcp.device', 'decky-mcp.plugins', 'decky-mcp.preview']);
-  return `${detail}; visible ${visibleViews().join(', ')}`;
-});
-
-await check('classic, not paired: empty trees (welcome content shows), context key false, status bar', async () => {
-  assert.deepEqual(await deviceProvider().getChildren(), []);
-  assert.deepEqual(await pluginsProvider().getChildren(), []);
-  assert.equal(calls.context.get('decky-mcp.paired'), false);
-  const view = tree('decky-mcp.device').view;
-  assert.match(view.description, /not paired/);
-  assert.match(status(), /\(not paired\)/);
-  const welcome = pkg.contributes.viewsWelcome.filter(w => w.view === 'decky-mcp.device' && evalWhen(w.when, calls.context));
-  assert.equal(welcome.length, 1);
-  return `device view description "${view.description}", status "${status()}"`;
-});
-
-await check('classic, paired (via secret storage + fake device): device and plugin roots', async () => {
-  await ctx.secrets.store(tokenKey, 'fake-token');
-  await settle();
-  assert.equal(calls.context.get('decky-mcp.paired'), true);
-  const roots = await deviceProvider().getChildren();
-  assert.deepEqual(labels(roots), ['Devices', '10.1.2.3:8765', 'Screen', 'Actions']);
-  assert.equal(roots[1].description, 'Connected · decky-mcp 0.2.0 · api 1');
-  assert.equal(roots[2].description, '30 fps · 19.5 Mbps', 'stats polled because the Device view is visible');
-  assert.equal(roots[2].command.command, 'decky-mcp.openScreen');
-  const devs = await deviceProvider().getChildren(roots[0]);
-  assert.equal(devs[0].contextValue, 'device.active');
-  assert.equal(devs.at(-1).command.command, 'decky-mcp.addDevice');
-  const conn = await deviceProvider().getChildren(roots[1]);
-  assert.deepEqual(conn.map(c => c.command.command), ['decky-mcp.pair', 'decky-mcp.enterToken', 'decky-mcp.changeHost', 'decky-mcp.disconnect']);
-  const actions = await deviceProvider().getChildren(roots[3]);
-  assert.equal(actions.length, 8);
-  for (const a of actions) assert.ok(calls.commands.has(a.command.command), a.command.command);
-  const pl = await pluginsProvider().getChildren();
-  assert.deepEqual(labels(pl), ['Decky-MCP', 'Tender']);
-  assert.equal(pl[0].description, '0.1.0 · decky-mcp');
-  assert.equal(pl[0].contextValue, 'plugin');
-  assert.match(pl[0].tooltip.value, /flags: root, debug/);
-  assert.match(pl[0].tooltip.value, /has_backend: true/);
-  assert.match(status(), /● 30 fps/);
-  return `${labels(roots).join(' | ')}; screen "${roots[2].description}"; plugins ${labels(pl).join(', ')}`;
-});
-
-await check('classic: stats polling stops when the Device view is hidden', async () => {
-  const t = tree('decky-mcp.device');
-  t.view.visible = false;
-  t.view._visibility.fire({ visible: false });
-  await settle();
-  const roots = await deviceProvider().getChildren();
-  assert.equal(roots[2].description, '');
-  t.view.visible = true;
-  t.view._visibility.fire({ visible: true });
-  await settle();
-  assert.equal((await deviceProvider().getChildren())[2].description, '30 fps · 19.5 Mbps');
-  return 'lease released on hide, re-acquired on show';
-});
-
-await check('fake client: plugin tree states', async () => {
+await check('fake client: plugin tree states, Actions Screen offline when unreachable', async () => {
   const fakeConn = (client, extra = {}) => ({
     devices: [], activeDevice: undefined, address: { host: 'h', port: 1 }, label: 'h', paired: !!client, tokenRejected: false,
+    connectedDevice: client ? { id: 'x', name: 'h', host: 'h', port: 1 } : undefined,
     health: { kind: 'ok', health }, onDidChange: new EventEmitter().event, onDidChangeTarget: new EventEmitter().event,
     authedClient: () => client, watchStats: () => new Disposable(), ...extra,
   });
@@ -412,11 +411,11 @@ await check('fake client: plugin tree states', async () => {
   assert.equal(p.command.command, 'decky-mcp.refreshPlugins');
   const unpaired = new ext.PluginsTreeProvider(fakeConn(undefined));
   assert.deepEqual(await unpaired.getChildren(), []);
-  const down = new ext.DeviceTreeProvider(fakeConn({}, { health: { kind: 'unreachable', error: 'cannot reach the device' } }));
-  const roots = down.getChildren();
-  assert.equal(roots[1].description, 'Unreachable');
-  assert.equal(roots[2].description, 'offline');
-  return 'list / empty / error placeholder / unpaired / unreachable';
+  const down = new ext.ActionsTreeProvider(fakeConn({}, { health: { kind: 'unreachable', error: 'cannot reach the device' } }));
+  const roots = await down.getChildren();
+  assert.equal(roots[0].description, 'offline');
+  down.dispose();
+  return 'list / empty / error placeholder / not connected / unreachable';
 });
 
 await check('preview webview: CSP and proxy URL, no token', async () => {
@@ -434,22 +433,7 @@ await check('preview webview: CSP and proxy URL, no token', async () => {
   return 'ok';
 });
 
-await check('classic: disconnect forgets the token and returns to the not-paired state', async () => {
-  await run('decky-mcp.disconnect');
-  await settle();
-  assert.deepEqual(await deviceProvider().getChildren(), []);
-  assert.equal(calls.context.get('decky-mcp.paired'), false);
-  assert.equal(secrets.has(tokenKey), false);
-});
-
-await check('switch back to devices-first', async () => {
-  const detail = await switchTo('devices-first');
-  assert.deepEqual(visibleViews(), ['decky-mcp.devices']);
-  assert.equal(status(), '$(vm) Decky: not connected');
-  return detail;
-});
-
-await check('devices-first: Connect on an unpaired device pairs (403, then token) and connects', async () => {
+await check('Connect on an unpaired device pairs (403, then token) and connects', async () => {
   fetched.length = 0;
   device.pairQueue = ['closed', 'grant'];
   let rowDuringPairing;
@@ -473,9 +457,9 @@ await check('devices-first: Connect on an unpaired device pairs (403, then token
   return `progress "${prog.title}: ${prog.messages[0]}", then "${info.m}" [${info.buttons.join(', ')}], screen panel opened`;
 });
 
-await check('devices-first, connected: views, rows, actions, titles and status bar', async () => {
+await check('connected: views, device row, titles and status bar', async () => {
   await settle(100);
-  assert.deepEqual(visibleViews(), ['decky-mcp.devices', 'decky-mcp.device', 'decky-mcp.plugins', 'decky-mcp.preview']);
+  assert.deepEqual(visibleViews(), ['decky-mcp.devices', 'decky-mcp.actions', 'decky-mcp.plugins', 'decky-mcp.preview']);
   const [r] = devicesProvider().getChildren();
   assert.equal(r.label, '10.1.2.3');
   assert.equal(r.description, 'connected');
@@ -488,18 +472,101 @@ await check('devices-first, connected: views, rows, actions, titles and status b
   for (const bad of ['decky-mcp.connect', 'decky-mcp.pair']) assert.ok(!ctxMenu.includes(bad), `${bad} on a connected device`);
   assert.ok(ctxMenu.includes('decky-mcp.pairAgain'));
   assert.equal(pkg.contributes.commands.find(c => c.command === 'decky-mcp.pairAgain').title, 'Re-pair');
-  const roots = deviceProvider().getChildren();
-  assert.equal(roots[0].label, 'Screen');
-  assert.equal(roots[0].description, '30 fps · 19.5 Mbps');
-  assert.equal(roots.length, 9);
-  for (const a of roots.slice(1)) assert.ok(calls.commands.has(a.command.command), a.command.command);
-  for (const a of roots) assert.ok(!['decky-mcp.pair', 'decky-mcp.enterToken', 'decky-mcp.connect'].includes(a.command.command));
   assert.deepEqual(labels(await pluginsProvider().getChildren()), ['Decky-MCP', 'Tender']);
-  assert.equal(tree('decky-mcp.device').view.description, '10.1.2.3');
+  assert.equal(tree('decky-mcp.actions').view.description, '10.1.2.3');
   assert.equal(tree('decky-mcp.plugins').view.description, '10.1.2.3');
   assert.equal(calls.previewView.description, '10.1.2.3');
   assert.equal(status(), '$(vm-connect) 10.1.2.3');
-  return `row "${r.label}" — "${r.description}" [$(vm-connect) green], inline ${itemMenu('decky-mcp.devices', r.contextValue, true).join(', ')}; Device: ${labels(roots).join(', ')}`;
+  return `row "${r.label}" — "${r.description}" [$(vm-connect) green], inline ${itemMenu('decky-mcp.devices', r.contextValue, true).join(', ')}; visible ${visibleViews().join(', ')}`;
+});
+
+await check('connected, no plugin.json: Actions roots Screen / Plugin / Loader / Steam / MCP with their leaves', async () => {
+  const { roots, kids } = await actionsTree();
+  const [screen, plugin] = roots;
+  assert.equal(screen.description, '30 fps · 19.5 Mbps', 'stats polled because the Actions view is visible');
+  assert.match(kids.Screen[1].tooltip, /http:\/\/10\.1\.2\.3:8765\/viewer/);
+  assert.match(kids.Screen[1].tooltip, /Pair a browser/);
+  assert.match(kids.Screen[1].tooltip, /cookie/);
+  assert.equal(plugin.description, 'no plugin.json in workspace');
+  for (const c of kids.Plugin) {
+    assert.equal(c.description, 'needs a plugin folder');
+    assert.equal(c.iconPath.color.id, 'disabledForeground');
+  }
+  const lines = roots.map(r => `${r.label}${r.description ? ` (${r.description})` : ''}: ${labels(kids[r.label]).join(', ')}`);
+  return lines.join(' | ');
+});
+
+await check('Plugin group without plugin.json: clicks explain why, no request', async () => {
+  for (const leaf of (await actionsProvider().getChildren((await actionsProvider().getChildren())[1]))) {
+    fetched.length = 0;
+    calls.messages.length = 0;
+    await run(leaf.command.command, ...(leaf.command.arguments ?? []));
+    const w = lastMessage('warning');
+    assert.ok(w, `${leaf.label} explained nothing`);
+    assert.match(w.m, /no workspace folder contains a plugin\.json/);
+    assert.ok(!fetched.some(p => p.startsWith('/plugins/')), `${leaf.label} hit the device`);
+  }
+  return lastMessage('warning').m;
+});
+
+await check('Plugin group with a plugin folder: description is the deploy dir, reload/logs target it', async () => {
+  const folderPath = '/work/my-plugin';
+  vscode.workspace.workspaceFolders = [{ name: 'my-plugin', uri: Uri.file(folderPath) }];
+  files.set(`file://${folderPath}/plugin.json`, Buffer.from(JSON.stringify({ name: 'My Plugin' })));
+  actionsProvider().refresh();
+  try {
+    const { roots, kids } = await actionsTree();
+    assert.equal(roots[1].description, 'my-plugin');
+    assert.match(roots[1].tooltip, /~\/homebrew\/plugins\/my-plugin/);
+    for (const c of kids.Plugin) assert.equal(c.description, undefined);
+    fetched.length = 0;
+    const reload = kids.Plugin[1];
+    await run(reload.command.command, ...reload.command.arguments);
+    assert.ok(fetched.includes('/plugins/my-plugin/reload'), fetched.join(', '));
+    assert.equal(lastMessage('info').m, 'Decky-MCP: reloaded my-plugin.');
+    settings.pluginDirName = 'other-dir';
+    actionsProvider().refresh();
+    assert.equal((await actionsProvider().getChildren())[1].description, 'other-dir', 'decky-mcp.pluginDirName wins');
+    return `Plugin (${roots[1].description}), reload → POST /plugins/my-plugin/reload`;
+  } finally {
+    settings.pluginDirName = '';
+    vscode.workspace.workspaceFolders = undefined;
+    files.clear();
+    actionsProvider().refresh();
+  }
+});
+
+await check('Screen and MCP leaves: viewer, snapshot, MCP URL, token', async () => {
+  await run('decky-mcp.openViewer');
+  assert.equal(calls.opened.at(-1), 'http://10.1.2.3:8765/viewer');
+  ui.saveDialog = opts => opts.defaultUri;
+  await run('decky-mcp.snapshot');
+  const dlg = calls.saveDialogs.at(-1);
+  assert.match(dlg.defaultUri.toString(), /\/deck-\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d\.jpg$/);
+  const w = calls.written.at(-1);
+  assert.equal(w.uri, dlg.defaultUri.toString());
+  assert.deepEqual([...w.data], [...frameJpeg]);
+  assert.match(lastMessage('info').m, /saved .*deck-.*\.jpg/);
+  await run('decky-mcp.copyMcpUrl');
+  assert.equal(calls.clipboard.at(-1), 'http://10.1.2.3:8765/mcp');
+  await run('decky-mcp.copyToken');
+  assert.equal(calls.clipboard.at(-1), 'fake-token');
+  assert.match(lastMessage('warning').m, /secret/);
+  return `opened ${calls.opened.at(-1)}; snapshot → ${dlg.defaultUri.path.split('/').pop()} (${w.data.length} B); token warning "${lastMessage('warning').m}"`;
+});
+
+await check('stats polling stops when the Actions view is hidden', async () => {
+  calls.panels[0].dispose();
+  const t = tree('decky-mcp.actions');
+  t.view.visible = false;
+  t.view._visibility.fire({ visible: false });
+  await settle();
+  assert.equal((await actionsProvider().getChildren())[0].description, '');
+  t.view.visible = true;
+  t.view._visibility.fire({ visible: true });
+  await settle();
+  assert.equal((await actionsProvider().getChildren())[0].description, '30 fps · 19.5 Mbps');
+  return 'lease released on hide, re-acquired on show';
 });
 
 await check('connected: periodic /health flips to unreachable and back, token kept', async () => {
@@ -509,7 +576,8 @@ await check('connected: periodic /health flips to unreachable and back, token ke
   assert.equal(r.description, 'unreachable');
   assert.equal(r.iconPath.id, 'warning');
   assert.equal(calls.context.get('decky-mcp.connected'), true, 'views stay while the session is unreachable');
-  assert.equal(tree('decky-mcp.device').view.description, '10.1.2.3 · unreachable');
+  assert.equal(tree('decky-mcp.actions').view.description, '10.1.2.3 · unreachable');
+  assert.equal((await actionsProvider().getChildren())[0].description, 'offline');
   assert.equal(status(), '$(warning) 10.1.2.3 (unreachable)');
   assert.equal(secrets.get(tokenKey), 'fake-token');
   device.up = true;
@@ -520,7 +588,7 @@ await check('connected: periodic /health flips to unreachable and back, token ke
   return 'connected → unreachable → connected';
 });
 
-await check('devices-first, paired but disconnected: Disconnect keeps the token, hides device views', async () => {
+await check('paired but disconnected: Disconnect keeps the token, hides Actions / Plugins / Preview', async () => {
   await run('decky-mcp.disconnectDevice');
   await settle();
   assert.equal(calls.context.get('decky-mcp.connected'), false);
@@ -531,12 +599,13 @@ await check('devices-first, paired but disconnected: Disconnect keeps the token,
   assert.equal(r.contextValue, 'deck.paired');
   assert.equal(r.command.command, 'decky-mcp.connect');
   assert.deepEqual(itemMenu('decky-mcp.devices', r.contextValue, true), ['decky-mcp.connect', 'decky-mcp.deviceActions']);
+  assert.deepEqual(await actionsProvider().getChildren(), []);
   assert.equal(secrets.get(tokenKey), 'fake-token');
   assert.equal(status(), '$(vm) Decky: not connected');
   return `row "${r.label}" — "${r.description}" [$(vm)]`;
 });
 
-await check('devices-first: Connect with a stored token checks /health and connects without pairing', async () => {
+await check('Connect with a stored token checks /health and connects without pairing', async () => {
   fetched.length = 0;
   await run('decky-mcp.connect', seedId());
   await settle();
@@ -549,7 +618,7 @@ await check('devices-first: Connect with a stored token checks /health and conne
   return `requests: ${[...new Set(fetched)].join(', ')}`;
 });
 
-await check('devices-first: a rejected token (401) goes straight into pairing', async () => {
+await check('a rejected token (401) goes straight into pairing', async () => {
   await ctx.secrets.store(tokenKey, 'stale-token');
   await settle();
   fetched.length = 0;
@@ -561,6 +630,17 @@ await check('devices-first: a rejected token (401) goes straight into pairing', 
   assert.equal(calls.context.get('decky-mcp.connected'), true);
   await run('decky-mcp.disconnectDevice');
   return `requests: ${fetched.join(', ')}`;
+});
+
+await check('a command while disconnected offers to connect instead of running', async () => {
+  let offered;
+  ui.warning = (m, buttons) => { offered = { m, buttons }; return undefined; };
+  const copied = calls.clipboard.length;
+  await run('decky-mcp.copyToken');
+  assert.equal(offered.m, 'Decky-MCP: not connected to a Deck.');
+  assert.deepEqual(offered.buttons, ['Connect to 10.1.2.3', 'Choose device']);
+  assert.equal(calls.clipboard.length, copied, 'nothing copied');
+  return `"${offered.m}" [${offered.buttons.join(', ')}]`;
 });
 
 await check('reachability error: one message with Retry / Edit device, no pairing; Retry connects', async () => {
@@ -627,49 +707,18 @@ await check('Add device: host + optional name, port only via "Change port", then
   return `prompts: ${prompts.join(' / ')}; then picks ${offered[0].join(' | ')}`;
 });
 
-await check('switch to unified', async () => {
+await check('status bar QuickPick: connect/switch, disconnect, open screen, add', async () => {
   await ctx.secrets.store(tokenKey, 'fake-token');
   await run('decky-mcp.connect', seedId());
   await settle();
-  const detail = await switchTo('unified');
-  assert.deepEqual(visibleViews(), ['decky-mcp.unified', 'decky-mcp.preview']);
-  return `${detail}; visible ${visibleViews().join(', ')}`;
-});
-
-await check('unified: one row per device; connected expands to Screen / Plugins / Actions / Settings', async () => {
-  await settle(100);
-  const p = unifiedProvider();
-  const roots = await p.getChildren();
-  assert.deepEqual(labels(roots), ['10.1.2.3', '10.9.9.9:9000']);
-  assert.equal(roots[0].collapsibleState, 2);
-  assert.equal(roots[1].collapsibleState, 1);
-  assert.equal(roots[0].iconPath.id, 'vm-connect');
-  const kids = await p.getChildren(roots[0]);
-  assert.deepEqual(labels(kids), ['Screen', 'Plugins', 'Actions', 'Settings']);
-  assert.equal(kids[0].description, '30 fps · 19.5 Mbps');
-  const pl = await p.getChildren(kids[1]);
-  assert.deepEqual(labels(pl), ['Decky-MCP', 'Tender']);
-  assert.deepEqual(itemMenu('decky-mcp.unified', 'plugin', true), ['decky-mcp.reloadPlugin', 'decky-mcp.pluginLogs']);
-  assert.equal((await p.getChildren(kids[2])).length, 8);
-  assert.deepEqual(labels(await p.getChildren(kids[3])), ['Edit', 'Copy viewer URL', 'Remove']);
-  const all = [...kids, ...(await p.getChildren(kids[2])), ...(await p.getChildren(kids[3]))];
-  for (const n of all) assert.ok(!['decky-mcp.pair', 'decky-mcp.enterToken', 'decky-mcp.connect'].includes(n.command?.command), n.label);
-  const other = await p.getChildren(roots[1]);
-  assert.deepEqual(labels(other), ['Connect', 'Edit', 'Remove']);
-  assert.deepEqual(other[0].command.arguments, [globalState.get('decky-mcp.devices')[1].id]);
-  assert.deepEqual(itemMenu('decky-mcp.unified', roots[0].contextValue, true), ['decky-mcp.disconnectDevice', 'decky-mcp.deviceActions']);
-  return `${labels(roots).join(', ')}; connected → ${labels(kids).join(', ')}; other → ${labels(other).join(', ')}`;
-});
-
-await check('status bar QuickPick: connect/switch, disconnect, add, layout', async () => {
   let offered;
   ui.quickPick = (items, opts) => { offered = { labels: items.map(i => i.label), placeHolder: opts.placeHolder }; return undefined; };
   await run('decky-mcp.switchDevice');
   assert.equal(calls.statusItems[0].command ?? 'decky-mcp.switchDevice', 'decky-mcp.switchDevice');
   assert.equal(offered.placeHolder, 'Connected to 10.1.2.3');
-  for (const want of [/vm-connect\) 10\.1\.2\.3/, /10\.9\.9\.9/, /Disconnect from 10\.1\.2\.3/, /Add device/, /Switch sidebar layout/]) {
-    assert.ok(offered.labels.some(l => want.test(l)), `${want} in ${offered.labels}`);
-  }
+  assert.deepEqual(offered.labels, [
+    '$(vm-connect) 10.1.2.3', '$(warning) 10.9.9.9', '', '$(debug-disconnect) Disconnect from 10.1.2.3', '$(device-desktop) Open screen', '$(add) Add device…']);
+  assert.equal(calls.statusItems[0].tooltip, 'Decky: connected to 10.1.2.3 (10.1.2.3:8765). Click for devices');
   return offered.labels.filter(Boolean).join(' | ');
 });
 

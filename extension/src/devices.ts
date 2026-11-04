@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
 import { Connection, DeviceStatus, SavedDevice, newDeviceId } from './connection';
-import type { Layout } from './layout';
 
 const DEFAULT_PORT = 8765;
 const HOST_RE = /^(\[[0-9a-fA-F:]+\]|[A-Za-z0-9.\-]+)$/;
@@ -139,12 +138,6 @@ export async function removeDevice(conn: Connection, arg?: unknown): Promise<voi
   await conn.saveDevices(rest);
 }
 
-export async function setActiveDevice(conn: Connection, layout: Layout, arg?: unknown): Promise<void> {
-  const d = arg === undefined ? undefined : deviceFrom(conn, arg);
-  if (d) return conn.setActive(d.id);
-  return switchDevice(conn, layout);
-}
-
 type PickItem = vscode.QuickPickItem & { run?: () => Thenable<unknown> | Promise<unknown> };
 
 export const STATUS_ICON: Record<DeviceStatus, string> = {
@@ -166,22 +159,11 @@ export function statusLabel(status: DeviceStatus): string {
   }
 }
 
-/** The status bar / "Switch device" picker. Classic switches the active device; the others connect. */
-export async function switchDevice(conn: Connection, layout: Layout): Promise<void> {
-  const active = conn.activeDevice;
+/** The status bar / "Switch device" picker: connect to (or switch to) a saved Deck. */
+export async function switchDevice(conn: Connection): Promise<void> {
   const connected = conn.connectedDevice;
   const items: PickItem[] = [];
   for (const d of conn.devices) {
-    if (layout === 'classic') {
-      const paired = !!(await conn.tokenFor(d));
-      items.push({
-        label: `${d.id === active?.id ? '$(check)' : '$(device-mobile)'} ${d.name}`,
-        description: `${d.host}:${d.port}`,
-        detail: d.id === active?.id ? 'active' : paired ? 'paired' : 'not paired',
-        run: () => conn.setActive(d.id),
-      });
-      continue;
-    }
     const status = conn.statusOf(d);
     const isConnected = d.id === connected?.id;
     items.push({
@@ -192,20 +174,14 @@ export async function switchDevice(conn: Connection, layout: Layout): Promise<vo
     });
   }
   items.push({ label: '', kind: vscode.QuickPickItemKind.Separator });
-  if (layout !== 'classic' && connected) {
-    items.push({ label: `$(debug-disconnect) Disconnect from ${connected.name}`, run: () => vscode.commands.executeCommand('decky-mcp.disconnectDevice') });
+  if (connected) {
+    items.push(
+      { label: `$(debug-disconnect) Disconnect from ${connected.name}`, run: () => vscode.commands.executeCommand('decky-mcp.disconnectDevice') },
+      { label: '$(device-desktop) Open screen', run: () => vscode.commands.executeCommand('decky-mcp.openScreen') },
+    );
   }
-  if (layout === 'classic' ? conn.paired : connected) {
-    items.push({ label: '$(device-desktop) Open screen', run: () => vscode.commands.executeCommand('decky-mcp.openScreen') });
-  }
-  items.push(
-    { label: '$(add) Add device…', run: () => addDevice(conn) },
-    { label: '$(gear) Switch sidebar layout…', run: () => vscode.commands.executeCommand('decky-mcp.switchLayout') },
-  );
-  const placeHolder = layout === 'classic'
-    ? `Active: ${conn.label}. Switch Decky device`
-    : connected ? `Connected to ${connected.name}` : 'Connect to a Deck';
-  const pick = await vscode.window.showQuickPick(items, { placeHolder });
+  items.push({ label: '$(add) Add device…', run: () => addDevice(conn) });
+  const pick = await vscode.window.showQuickPick(items, { placeHolder: connected ? `Connected to ${connected.name}` : 'Connect to a Deck' });
   await pick?.run?.();
 }
 

@@ -140,6 +140,12 @@ await check('/frame.jpg via proxy (sidebar preview)', async () => {
   return `3 frames at 1.5 s: ${sizes.map(s => `${(s / 1024).toFixed(0)} KiB`).join(', ')} (≈${(sizes.reduce((a, b) => a + b) * 8 / 4.5 / 1e6).toFixed(2)} Mbit/s)`;
 });
 
+await check('/frame.jpg via client (Snapshot to file)', async () => {
+  const jpeg = await new DeckyClient({ host, port }, token).frame();
+  if (jpeg[0] !== 0xff || jpeg[1] !== 0xd8 || jpeg.at(-2) !== 0xff || jpeg.at(-1) !== 0xd9) throw new Error('not a complete JPEG');
+  return `${(jpeg.length / 1024).toFixed(0)} KiB JPEG`;
+});
+
 // Runs the real media/screen.js against the proxy in a minimal DOM, including the repeated
 // `visible: true` messages VS Code sends on focus changes, and compares its fps readout with the
 // device's own /stream/stats and with a raw part count.

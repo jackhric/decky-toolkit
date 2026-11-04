@@ -2,7 +2,6 @@ import * as vscode from 'vscode';
 import type { PluginInfo } from './api';
 import { DeckyClient, describeError } from './client';
 import type { ConnectionState } from './connection';
-import type { Layout } from './layout';
 
 export class PluginNode extends vscode.TreeItem {
   constructor(readonly info: PluginInfo) {
@@ -26,7 +25,7 @@ export class PluginsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
   readonly onDidChangeTreeData = this.changed.event;
   private readonly sub: vscode.Disposable;
 
-  constructor(private readonly conn: ConnectionState, private readonly layout: () => Layout = () => 'classic') {
+  constructor(private readonly conn: ConnectionState) {
     this.sub = conn.onDidChangeTarget(() => this.refresh());
   }
 
@@ -40,9 +39,7 @@ export class PluginsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
 
   async getChildren(item?: vscode.TreeItem): Promise<vscode.TreeItem[]> {
     if (item) return [];
-    if (this.layout() !== 'classic' && !this.conn.connectedDevice) return [];
-    const client = this.conn.authedClient();
-    // Empty while unpaired so the viewsWelcome content is shown instead.
+    const client = this.conn.connectedDevice && this.conn.authedClient();
     if (!client) return [];
     return loadPluginItems(client);
   }

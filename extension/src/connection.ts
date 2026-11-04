@@ -61,8 +61,6 @@ export class Connection implements ConnectionState, vscode.Disposable {
   readonly onDidChangeStatus = this.statusChanged.event;
   readonly proxy = new DeviceProxy(() => this.proxyTarget());
   private readonly disposables: vscode.Disposable[] = [this.changed, this.targetChanged, this.statusChanged];
-  /** Set per sidebar layout: commands then need a connected device, not just a stored token. */
-  requireSession = false;
 
   health: HealthState = { kind: 'unknown' };
   stats?: StreamStats;
@@ -349,20 +347,8 @@ export class Connection implements ConnectionState, vscode.Disposable {
     return this.cachedToken ? new DeckyClient(this.address, this.cachedToken) : undefined;
   }
 
-  /** Returns undefined (after offering to pair) when no token is stored for the current device. */
+  /** The connected device's client; offers to connect (and returns undefined) when there is none. */
   async client(): Promise<DeckyClient | undefined> {
-    if (this.requireSession) return this.sessionClient();
-    const token = await this.token();
-    if (token) return new DeckyClient(this.address, token);
-    const choice = await vscode.window.showWarningMessage(
-      `Decky-MCP: not paired with ${this.label}.`, 'Pair with device', 'Enter token manually');
-    if (choice === 'Pair with device') await vscode.commands.executeCommand('decky-mcp.pair');
-    if (choice === 'Enter token manually') await vscode.commands.executeCommand('decky-mcp.enterToken');
-    const after = await this.token();
-    return after ? new DeckyClient(this.address, after) : undefined;
-  }
-
-  private async sessionClient(): Promise<DeckyClient | undefined> {
     if (!this.connectedDevice) {
       const d = this.activeDevice;
       const connectTo = d ? `Connect to ${d.name}` : undefined;

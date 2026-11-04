@@ -1,13 +1,12 @@
 import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
 import { Connection, ConnectionState, externalProxyBase } from './connection';
-import type { Layout } from './layout';
 
 export class StatusBar implements vscode.Disposable {
   private readonly item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
   private readonly sub: vscode.Disposable;
 
-  constructor(private readonly conn: ConnectionState, private readonly layout: () => Layout = () => 'classic') {
+  constructor(private readonly conn: ConnectionState) {
     this.item.command = 'decky-mcp.switchDevice';
     this.sub = conn.onDidChange(() => this.render());
     this.render();
@@ -15,27 +14,15 @@ export class StatusBar implements vscode.Disposable {
   }
 
   render(): void {
-    if (this.layout() !== 'classic') return this.renderSession();
-    const { paired, health, stats, statsError } = this.conn;
-    const error = health.kind === 'unreachable' ? health.error : statsError;
-    let text = `$(device-mobile) Decky: ${this.conn.label}`;
-    if (!paired) text += ' (not paired)';
-    else if (error) text += ' ○ offline';
-    else if (stats) text += ` ● ${Math.round(stats.running ? stats.fps : 0)} fps`;
-    this.item.text = text;
-    this.item.tooltip = `${error ? `Decky-MCP: ${error}\n` : ''}${this.conn.address.host}:${this.conn.address.port}. Click to switch device or open the screen`;
-  }
-
-  private renderSession(): void {
     const d = this.conn.connectedDevice;
     if (!d) {
       this.item.text = '$(vm) Decky: not connected';
-      this.item.tooltip = 'Click to connect to a Deck, add one or switch the sidebar layout';
+      this.item.tooltip = 'Click to connect to a Deck or add one';
       return;
     }
     const down = this.conn.health.kind === 'unreachable';
     this.item.text = `$(${down ? 'warning' : 'vm-connect'}) ${d.name}${down ? ' (unreachable)' : ''}`;
-    this.item.tooltip = `Decky: connected to ${d.name} (${d.host}:${d.port})${down ? `, not answering: ${(this.conn.health as { error: string }).error}` : ''}. Click for devices and layout`;
+    this.item.tooltip = `Decky: connected to ${d.name} (${d.host}:${d.port})${down ? `, not answering: ${(this.conn.health as { error: string }).error}` : ''}. Click for devices`;
   }
 
   dispose(): void {
