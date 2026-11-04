@@ -61,13 +61,15 @@
           "id": "decky-mcp.plugins",
           "name": "Plugins",
           "icon": "media/decky.svg",
-          "when": "decky-mcp.connected"
+          "when": "decky-mcp.connected",
+          "visibility": "collapsed"
         },
         {
           "id": "decky-mcp.controllers",
           "name": "Controllers",
           "icon": "media/decky.svg",
-          "when": "decky-mcp.connected"
+          "when": "decky-mcp.connected",
+          "visibility": "collapsed"
         },
         {
           "type": "webview",
@@ -81,7 +83,7 @@
     "viewsWelcome": [
       {
         "view": "decky-mcp.devices",
-        "contents": "No devices yet. Add a Decky device (any machine running Decky Loader: Steam Deck, Bazzite, SteamOS, …).\n[Add device](command:decky-mcp.addDevice)"
+        "contents": "No devices yet. Add a Decky device (any machine running Decky Loader: Steam Deck, Bazzite, SteamOS, \u2026).\n[Add device](command:decky-mcp.addDevice)"
       },
       {
         "view": "decky-mcp.controllers",
@@ -145,13 +147,13 @@
       },
       {
         "command": "decky-mcp.navigate",
-        "title": "Navigate Steam UI to…",
+        "title": "Navigate Steam UI to\u2026",
         "category": "Decky",
         "icon": "$(compass)"
       },
       {
         "command": "decky-mcp.openPluginPanel",
-        "title": "Open plugin panel…",
+        "title": "Open plugin panel\u2026",
         "category": "Decky",
         "icon": "$(extensions)"
       },
@@ -256,7 +258,7 @@
       },
       {
         "command": "decky-mcp.installZip",
-        "title": "Install plugin zip…",
+        "title": "Install plugin zip\u2026",
         "category": "Decky",
         "icon": "$(package)"
       },
@@ -268,7 +270,7 @@
       },
       {
         "command": "decky-mcp.addDevice",
-        "title": "Add device…",
+        "title": "Add device\u2026",
         "category": "Decky",
         "icon": "$(add)"
       },
@@ -316,7 +318,7 @@
       },
       {
         "command": "decky-mcp.deviceActions",
-        "title": "More actions…",
+        "title": "More actions\u2026",
         "category": "Decky",
         "icon": "$(ellipsis)"
       }
