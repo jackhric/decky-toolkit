@@ -26,6 +26,10 @@ protected by a bearer token shown in the plugin's Quick Access panel.
 | `stream_status` | Live stream state: running, fps, bitrate, resolution, viewer count, settings |
 | `set_stream_settings` | Change the stream's frame rate (1-60), JPEG quality and output width |
 | `toast` | Show a Decky toast in the Steam UI |
+| `set_input_enabled` | Turn remote input on or off (off by default) |
+| `input_key` / `input_text` | Press key combos (`"ctrl+shift+a"`, `"enter"`) or type ASCII text |
+| `input_mouse` | Move, click, double-click, hold or scroll the pointer (normalised or pixel coordinates) |
+| `input_gamepad` | Press buttons, move sticks and triggers on a virtual Xbox 360 pad, or run a sequence |
 | `read_file` / `write_file` | Read or write files on the device (runs as root) |
 
 ## Live screen viewer
@@ -59,6 +63,41 @@ from the viewer, `PUT /stream/settings` or the `set_stream_settings` tool. Measu
 at 1080p, JPEG quality 70, with a changing screen: 60 fps costs about 33-40 % of one CPU core and
 30-100 Mbit/s depending on content; 30 fps about 23 % and up to ~50 Mbit/s. On Wi-Fi, lower the
 width or quality.
+
+## Remote input
+
+The viewer and MCP clients can drive the Deck with keyboard, mouse and gamepad input. It is **off
+by default**. Turn it on with the **Allow remote input** toggle in the Decky-MCP panel, the
+**⌨ Input** button in the viewer, `PUT /input/settings` or the `set_input_enabled` tool. The setting
+is stored in `settings.json` and applies to every client.
+
+In the viewer, with input on:
+
+- **UI mode**: click the picture to capture the keyboard (a blue outline shows it). Mouse moves,
+  clicks and the wheel land on the matching spot of the Deck screen, and keys are sent by physical
+  position (`KeyboardEvent.code`). Clicking the toolbar, switching tabs or leaving the window
+  releases every held key.
+- **Game mode**: clicking the picture locks the pointer and sends relative mouse motion, for games
+  that use mouse look. Esc releases the pointer.
+- **Gamepad**: a controller plugged into the viewer machine is forwarded about 60 times a second
+  while the page has focus ("🎮 connected" in the toolbar). It shows up on the Deck as an Xbox 360
+  pad, and the pad is removed 60 s after the last input.
+
+Keyboard and mouse go through gamescope's own libei input server, so a pointer position lands 1:1
+on the Steam UI (verified to the pixel) and a key press works like a real keyboard. If gamescope
+has no libei socket, the plugin falls back to uinput devices. The gamepad is always a uinput
+device that Steam opens like a real controller. All of it is stdlib plus `ctypes`; nothing to
+install.
+
+Security notes for input:
+
+- Input is full control of the device: store purchases, Desktop Mode, a terminal. It needs the
+  token (bearer or the viewer cookie) and passes the same `Origin` check as the other routes.
+- Input is off until you turn it on, and it is refused while the pairing window is open.
+- The Deck shows a toast "Remote input from <ip>" when a client starts sending input, and every
+  input session is written to the plugin log.
+- Keys, mouse buttons and the gamepad are released when a client disconnects, when input is turned
+  off and when the plugin unloads.
 
 ## REST endpoints
 

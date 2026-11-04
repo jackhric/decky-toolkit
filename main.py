@@ -15,6 +15,7 @@ sys.path.append(decky.DECKY_PLUGIN_DIR + "/py_modules")  # the loader does this 
 from decky_mcp.auth import TokenAuth  # noqa: E402
 from decky_mcp.capture import ScreenCapturer  # noqa: E402
 from decky_mcp.http import Api  # noqa: E402
+from decky_mcp.input.service import InputService  # noqa: E402
 from decky_mcp.protocol import McpServer  # noqa: E402
 from decky_mcp.settings import Settings  # noqa: E402
 from decky_mcp.tools import build_registry  # noqa: E402
@@ -72,6 +73,7 @@ class Plugin:
     settings: Settings
     runner: web.AppRunner | None = None
     capturer: ScreenCapturer | None = None
+    input: InputService | None = None
     last_error: str | None = None
     pairing_until: float = 0.0
     pairing_count: int = 0
@@ -82,13 +84,14 @@ class Plugin:
             return
         api = Api(
             auth=TokenAuth(self.settings.token),
-            mcp=McpServer(build_registry(self.capturer), decky.logger),
+            mcp=McpServer(build_registry(self.capturer, self.input), decky.logger),
             capturer=self.capturer,
             static_dir=os.path.join(decky.DECKY_PLUGIN_DIR, "static"),
             logger=decky.logger,
             pairing_open=self._pairing_open,
             on_paired=self._on_paired,
             base_url=self._base_url,
+            input_service=self.input,
         )
         # The loader SIGKILLs a plugin 5s after SIGTERM, so never wait long for in-flight requests.
         runner = web.AppRunner(api.build_app(), access_log=None, shutdown_timeout=2)
@@ -113,6 +116,8 @@ class Plugin:
         decky.logger.info("MCP server listening on http://%s:%s/mcp", self.settings.bind, self.settings.port)
 
     async def _stop_server(self) -> None:
+        if self.input is not None:
+            await self.input.shutdown()
         if self.capturer is not None:
             await self.capturer.stop()
         if self.runner is not None:
@@ -145,7 +150,19 @@ class Plugin:
         self.pairing_until = 0.0
         return await self.get_status()
 
+    async def _on_input_session(self, remote: str) -> None:
+        decky.logger.info("input session toast: remote input from %s", remote)
+        await decky.emit("decky_mcp_input_session", remote)
+
     # ---- methods callable from the frontend ----
+
+    async def get_input_settings(self) -> dict[str, Any]:
+        assert self.input is not None  # created in _main
+        return self.input.status()
+
+    async def set_input_enabled(self, enabled: bool) -> dict[str, Any]:
+        assert self.input is not None
+        return await self.input.set_enabled(bool(enabled))
 
     async def get_status(self) -> dict[str, Any]:
         ip = _primary_ip()
@@ -163,6 +180,7 @@ class Plugin:
             "pairing_seconds_left": self._pairing_seconds_left(),
             "pairing_count": self.pairing_count,
             "stream": self.capturer.stats() if self.capturer else None,
+            "input": self.input.status() if self.input else None,
             "error": self.last_error,
         }
 
@@ -202,9 +220,11 @@ class Plugin:
         self.settings = Settings.load(decky.DECKY_PLUGIN_SETTINGS_DIR)
         decky.logger.info("Decky-MCP starting (python %s)", sys.version.split()[0])
         threading.Thread(target=_loader_watchdog, name="loader-watchdog", daemon=True).start()
-        self.capturer = ScreenCapturer(
-            lambda: self.settings, decky.logger, save_settings=lambda: self.settings.save(decky.DECKY_PLUGIN_SETTINGS_DIR),
-        )
+        save = lambda: self.settings.save(decky.DECKY_PLUGIN_SETTINGS_DIR)  # noqa: E731
+        self.capturer = ScreenCapturer(lambda: self.settings, decky.logger, save_settings=save)
+        self.input = InputService(lambda: self.settings, save, decky.logger, on_session=self._on_input_session)
+        # The panel mirrors a setting that remote clients usually change, so push changes to it.
+        self.input.add_listener(lambda st: asyncio.ensure_future(decky.emit("decky_mcp_input_state", st["enabled"])))
         await self._start_server()
 
     async def _unload(self) -> None:
