@@ -1103,7 +1103,7 @@ await check('Controllers view live: SSE through the proxy, add / remove, 409 and
   ctl.controllers = [...ctl.controllers, { id: 'evdev:8bd', name: '8BitDo Pro 2', kind: 'physical', virtual_id: null, vendor: '2dc8', product: '6003', device: '/dev/input/event7', steam: null }];
   ctlPush();
   await settle(120);
-  assert.deepEqual(await rowLabels(), ['Steam Deck', 'Decky-MCP pad (virtual)', '8BitDo Pro 2']);
+  assert.deepEqual(await rowLabels(), ['1. Steam Deck', '2. Decky-MCP pad (virtual)', '8BitDo Pro 2']);
   assert.ok(!fetched.includes('/controllers'), 'no polling while the stream is open');
 
   // Add: optional name, Enter takes "Virtual pad N" (the auto pad does not count).
