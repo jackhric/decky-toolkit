@@ -72,8 +72,7 @@ On the device, turn on Decky's developer mode (Decky settings → **General** �
 
 - **Install Plugin from URL:** enter `jackhric.github.io/decky-toolkit/decky-toolkit.zip` (always
   the latest plugin release) and press **Install**, or
-- **Install Plugin from ZIP File:** download `decky-toolkit-<version>.zip` from a `plugin-v…`
-  [release](https://github.com/jackhric/decky-toolkit/releases) (for example in Desktop Mode) and pick it with **Browse**.
+- **Install Plugin from ZIP File:** pick the plugin zip from a [release](https://github.com/jackhric/decky-toolkit/releases).
 
 Decky warns about third-party plugins (**Continue** unlocks after a few seconds), then asks you to
 confirm the install.
