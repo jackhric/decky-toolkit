@@ -65,12 +65,30 @@ Open Quick Access (…) → **Decky Toolkit** on the device. The panel shows the
 
 ### 2. Install the VS Code extension
 
-- **VS Code:** install
-  [Decky Toolkit from the VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=jackhric.decky-toolkit),
-  or search for "Decky Toolkit" in the Extensions view.
-- **VSCodium and other editors that use Open VSX:** install
-  [Decky Toolkit from Open VSX](https://open-vsx.org/extension/jackhric/decky-toolkit), or search
-  for "Decky Toolkit" in the Extensions view.
+<p align="center">
+  <img alt="Installing Decky Toolkit from the Extensions view in VS Code" src="docs/images/install/vscode-install.gif" width="800">
+</p>
+
+1. Open the **Extensions** view (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>X</kbd>, or
+   <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>X</kbd> on macOS), search for **Decky Toolkit** and click
+   **Install**.
+
+   <img alt="Decky Toolkit in the Extensions view search results with its Install button" src="docs/images/install/step1-search.png" width="464">
+
+2. VS Code asks whether you trust the publisher the first time you install one of their
+   extensions. Click **Trust Publisher & Install**.
+
+   <img alt="The Do you trust the publisher Jack Hric dialog with the Trust Publisher and Install button" src="docs/images/install/step2-trust.png" width="554">
+
+3. A **Decky** icon appears in the Activity Bar. Click it: the Devices view opens with an
+   **Add device** button, which is where [pairing](#3-pair-your-editor-with-the-device) starts.
+
+   <img alt="The Decky Devices view showing No devices yet and an Add device button" src="docs/images/install/step3-add-device.png" width="464">
+
+The same steps work in **VSCodium** and other editors that install from Open VSX. You can also
+open the listing directly:
+[VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=jackhric.decky-toolkit) ·
+[Open VSX](https://open-vsx.org/extension/jackhric/decky-toolkit).
 
 From a terminal:
 
@@ -101,7 +119,8 @@ code --install-extension decky-toolkit-<version>.vsix
 
 ### 3. Pair your editor with the device
 
-1. Click the **Decky** icon in the Activity Bar, then **+** to add a device by its IP address.
+1. Click the **Decky** icon in the Activity Bar, then **Add device** (or **+**) and enter the
+   device's IP address.
 2. Click the device. VS Code shows a four-digit code.
 3. The device shows a toast with the same code. In Quick Access → **Decky Toolkit**, check the
    code and press **Approve**.
