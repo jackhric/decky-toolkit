@@ -28,6 +28,8 @@
   async function run() {
     const my = ++gen;
     clearTimeout(retry);
+    // A second concurrent stream would feed stats() too and double the fps readout.
+    if (abort) abort.abort();
     abort = new AbortController();
     try {
       const res = await fetch(base + '/stream.mjpeg', { signal: abort.signal, cache: 'no-store' });
@@ -72,7 +74,8 @@
     const m = e.data;
     if (m.type === 'reconnect') { if (m.base) base = m.base; stop(); if (visible) run(); }
     // Hidden panels keep their context; stop pulling ~50 Mbit/s nobody is looking at.
-    if (m.type === 'visible') { visible = m.visible; if (visible) { show('Connecting…'); run(); } else stop(); }
+    // onDidChangeViewState also fires on focus changes, so only act when visibility really flips.
+    if (m.type === 'visible' && m.visible !== visible) { visible = m.visible; if (visible) { show('Connecting…'); run(); } else stop(); }
   });
 
   el('pause').onclick = () => { paused = !paused; el('pause').textContent = paused ? 'Resume' : 'Pause'; el('pause').classList.toggle('on', paused); };

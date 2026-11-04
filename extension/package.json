@@ -2,8 +2,9 @@
   "name": "decky-mcp",
   "displayName": "Decky-MCP",
   "description": "Live screen, deploy, logs and Steam console for Decky plugin development against a Decky-MCP device",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "jackhric",
+  "icon": "media/icon.png",
   "license": "BSD-3-Clause",
   "repository": {
     "type": "git",
@@ -22,22 +23,177 @@
   ],
   "main": "./dist/extension.js",
   "activationEvents": [
-    "workspaceContains:plugin.json"
+    "workspaceContains:plugin.json",
+    "onView:decky-mcp.device",
+    "onView:decky-mcp.plugins",
+    "onView:decky-mcp.preview"
   ],
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "decky-mcp",
+          "title": "Decky",
+          "icon": "media/decky.svg"
+        }
+      ]
+    },
+    "views": {
+      "decky-mcp": [
+        {
+          "id": "decky-mcp.device",
+          "name": "Device",
+          "icon": "media/decky.svg"
+        },
+        {
+          "id": "decky-mcp.plugins",
+          "name": "Plugins",
+          "icon": "media/decky.svg"
+        },
+        {
+          "type": "webview",
+          "id": "decky-mcp.preview",
+          "name": "Preview",
+          "icon": "media/decky.svg"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "decky-mcp.device",
+        "when": "!decky-mcp.paired",
+        "contents": "Not paired with the active Deck yet.\nClick Pair, then on the Deck open the Quick Access menu (…), choose Decky-MCP and press \"Pair a browser\" within two minutes.\n[Pair with device](command:decky-mcp.pair)\nOlder device plugin without pairing? Paste the token shown in the Decky-MCP panel instead.\n[Enter token manually](command:decky-mcp.enterToken)\nWrong Deck? [Switch device](command:decky-mcp.switchDevice) · [Add device](command:decky-mcp.addDevice) · [Change host](command:decky-mcp.changeHost)"
+      },
+      {
+        "view": "decky-mcp.plugins",
+        "when": "!decky-mcp.paired",
+        "contents": "Pair with the Deck to list, reload and install its Decky plugins.\n[Pair with device](command:decky-mcp.pair)"
+      }
+    ],
     "commands": [
-      { "command": "decky-mcp.pair", "title": "Pair with device", "category": "Decky" },
-      { "command": "decky-mcp.enterToken", "title": "Enter token manually", "category": "Decky" },
-      { "command": "decky-mcp.disconnect", "title": "Disconnect", "category": "Decky" },
-      { "command": "decky-mcp.openScreen", "title": "Open screen", "category": "Decky" },
-      { "command": "decky-mcp.deploy", "title": "Deploy plugin", "category": "Decky" },
-      { "command": "decky-mcp.restartLoader", "title": "Restart loader", "category": "Decky" },
-      { "command": "decky-mcp.reloadPlugin", "title": "Reload plugin", "category": "Decky" },
-      { "command": "decky-mcp.loaderLogs", "title": "Show loader logs", "category": "Decky" },
-      { "command": "decky-mcp.pluginLogs", "title": "Show plugin logs", "category": "Decky" },
-      { "command": "decky-mcp.evaluate", "title": "Evaluate JS in Steam UI", "category": "Decky" },
-      { "command": "decky-mcp.toast", "title": "Toast on Deck", "category": "Decky" },
-      { "command": "decky-mcp.writeMcpConfig", "title": "Write MCP config for this workspace", "category": "Decky" }
+      {
+        "command": "decky-mcp.pair",
+        "title": "Pair with device",
+        "category": "Decky",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "decky-mcp.enterToken",
+        "title": "Enter token manually",
+        "category": "Decky",
+        "icon": "$(key)"
+      },
+      {
+        "command": "decky-mcp.disconnect",
+        "title": "Disconnect",
+        "category": "Decky",
+        "icon": "$(debug-disconnect)"
+      },
+      {
+        "command": "decky-mcp.openScreen",
+        "title": "Open screen",
+        "category": "Decky",
+        "icon": "$(device-desktop)"
+      },
+      {
+        "command": "decky-mcp.deploy",
+        "title": "Deploy plugin",
+        "category": "Decky",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "decky-mcp.restartLoader",
+        "title": "Restart loader",
+        "category": "Decky",
+        "icon": "$(debug-restart)"
+      },
+      {
+        "command": "decky-mcp.reloadPlugin",
+        "title": "Reload plugin",
+        "category": "Decky",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "decky-mcp.loaderLogs",
+        "title": "Show loader logs",
+        "category": "Decky",
+        "icon": "$(output)"
+      },
+      {
+        "command": "decky-mcp.pluginLogs",
+        "title": "Show plugin logs",
+        "category": "Decky",
+        "icon": "$(output)"
+      },
+      {
+        "command": "decky-mcp.evaluate",
+        "title": "Evaluate JS in Steam UI",
+        "category": "Decky"
+      },
+      {
+        "command": "decky-mcp.toast",
+        "title": "Toast on Deck",
+        "category": "Decky"
+      },
+      {
+        "command": "decky-mcp.writeMcpConfig",
+        "title": "Write MCP config for this workspace",
+        "category": "Decky"
+      },
+      {
+        "command": "decky-mcp.refresh",
+        "title": "Refresh",
+        "category": "Decky",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "decky-mcp.refreshPlugins",
+        "title": "Refresh plugins",
+        "category": "Decky",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "decky-mcp.installZip",
+        "title": "Install plugin zip…",
+        "category": "Decky",
+        "icon": "$(package)"
+      },
+      {
+        "command": "decky-mcp.changeHost",
+        "title": "Change host",
+        "category": "Decky",
+        "icon": "$(server)"
+      },
+      {
+        "command": "decky-mcp.addDevice",
+        "title": "Add device…",
+        "category": "Decky",
+        "icon": "$(add)"
+      },
+      {
+        "command": "decky-mcp.editDevice",
+        "title": "Edit device",
+        "category": "Decky",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "decky-mcp.removeDevice",
+        "title": "Remove device",
+        "category": "Decky",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "decky-mcp.setActiveDevice",
+        "title": "Set active device",
+        "category": "Decky",
+        "icon": "$(check)"
+      },
+      {
+        "command": "decky-mcp.switchDevice",
+        "title": "Switch device",
+        "category": "Decky",
+        "icon": "$(vm)"
+      }
     ],
     "configuration": {
       "title": "Decky-MCP",
@@ -58,6 +214,123 @@
           "description": "Directory name under ~/homebrew/plugins to deploy to. Empty means the workspace folder's name."
         }
       }
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "decky-mcp.pair",
+          "when": "view == decky-mcp.device",
+          "group": "navigation@1"
+        },
+        {
+          "command": "decky-mcp.openScreen",
+          "when": "view == decky-mcp.device && decky-mcp.paired",
+          "group": "navigation@2"
+        },
+        {
+          "command": "decky-mcp.refresh",
+          "when": "view == decky-mcp.device",
+          "group": "navigation@3"
+        },
+        {
+          "command": "decky-mcp.switchDevice",
+          "when": "view == decky-mcp.device",
+          "group": "devices@1"
+        },
+        {
+          "command": "decky-mcp.addDevice",
+          "when": "view == decky-mcp.device",
+          "group": "devices@2"
+        },
+        {
+          "command": "decky-mcp.installZip",
+          "when": "view == decky-mcp.plugins && decky-mcp.paired",
+          "group": "navigation@1"
+        },
+        {
+          "command": "decky-mcp.refreshPlugins",
+          "when": "view == decky-mcp.plugins",
+          "group": "navigation@2"
+        },
+        {
+          "command": "decky-mcp.openScreen",
+          "when": "view == decky-mcp.preview && decky-mcp.paired",
+          "group": "navigation@1"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "decky-mcp.addDevice",
+          "when": "view == decky-mcp.device && viewItem == devices",
+          "group": "inline"
+        },
+        {
+          "command": "decky-mcp.editDevice",
+          "when": "view == decky-mcp.device && viewItem =~ /^device(\\.active)?$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "decky-mcp.removeDevice",
+          "when": "view == decky-mcp.device && viewItem =~ /^device(\\.active)?$/",
+          "group": "inline@2"
+        },
+        {
+          "command": "decky-mcp.setActiveDevice",
+          "when": "view == decky-mcp.device && viewItem == device",
+          "group": "1_device@1"
+        },
+        {
+          "command": "decky-mcp.editDevice",
+          "when": "view == decky-mcp.device && viewItem =~ /^device(\\.active)?$/",
+          "group": "1_device@2"
+        },
+        {
+          "command": "decky-mcp.removeDevice",
+          "when": "view == decky-mcp.device && viewItem =~ /^device(\\.active)?$/",
+          "group": "1_device@3"
+        },
+        {
+          "command": "decky-mcp.refresh",
+          "when": "view == decky-mcp.device && viewItem == connection",
+          "group": "inline@1"
+        },
+        {
+          "command": "decky-mcp.changeHost",
+          "when": "view == decky-mcp.device && viewItem == connection",
+          "group": "inline@2"
+        },
+        {
+          "command": "decky-mcp.openScreen",
+          "when": "view == decky-mcp.device && viewItem == screen",
+          "group": "inline"
+        },
+        {
+          "command": "decky-mcp.reloadPlugin",
+          "when": "view == decky-mcp.plugins && viewItem == plugin",
+          "group": "inline@1"
+        },
+        {
+          "command": "decky-mcp.pluginLogs",
+          "when": "view == decky-mcp.plugins && viewItem == plugin",
+          "group": "inline@2"
+        },
+        {
+          "command": "decky-mcp.reloadPlugin",
+          "when": "view == decky-mcp.plugins && viewItem == plugin",
+          "group": "1_plugin@1"
+        },
+        {
+          "command": "decky-mcp.pluginLogs",
+          "when": "view == decky-mcp.plugins && viewItem == plugin",
+          "group": "1_plugin@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "decky-mcp.setActiveDevice",
+          "when": "false"
+        }
+      ]
     }
   },
   "scripts": {
@@ -65,6 +338,7 @@
     "watch": "node esbuild.mjs --watch",
     "typecheck": "tsc --noEmit",
     "package": "vsce package --no-dependencies",
+    "smoke": "node scripts/smoke.mjs",
     "dev-check": "node scripts/dev-check.mjs"
   },
   "devDependencies": {

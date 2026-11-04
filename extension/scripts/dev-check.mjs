@@ -112,6 +112,67 @@ await check('/stream.mjpeg via proxy (5 s)', async () => {
   return `${parts} parts in 5 s (${(parts / 5).toFixed(1)} fps, ${mbps} Mbit/s, ${ctype})`;
 });
 
+await check('/plugins via proxy and client', async () => {
+  const res = await fetch(base + '/plugins', { headers: { Origin: 'vscode-webview://dev-check' } });
+  if (!res.ok) throw new Error(`HTTP ${res.status} ${await res.text()}`);
+  const viaProxy = await res.json();
+  const viaClient = await new DeckyClient({ host, port }, token).listPlugins();
+  if (!Array.isArray(viaProxy) || viaProxy.length !== viaClient.length) throw new Error(`proxy ${viaProxy.length} vs client ${viaClient.length}`);
+  const bad = viaClient.find(p => typeof p.dir !== 'string');
+  if (bad) throw new Error(`entry without dir: ${JSON.stringify(bad)}`);
+  return viaClient.map(p => `${p.name ?? p.dir} ${p.version ?? '?'} (${p.dir}, backend=${p.has_backend})`).join('; ');
+});
+
+await check('/frame.jpg via proxy (sidebar preview)', async () => {
+  const sizes = [];
+  for (let i = 0; i < 3; i++) {
+    const res = await fetch(`${base}/frame.jpg?t=${Date.now()}`, { headers: { Origin: 'vscode-webview://dev-check' } });
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${await res.text()}`);
+    if (res.headers.get('access-control-allow-origin') !== 'vscode-webview://dev-check') throw new Error('missing CORS header');
+    const buf = new Uint8Array(await res.arrayBuffer());
+    if (buf[0] !== 0xff || buf[1] !== 0xd8) throw new Error(`not a JPEG (${res.headers.get('content-type')})`);
+    sizes.push(buf.length);
+    await new Promise(r => setTimeout(r, 1500));
+  }
+  return `3 frames at 1.5 s: ${sizes.map(s => `${(s / 1024).toFixed(0)} KiB`).join(', ')} (≈${(sizes.reduce((a, b) => a + b) * 8 / 4.5 / 1e6).toFixed(2)} Mbit/s)`;
+});
+
+// Runs the real media/screen.js against the proxy in a minimal DOM, including the repeated
+// `visible: true` messages VS Code sends on focus changes, and compares its fps readout with the
+// device's own /stream/stats and with a raw part count.
+await check('screen panel fps readout matches the device', async () => {
+  const src = readFileSync(path.join(root, 'media', 'screen.js'), 'utf8');
+  const els = new Map();
+  const el = id => {
+    if (!els.has(id)) {
+      const classes = new Set();
+      const e = {
+        textContent: '', hidden: false, onclick: null, onload: null,
+        classList: { add: c => classes.add(c), remove: c => classes.delete(c), toggle: (c, on) => ((on ?? !classes.has(c)) ? classes.add(c) : classes.delete(c), classes.has(c)) },
+      };
+      Object.defineProperty(e, 'src', { set(v) { this._src = v; queueMicrotask(() => this.onload?.()); }, get() { return this._src; } });
+      e.naturalWidth = 1920; e.naturalHeight = 1080;
+      els.set(id, e);
+    }
+    return els.get(id);
+  };
+  const listeners = [];
+  const document = { getElementById: el, body: { dataset: { base } }, addEventListener() {} };
+  const window = { addEventListener: (t, fn) => { if (t === 'message') listeners.push(fn); } };
+  const post = data => listeners.forEach(fn => fn({ data }));
+  new Function('acquireVsCodeApi', 'document', 'window', src)(() => ({ postMessage() {} }), document, window);
+  for (const t of [800, 1600, 2400]) setTimeout(() => post({ type: 'visible', visible: true }), t);
+  await new Promise(r => setTimeout(r, 6000));
+  const shown = Number(el('fps').textContent);
+  const frames = Number(el('frames').textContent);
+  post({ type: 'visible', visible: false });
+  const s = await new DeckyClient({ host, port }, token).streamStats();
+  const ref = s.settings?.fps ? Math.min(s.fps, s.settings.fps) : s.fps;
+  const diff = Math.abs(shown - ref) / ref;
+  if (!(diff <= 0.1)) throw new Error(`page shows ${shown} fps, device reports ${s.fps} (cap ${s.settings?.fps}); ${frames} frames in 6 s`);
+  return `page shows ${shown} fps after 3 extra "visible" messages, device reports ${s.fps} fps (cap ${s.settings?.fps}), ${frames} frames in 6 s (${(frames / 6).toFixed(1)}/s)`;
+});
+
 await check('MCP tools/list via client', async () => {
   const tools = await new DeckyClient({ host, port }, token).listTools();
   if (tools.length < 13) throw new Error(`only ${tools.length} tools`);

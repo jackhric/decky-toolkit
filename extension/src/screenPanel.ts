@@ -1,64 +1,56 @@
 import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
-import { DeckyClient, describeError } from './client';
-import { Connection } from './connection';
+import { Connection, ConnectionState, externalProxyBase } from './connection';
 
 export class StatusBar implements vscode.Disposable {
   private readonly item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
-  private fps?: number;
-  private error?: string;
+  private readonly sub: vscode.Disposable;
 
-  constructor(private readonly conn: Connection) {
-    this.item.command = 'decky-mcp.openScreen';
-    conn.onDidChange(() => this.render());
+  constructor(private readonly conn: ConnectionState) {
+    this.item.command = 'decky-mcp.switchDevice';
+    this.sub = conn.onDidChange(() => this.render());
     this.render();
     this.item.show();
   }
 
-  set(fps: number | undefined, error?: string): void {
-    this.fps = fps;
-    this.error = error;
-    this.render();
-  }
-
   private render(): void {
+    const { paired, health, stats, statsError } = this.conn;
+    const error = health.kind === 'unreachable' ? health.error : statsError;
     let text = `$(device-mobile) Decky: ${this.conn.label}`;
-    if (!this.conn.paired) text += ' (not paired)';
-    else if (this.error) text += ' ○ offline';
-    else if (this.fps !== undefined) text += ` ● ${Math.round(this.fps)} fps`;
+    if (!paired) text += ' (not paired)';
+    else if (error) text += ' ○ offline';
+    else if (stats) text += ` ● ${Math.round(stats.running ? stats.fps : 0)} fps`;
     this.item.text = text;
-    this.item.tooltip = this.error ? `Decky-MCP: ${this.error}` : 'Open the Deck screen';
+    this.item.tooltip = `${error ? `Decky-MCP: ${error}\n` : ''}${this.conn.address.host}:${this.conn.address.port}. Click to switch device or open the screen`;
   }
 
   dispose(): void {
+    this.sub.dispose();
     this.item.dispose();
   }
 }
 
 export class ScreenPanel {
   private static current?: ScreenPanel;
-  private poll?: NodeJS.Timeout;
   private readonly disposables: vscode.Disposable[] = [];
 
-  static async show(ctx: vscode.ExtensionContext, conn: Connection, status: StatusBar): Promise<void> {
+  static async show(ctx: vscode.ExtensionContext, conn: Connection): Promise<void> {
     if (ScreenPanel.current) {
       ScreenPanel.current.panel.reveal();
       return;
     }
-    const base = await conn.proxy.start();
-    const external = (await vscode.env.asExternalUri(vscode.Uri.parse(base))).toString(true).replace(/\/$/, '');
+    const { base, external } = await externalProxyBase(conn);
     const panel = vscode.window.createWebviewPanel('decky-mcp.screen', `Deck: ${conn.label}`, vscode.ViewColumn.Beside, {
       enableScripts: true,
       retainContextWhenHidden: true,
       localResourceRoots: [vscode.Uri.joinPath(ctx.extensionUri, 'media')],
     });
-    ScreenPanel.current = new ScreenPanel(ctx, conn, status, panel, base, external);
+    ScreenPanel.current = new ScreenPanel(ctx, conn, panel, base, external);
   }
 
   private constructor(
     ctx: vscode.ExtensionContext,
-    private readonly conn: Connection,
-    private readonly status: StatusBar,
+    conn: Connection,
     private readonly panel: vscode.WebviewPanel,
     private readonly base: string,
     external: string,
@@ -69,23 +61,11 @@ export class ScreenPanel {
     panel.webview.onDidReceiveMessage(m => {
       if (m?.type === 'snapshot') void vscode.env.openExternal(vscode.Uri.parse(`${this.base}/frame.jpg?t=${Date.now()}`));
     }, null, this.disposables);
-    conn.onDidChange(() => {
+    conn.onDidChangeTarget(() => {
       panel.title = `Deck: ${conn.label}`;
       void panel.webview.postMessage({ type: 'reconnect' });
     }, null, this.disposables);
-    this.poll = setInterval(() => void this.pollStats(), 5000);
-    void this.pollStats();
-  }
-
-  private async pollStats(): Promise<void> {
-    const token = await this.conn.token();
-    if (!token) return this.status.set(undefined);
-    try {
-      const stats = await new DeckyClient(this.conn.address, token).streamStats();
-      this.status.set(stats.running ? stats.fps : 0, stats.error ?? undefined);
-    } catch (e) {
-      this.status.set(undefined, describeError(e));
-    }
+    this.disposables.push(conn.watchStats());
   }
 
   private html(ctx: vscode.ExtensionContext, external: string): string {
@@ -133,8 +113,6 @@ export class ScreenPanel {
 
   private dispose(): void {
     ScreenPanel.current = undefined;
-    clearInterval(this.poll);
-    this.status.set(undefined);
     this.disposables.forEach(d => d.dispose());
   }
 }
