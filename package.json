@@ -1,6 +1,6 @@
 {
   "name": "decky-toolkit",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "MCP server for AI-assisted Decky plugin development",
   "type": "module",
   "scripts": {
@@ -13,7 +13,13 @@
     "type": "git",
     "url": "git+https://github.com/jackhric/decky-toolkit.git"
   },
-  "keywords": ["decky", "decky-plugin", "mcp", "steam-deck", "bazzite"],
+  "keywords": [
+    "decky",
+    "decky-plugin",
+    "mcp",
+    "steam-deck",
+    "bazzite"
+  ],
   "author": "jackh",
   "license": "MIT",
   "devDependencies": {
@@ -33,7 +39,10 @@
   },
   "pnpm": {
     "peerDependencyRules": {
-      "ignoreMissing": ["react", "react-dom"]
+      "ignoreMissing": [
+        "react",
+        "react-dom"
+      ]
     }
   }
 }
