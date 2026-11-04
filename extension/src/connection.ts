@@ -98,13 +98,14 @@ export class Connection implements ConnectionState, vscode.Disposable {
 
   private get settingsAddress(): DeviceAddress {
     const cfg = vscode.workspace.getConfiguration('decky-toolkit');
-    return { host: cfg.get<string>('host', '10.0.70.18').trim(), port: cfg.get<number>('port', 8765) };
+    return { host: cfg.get<string>('host', '').trim(), port: cfg.get<number>('port', 8765) };
   }
 
   /** Seeds the device list from the host/port settings the first time the extension runs. */
   async initDevices(): Promise<void> {
     if (this.ctx.globalState.get<SavedDevice[]>(DEVICES_KEY) !== undefined) return;
     const { host, port } = this.settingsAddress;
+    if (!host) return;
     const seed: SavedDevice = { id: newDeviceId(), name: host, host, port };
     await this.ctx.globalState.update(DEVICES_KEY, [seed]);
     await this.ctx.globalState.update(ACTIVE_KEY, seed.id);

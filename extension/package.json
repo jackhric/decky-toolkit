@@ -333,7 +333,7 @@
       "properties": {
         "decky-toolkit.host": {
           "type": "string",
-          "default": "10.0.70.18",
+          "default": "",
           "description": "IP address or hostname of the device running the Decky Toolkit plugin."
         },
         "decky-toolkit.port": {
