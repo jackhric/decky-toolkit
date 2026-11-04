@@ -10,11 +10,11 @@ import { fileURLToPath } from 'url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
-const host = process.argv[2] ?? process.env.DECKY_HOST ?? '10.0.70.18';
+const host = process.argv[2] ?? process.env.DECKY_HOST;
 const port = Number(process.argv[3] ?? process.env.DECKY_PORT ?? 8765);
 const tokenFile = process.env.DECKY_TOKEN_FILE;
-if (!tokenFile) {
-  console.error('Set DECKY_TOKEN_FILE to a file containing the bearer token.');
+if (!tokenFile || !host) {
+  console.error('Usage: DECKY_TOKEN_FILE=<file> node scripts/dev-check.mjs <host> [port]  (or set DECKY_HOST)');
   process.exit(2);
 }
 const token = readFileSync(tokenFile, 'utf8').trim();
