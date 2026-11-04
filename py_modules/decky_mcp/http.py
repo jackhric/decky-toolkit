@@ -8,7 +8,8 @@ from typing import Callable
 
 from aiohttp import web
 
-from . import audit, cdp, logs
+from . import audit, cdp, games, logs
+from .apps import Apps
 from .audio import FORMAT as AUDIO_FORMAT, AudioCapturer, AudioDisabled, AudioUnavailable
 from .auth import TokenAuth
 from .capture import BOUNDARY, CaptureUnavailable, ScreenCapturer
@@ -18,6 +19,7 @@ from .input.ei import EiError
 from .input.service import InputDisabled, InputService, InputUnavailable
 from .pairing import MAX_WAIT_SECONDS, POLL_AFTER_MS, PairingLimit, PairingRequests
 from .protocol import SERVER_INFO, McpServer
+from .record import check_name, recorder_for
 from .tools import plugins
 from .tools.system import list_plugins, schedule_loader_restart
 from .ui import UiNavigator
@@ -90,6 +92,13 @@ class Api:
             web.get("/logs/stream", self.handle_logs_stream),
             web.get("/cef/console", self.handle_console),
             web.get("/cef/console/stream", self.handle_console_stream),
+            web.get("/apps", self.handle_apps),
+            web.get("/apps/{appid}", self.handle_app),
+            web.get("/apps/{appid}/dirs", self.handle_app_dirs),
+            web.get("/apps/{appid}/saves", self.handle_app_saves),
+            web.get("/fs", self.handle_fs),
+            web.get("/recordings", self.handle_recordings),
+            web.get("/recordings/{name}", self.handle_recording_download),
             *self.mcp.routes(),
         ])
         return app
@@ -631,3 +640,74 @@ class Api:
                 await asyncio.gather(pending, return_exceptions=True)
             await lines.aclose()
         return res
+
+    # ---- apps, game files, recordings ----
+
+    @property
+    def apps(self) -> Apps:
+        if getattr(self, "_apps", None) is None:
+            self._apps = Apps()
+        return self._apps
+
+    async def _library_call(self, fn, *args) -> web.Response:
+        try:
+            return web.json_response(await fn(*args))
+        except games.SensitivePath as e:
+            return _error(403, str(e))
+        except FileNotFoundError as e:
+            return _error(404, str(e))
+        except ValueError as e:
+            return _error(400, str(e))
+        except cdp.CdpError as e:
+            return _error(502, str(e))
+
+    async def _app_route(self, request: web.Request, fn) -> web.Response:
+        raw = request.match_info["appid"]
+        if not raw.isdigit() or int(raw) <= 0:
+            return _error(400, "appid must be a positive integer")
+        return await self._library_call(fn, int(raw))
+
+    async def handle_apps(self, request: web.Request) -> web.Response:
+        installed = request.query.get("installed_only", "1") not in ("0", "false")
+        tools = request.query.get("include_tools", "0") in ("1", "true")
+        return await self._library_call(self.apps.list, installed, request.query.get("query"), tools)
+
+    async def handle_app(self, request: web.Request) -> web.Response:
+        return await self._app_route(request, self.apps.info)
+
+    async def handle_app_dirs(self, request: web.Request) -> web.Response:
+        return await self._app_route(request, self.apps.dirs)
+
+    async def handle_app_saves(self, request: web.Request) -> web.Response:
+        return await self._app_route(request, self.apps.saves)
+
+    async def handle_fs(self, request: web.Request) -> web.Response:
+        path = request.query.get("path")
+        if not path:
+            return _error(400, "path is required")
+        try:
+            depth = int(request.query.get("depth", 1))
+        except ValueError:
+            return _error(400, "depth must be an integer")
+
+        async def listing() -> dict:
+            return await asyncio.to_thread(games.fs_list, path, depth, request.query.get("glob") or None)
+        return await self._library_call(listing)
+
+    async def handle_recordings(self, _request: web.Request) -> web.Response:
+        if self.capturer is None:
+            return _error(404, "capture not available")
+        return web.json_response(await asyncio.to_thread(recorder_for(self.capturer).list))
+
+    async def handle_recording_download(self, request: web.Request) -> web.StreamResponse:
+        if self.capturer is None:
+            return _error(404, "capture not available")
+        try:
+            name = check_name(request.match_info["name"])
+        except ValueError as e:
+            return _error(400, str(e))
+        path = recorder_for(self.capturer).path_for(name)
+        if not os.path.isfile(path):
+            return _error(404, f"no recording named {name}")
+        return web.FileResponse(path, headers={"Content-Type": "video/x-matroska",
+                                               "Content-Disposition": f'attachment; filename="{name}.mkv"'})
