@@ -1,7 +1,7 @@
 {
   "name": "decky-toolkit",
   "displayName": "Decky Toolkit",
-  "description": "Live screen, one-click deploy, logs and Steam console for Decky plugin development on devices running Decky Loader (Steam Deck, SteamOS, Bazzite)",
+  "description": "Decky Loader plugin development for VS Code.",
   "version": "0.6.3",
   "publisher": "jackhric",
   "icon": "media/icon.png",
