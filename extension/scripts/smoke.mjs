@@ -244,6 +244,7 @@ globalThis.fetch = async (url, init = {}) => {
     const dir = u.searchParams.get('plugin');
     if (!dir) return json({ lines: device.journal.slice(-Number(u.searchParams.get('tail') ?? 100)) });
     return device.pluginLog[dir] ? json({ lines: device.pluginLog[dir].slice(-5) }) : json({ error: 'no log dir' }, 404);
+  }
   if (u.pathname === '/input/settings') {
     if (!device.inputSupported) return new Response('404: Not Found', { status: 404 });
     if (init.method === 'PUT') device.input = { ...device.input, enabled: JSON.parse(init.body).enabled };
