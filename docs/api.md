@@ -1,7 +1,8 @@
 # Decky-MCP HTTP API
 
-Base URL: `http://<deck-ip>:8765`. Everything except `/`, `/health` and the viewer's own token /
-pairing handling requires either `Authorization: Bearer <token>` or the `decky_mcp_token` cookie.
+Base URL: `http://<deck-ip>:8765`. Everything except `/`, `/health`, `/pair` and the viewer's own
+token / pairing handling requires either `Authorization: Bearer <token>` or the `decky_mcp_token`
+cookie; routes marked "bearer" refuse the cookie.
 Unauthorised requests get `401`; a request with an `Origin` header that does not point at this host
 or loopback gets `403`. `GET /health` reports `api_version`; clients compare it before using
 version-specific routes.
@@ -36,30 +37,30 @@ Status key: **live** = implemented and deployed, **planned** = agreed design, no
 
 | Route | Auth | Status | Notes |
 | --- | --- | --- | --- |
-| `GET /pair` | none, only while pairing is open | planned | Returns `{token, url, api_version}` so a client (VS Code extension, CLI) can obtain the token during the 120 s window opened from the Decky panel. Outside the window: `403 {"error":"pairing closed"}`. Each grant increments the panel's pairing counter and emits the `decky_mcp_paired` event. |
+| `GET /pair` | none, only while pairing is open | live | Returns `{token, url, api_version}` (`url` is `http://<ip>:<port>`, no path) so a client (VS Code extension, CLI) can obtain the token during the 120 s window opened from the Decky panel. Outside the window: `403 {"error":"pairing closed"}`; a foreign `Origin` also gets `403`. Each grant increments the panel's pairing counter and emits the `decky_mcp_paired` event. |
 
 ## Plugins
 
 | Route | Auth | Status | Notes |
 | --- | --- | --- | --- |
-| `POST /plugins/install` | bearer | planned | Body: `multipart/form-data` with field `file` (a plugin zip as produced by the Decky CLI or `scripts/deploy.sh` staging: either `<name>/...` as the single top-level dir, or files at the zip root). Query: `restart=loader` (default) \| `plugin` \| `none`. Validates `plugin.json` (`name`, `author`, `flags`, `api_version`) and refuses path traversal. Installs to `~/homebrew/plugins/<dirname>` atomically (unzip to a temp dir, swap). Response `{installed: {dir, name, version}, restarted: "loader"|"plugin"|"none"}`. With `restart=loader` the reply is sent before the restart fires 1 s later. |
-| `GET /plugins` | bearer/cookie | planned | Same as the `list_plugins` tool. |
-| `POST /plugins/{dir}/reload` | bearer | planned | Reload one plugin's backend via Decky (`loader/reload_plugin`) without restarting the loader. |
-| `POST /loader/restart` | bearer | planned | Same as the `restart_loader` tool. |
+| `POST /plugins/install` | bearer | live | Body: `multipart/form-data` with field `file` (a plugin zip as produced by the Decky CLI or `scripts/deploy.sh` staging: either `<name>/...` as the single top-level dir, or files at the zip root). Query: `restart=loader` (default) \| `plugin` \| `none`. Validates `plugin.json` (string `name`, string `author`, list `flags`, int `api_version`) and refuses absolute paths, `..` and symlinks (`400 {"error"}`). The dir name is the zip's top-level dir, else `name` with spaces turned into `-`. Installs to `~/homebrew/plugins/<dirname>` atomically (unzip to a temp dir next to `plugins/`, D0755/F0644 root:root, swap). `version` comes from `package.json` (may be `null`). Response `{installed: {dir, name, version}, restarted: "loader"|"plugin"|"none"}`. With `restart=loader` the reply is sent before the restart fires 1 s later. |
+| `GET /plugins` | bearer/cookie | live | Same as the `list_plugins` tool. |
+| `POST /plugins/{dir}/reload` | bearer | live | Reload one plugin's backend via Decky (`loader/reload_plugin`, called through `window.DeckyBackend` in SharedJSContext) without restarting the loader. `{dir, name, scheduled}`; reloading Decky-MCP itself is deferred 1 s (`scheduled: true`). `404` if the dir has no `plugin.json`, `502` if the Steam UI is unreachable. |
+| `POST /loader/restart` | bearer | live | Same as the `restart_loader` tool. `{restarting: true, delay_s: 1}`. |
 
 ## Logs
 
 | Route | Auth | Status | Notes |
 | --- | --- | --- | --- |
-| `GET /logs/stream` | bearer/cookie | planned | `text/event-stream`. Query: `source=loader` (journal, default) \| `plugin`, `plugin=<dir>` for plugin logs, `tail=<n>` initial lines (default 100). Events: `data: <one log line>`; a comment `: keepalive` every 15 s. |
-| `GET /logs/tail` | bearer/cookie | planned | Same filters, returns `{lines: [...]}` once. |
+| `GET /logs/stream` | bearer/cookie | live | `text/event-stream`. Query: `source=loader` (journal, default) \| `plugin`, `plugin=<dir>` for plugin logs (giving `plugin` alone implies `source=plugin`), `tail=<n>` initial lines (default 100, max 5000). Events: `data: <one log line>`; a comment `: keepalive` every 15 s. Plugin logs follow the newest file in `~/homebrew/logs/<dir>/` and switch when Decky starts a new one. |
+| `GET /logs/tail` | bearer/cookie | live | Same filters, returns `{lines: [...]}` once. `404` if the plugin has no log dir. |
 
 ## MCP tools (live)
 
 `decky_status`, `list_plugins`, `read_plugin_log`, `loader_log`, `restart_loader`, `cef_targets`,
 `cef_evaluate`, `cef_screenshot`, `toast`, `screen_capture`, `stream_status`, `read_file`,
-`write_file`. Planned additions mirror the planned routes: `install_plugin` (path on device or
-base64 zip), `reload_plugin`.
+`write_file`, `install_plugin` (`path` on the device or `zip_base64`, plus `restart` as for
+`POST /plugins/install`), `reload_plugin` (`dir`).
 
 ## Events (backend → Decky frontend)
 
