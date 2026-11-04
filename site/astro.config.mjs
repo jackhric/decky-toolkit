@@ -10,7 +10,7 @@ export default defineConfig({
   site: 'https://jackhric.github.io',
   base: '/decky-toolkit',
   integrations: [
-    sitemap({ filter: page => !page.includes('/variants/') }),
+    sitemap(),
     starlight({
       title: 'Decky Toolkit',
       description: 'Build, test and deploy SteamOS plugins quickly from VS Code or VSCodium.',
