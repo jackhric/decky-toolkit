@@ -221,6 +221,8 @@ drive frontend methods from a test, evaluate
 SharedJSContext via the `cef_evaluate` tool.
 
 ## CI and releases
+- Work branches off `dev` and PRs target `dev`; `dev` is merged into `main` to release. CI runs on PRs and
+  pushes for both branches; release-please only runs on `main`.
 - `.github/workflows/ci.yml`: plugin (typecheck, build, zip), Python tests, extension (typecheck, build,
   smoke, package). Also called by `release.yml`.
 - Versions are bumped only by release-please (`release-please-config.json`, `.release-please-manifest.json`)
