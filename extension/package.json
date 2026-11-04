@@ -2,7 +2,7 @@
   "name": "decky-mcp",
   "displayName": "Decky-MCP",
   "description": "Live screen, deploy, logs and Steam console for Decky plugin development against a Decky-MCP device",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "publisher": "jackhric",
   "icon": "media/icon.png",
   "license": "BSD-3-Clause",
@@ -24,6 +24,8 @@
   "main": "./dist/extension.js",
   "activationEvents": [
     "workspaceContains:plugin.json",
+    "workspaceContains:*/plugin.json",
+    "workspaceContains:*/*/plugin.json",
     "onView:decky-mcp.devices",
     "onView:decky-mcp.actions",
     "onView:decky-mcp.plugins",
@@ -108,7 +110,19 @@
         "command": "decky-mcp.deploy",
         "title": "Deploy plugin",
         "category": "Decky",
-        "icon": "$(cloud-upload)"
+        "icon": "$(rocket)"
+      },
+      {
+        "command": "decky-mcp.deployFull",
+        "title": "Deploy plugin (full restart)",
+        "category": "Decky",
+        "icon": "$(debug-restart)"
+      },
+      {
+        "command": "decky-mcp.toggleAutoDeploy",
+        "title": "Toggle auto-deploy on change",
+        "category": "Decky",
+        "icon": "$(sync)"
       },
       {
         "command": "decky-mcp.restartLoader",
@@ -262,9 +276,36 @@
           "type": "boolean",
           "default": true,
           "description": "Open the live screen panel after the first successful connect of a session."
+        },
+        "decky-mcp.deploy.build": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "always",
+            "never"
+          ],
+          "enumDescriptions": [
+            "Run the package.json build script only when src/ (or tsconfig/rollup config) is newer than dist/index.js",
+            "Always run the build script before deploying",
+            "Never build; deploy dist/ as it is"
+          ],
+          "default": "auto",
+          "description": "Whether Deploy runs `pnpm run build` (or npm/yarn, from the lockfile) first. Python files never need a build."
+        },
+        "decky-mcp.deploy.onChange": {
+          "type": "boolean",
+          "default": false,
+          "description": "Deploy the workspace plugin (fast, without building) whenever dist/index.js, main.py or py_modules/**/*.py change. Keep your build running in watch mode (`pnpm run watch`)."
         }
       }
     },
+    "keybindings": [
+      {
+        "command": "decky-mcp.deploy",
+        "key": "ctrl+alt+d",
+        "mac": "cmd+alt+d"
+      }
+    ],
     "menus": {
       "view/title": [
         {

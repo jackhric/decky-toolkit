@@ -7,7 +7,9 @@ HTTP server on the Steam Deck (port 8765) and gives you, inside VS Code or VSCod
   (grouped by Screen, Plugin, Loader, Steam and MCP), plugins and a small live preview appear, so
   you never need the command palette,
 - a live view of the Deck's display (30 fps MJPEG) in an editor tab,
-- one-click build + deploy of the Decky plugin in your workspace, and install of any plugin zip,
+- one-click deploy of the Decky plugin open in your workspace: it is detected automatically, built
+  only when its sources changed, and reloaded on its own in about a second (no loader restart),
+  optionally on every change; plus install of any plugin zip,
 - live loader and plugin logs in output channels,
 - a JavaScript console for the Steam UI (`SharedJSContext`) and Deck toasts,
 - a generated `.mcp.json` so Claude Code and other MCP clients in the workspace can use the Deck.
@@ -23,8 +25,10 @@ The Decky-MCP plugin must already be installed and enabled on the Deck.
    [Pairing](#pairing). If it is paired, it connects in a second.
 3. **Work.** When it is connected, the **Actions**, **Plugins** and **Preview** views appear below
    the list, with the Deck's name in their title bars. The screen panel opens automatically after
-   the first connect of a session (setting `decky-mcp.openScreenOnConnect`). Click **Plugin →
-   Deploy** in the Actions view to build and install the plugin in your workspace.
+   the first connect of a session (setting `decky-mcp.openScreenOnConnect`). If your workspace is a
+   Decky plugin, you are offered to deploy it; afterwards use the `$(rocket) Deploy <name>` button in
+   the status bar, <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd> (<kbd>Cmd</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd>
+   on macOS) or **Plugin → Deploy** in the Actions view. See [Deploy](#deploy).
 4. **Disconnect** with the icon on the device row. The token is kept, so the next connect needs no
    pairing.
 
@@ -69,11 +73,12 @@ you expand or collapse.
   - **Open viewer in browser**: opens `http://host:port/viewer`. The browser is paired on its own:
     press **Pair a browser** on the Deck, unless it still has the cookie from an earlier pairing.
   - **Snapshot to file**: fetches `/frame.jpg` and saves it (default name `deck-<timestamp>.jpg`).
-- **Plugin** (description: the directory the workspace plugin deploys to)
-  - **Deploy**, **Reload backend**, **Show plugin logs** for the workspace folder that contains a
-    `plugin.json` (a picker asks if there are several). Without one the group says *no plugin.json
-    in workspace*, the actions show *needs a plugin folder*, and clicking one tells you to open
-    your plugin folder.
+- **Plugin** (description: `<name> v<version>` of the detected plugin; the tooltip names its folder
+  and the directory it deploys to)
+  - **Deploy** (fast, see [Deploy](#deploy)), **Deploy (full restart)**, **Reload backend**, **Show
+    plugin logs** and **Auto-deploy on change: On/Off** for the plugin in the workspace (a picker
+    asks if there are several). Without one the group says *no plugin.json in workspace*, the
+    actions show *needs a plugin folder*, and clicking one tells you to open your plugin folder.
 - **Loader**
   - **Restart loader**, **Show loader logs**, **Install plugin zip…** (pick any `.zip`).
 - **Steam**
@@ -97,6 +102,58 @@ Refresh.
 Fetches one `/frame.jpg` every 1.5 s while the view is visible (well under 1 Mbit/s, instead of the
 ~40 Mbit/s stream), scaled to the sidebar width. Click **Open full screen view** or the title icon
 for the screen panel.
+
+## Deploy
+
+The extension looks for Decky plugins in the workspace: every folder with a `plugin.json`, in a
+workspace folder or up to two levels below it (not in `node_modules`). It reads the name, author,
+flags and `api_version` from `plugin.json` and the version from `package.json`, and installs to
+`~/homebrew/plugins/<folder name>` (setting `decky-mcp.pluginDirName` overrides the name). Plugins
+are expected to follow the [decky-plugin-template](https://github.com/SteamDeckHomebrew/decky-plugin-template)
+layout. Edits to `plugin.json` or `package.json` are picked up at once.
+
+The first time a plugin is found while a device is connected you get *Decky plugin detected:
+<name>. Deploy to <device>?* with **Deploy** and **Not now** (once per window). While a device is
+connected, the status bar shows `$(rocket) Deploy <name>` (`$(sync~spin)` while a deploy runs).
+
+**One click.** Deploy runs these steps and reports *Deployed <name> in 0.6 s*:
+
+1. **Build, only if needed.** With `decky-mcp.deploy.build` = `auto` (default), `pnpm run build` runs
+   only when a file under `src/` (or `tsconfig.json` / `rollup.config.*`) is newer than
+   `dist/index.js`, or `dist/index.js` is missing. `main.py` and `py_modules/` never need a build.
+   `always` and `never` do what they say. The package manager follows the lockfile
+   (`pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`; pnpm if there is none). Build output goes
+   to the **Decky** output channel; a failed build fails the deploy with the compiler's error line.
+2. **Stage and zip** what the template ships: `dist`, `plugin.json`, `package.json`, `main.py`,
+   `LICENSE`, `README.md`, `defaults`, `py_modules`, `static`, `bin`, `assets` (those present),
+   without `__pycache__`, `*.pyc`, `node_modules` and `.git`. `src/`, `backend/` (the sources of
+   `bin/`) and `tests/` stay behind. Executable bits (`bin/*`) are kept.
+3. **Upload** to `POST /plugins/install`, which swaps the plugin directory atomically.
+4. **Reload only this plugin.** Decky stops the plugin's backend, starts the new one and makes the
+   Steam UI import the new `dist/index.js`, so backend and frontend both update without a loader
+   restart. The extension waits (up to 10 s) until the loader's log says `Loaded <name>` and the
+   plugin's new log file has its first line, then reports the time.
+
+**Fast vs full.** The fast path above takes 0.5-1 s plus the build (measured: 0.6 s with
+`dist/` up to date, 2 s with a 1.5 s rollup build). **Deploy (full restart)** restarts Decky Loader
+instead, which also reloads the Steam UI: about 9 s until the device answers again and another
+~8 s until the plugin's panel is back. Use it when the plugin is not loaded yet or a reload left
+it in a bad state. The first deploy of a plugin that is not installed yet always restarts the
+loader (Decky only reloads plugins it has loaded).
+
+**The `debug` flag.** It is not needed for fast deploys. The template sets it, and with it the
+loader's own file watcher reloads the plugin after every install, normally twice (once per changed
+file). The extension then lets the watcher do the reload instead of asking for one, waits until
+the reloads have settled (about 2-3 s), and only asks Decky itself if the watcher has done nothing
+after 4 s (it is off for 10 s after the loader starts). Without the flag a deploy is a single
+reload and finishes sooner.
+
+**Auto-deploy on change** (off by default; toggle with **Plugin → Auto-deploy on change** or the
+`decky-mcp.deploy.onChange` setting): changes to `dist/index.js`, `main.py` or
+`py_modules/**/*.py` trigger a fast deploy 750 ms after the last change, without building. Keep
+your bundler running in watch mode (`pnpm run watch`) so every save rebuilds `dist/index.js`. A
+change during a running deploy queues one more deploy. Auto-deploys report in the status bar
+instead of a notification.
 
 ## Pairing
 
@@ -150,7 +207,9 @@ All of these are also in the command palette under the `Decky:` category.
 | Decky: Open screen | Live screen panel with fps / Mbps / resolution, pause, fit/actual, snapshot |
 | Decky: Open viewer in browser | Opens `http://host:port/viewer` in the default browser (pair the browser on the Deck) |
 | Decky: Snapshot to file | Saves the current `/frame.jpg` with a Save dialog |
-| Decky: Deploy plugin | `pnpm run build`, zip, `POST /plugins/install?restart=loader`, wait for `/health` |
+| Decky: Deploy plugin | Build if needed, zip, `POST /plugins/install`, reload just this plugin and confirm it (<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd>) |
+| Decky: Deploy plugin (full restart) | Same, but restarts Decky Loader and waits for `/health` |
+| Decky: Toggle auto-deploy on change | Flips `decky-mcp.deploy.onChange` for the workspace |
 | Decky: Install plugin zip… | Uploads a plugin zip from disk to `/plugins/install?restart=loader` |
 | Decky: Restart loader | `POST /loader/restart` (falls back to the `restart_loader` tool) |
 | Decky: Reload plugin | `POST /plugins/{dir}/reload` for one plugin backend |
@@ -170,7 +229,9 @@ All of these are also in the command palette under the `Decky:` category.
 | `decky-mcp.openScreenOnConnect` | `true` | Open the screen panel after the first successful connect of a session |
 | `decky-mcp.host` | `10.0.70.18` | Deck IP or hostname. Seeds the first saved Deck; used when the device list is empty |
 | `decky-mcp.port` | `8765` | Decky-MCP server port (same rules as `host`) |
-| `decky-mcp.pluginDirName` | (empty) | Target dir under `~/homebrew/plugins` for deploy; empty means the workspace folder name |
+| `decky-mcp.pluginDirName` | (empty) | Target dir under `~/homebrew/plugins` for deploy; empty means the plugin folder's name |
+| `decky-mcp.deploy.build` | `auto` | `auto`: build only when `src/` is newer than `dist/index.js`; `always`; `never` |
+| `decky-mcp.deploy.onChange` | `false` | Fast-deploy (without building) when `dist/index.js`, `main.py` or `py_modules/**/*.py` change |
 
 Saved Decks live in VS Code's global state (`decky-mcp.devices`), so all windows share them.
 Tokens are stored per `host:port` in secret storage.
@@ -185,10 +246,10 @@ Tokens are stored per `host:port` in secret storage.
   confirmation.
 - **Theme.** The screen panel and preview use only VS Code theme colours (`--vscode-*` variables);
   only the video area itself is black.
-- **Deploy** stages the same files as `scripts/deploy.sh` (`dist`, `plugin.json`, `package.json`,
-  `main.py`, `LICENSE`, `README.md`, `defaults`, `py_modules`, `static`, plus `bin` if present,
-  without `__pycache__`), zips them under a single `<dirname>/` folder with a built-in zip writer and
-  uploads the zip. Build output goes to the "Decky-MCP Deploy" output channel.
+- **Deploy** zips the staged files (see [Deploy](#deploy)) under a single `<dirname>/` folder with
+  a built-in zip writer and uploads the zip. It confirms a fast reload from `/logs/tail` (the
+  loader journal and the plugin's log) and `/plugins`. Build and deploy output goes to the
+  "Decky" output channel.
 - **Older devices.** If `/logs/stream` is missing, logs fall back to polling the `loader_log` /
   `read_plugin_log` MCP tools every 3 s and print only new lines. Deploy and reload need a device
   plugin with `/plugins/install` and `/plugins/{dir}/reload`; without them you get an error asking
@@ -216,7 +277,7 @@ code --extensionDevelopmentPath="$PWD" /path/to/your/decky-plugin
 (`codium` works the same way.) Use `pnpm run watch` to rebuild on save, then run
 "Developer: Reload Window" in the development host.
 
-Install the packaged build with `code --install-extension decky-mcp-0.4.0.vsix`.
+Install the packaged build with `code --install-extension decky-mcp-0.5.0.vsix`.
 
 ### Smoke test (no device)
 
@@ -230,10 +291,31 @@ It evaluates the `when` clauses in `package.json` against the context keys the e
 checks which views are visible before and after connecting, the device rows for an unpaired, a
 paired and a connected Deck and the menus on them, the view title buttons, and the Actions tree
 (exactly Screen, Plugin, Loader, Steam and MCP with their leaves, with and without a `plugin.json`
-in the workspace). It also checks that Connect on an unpaired Deck starts pairing (fake `/pair`
+in the workspace). It detects plugins in a temporary workspace (with and without the `debug` flag,
+depth limit, `node_modules` skipped), checks the build decisions, the staged file set and the exec
+bit, the status bar button and the one-time prompt, and deploys against the fake device: first
+install (loader restart), fast deploy (`restart=plugin`), debug-flagged deploy (watcher reloads),
+full restart, a failing build and auto-deploy on change. It also checks that Connect on an unpaired Deck starts pairing (fake `/pair`
 answers 403, then a token), the reachability error with Retry, the pairing timeout (with a short
 timeout), the 15 s health check going unreachable and back, Add device, snapshot, Copy MCP URL /
 token and Open viewer.
+
+### Deploy check (device)
+
+`scripts/deploy-check.mjs` deploys a throwaway plugin built from the template through the same
+code the extension uses and checks on the device that both halves changed:
+
+```sh
+DECKY_TOKEN_FILE=~/deck-token node scripts/deploy-check.mjs /path/to/decky-mcp-test [host] [port]
+```
+
+The plugin must be named `Decky-MCP Test`, export `VERSION` from `src/version.ts` and
+`py_modules/testver/__init__.py`, set `window.__deckyMcpTestVersion = VERSION` in its frontend and
+have a `version` method. The script rewrites those per round: first install, fast deploy with and
+without the `debug` flag, a deploy with nothing to build and one full restart (skipped while a
+`/stream.mjpeg` viewer is connected). Each round checks the bundle's version via `cef_evaluate`,
+the backend's via `loader/call_plugin_method`, `/plugins`, the number of `Loaded` lines and that
+exactly one backend process runs. At the end Decky uninstalls the plugin (no loader restart).
 
 ### Headless integration check
 
