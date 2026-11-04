@@ -17,7 +17,8 @@ See README.md for setup and docs/reference.md for the tool list and architecture
   in `tools/ui.py`).
 - `src/index.tsx` — Quick Access panel (React, `@decky/ui`, `@decky/api`). Built by `pnpm run build`
   into `dist/index.js`.
-- `scripts/deploy.sh`, `scripts/smoke.sh`, `scripts/logs.sh` — read `deploy.env` (gitignored).
+- `scripts/test.sh` — Python tests under uv with the loader's Python major (CI runs it). Deploying this repo to
+  a device is done with the extension itself (it detects the root `plugin.json`); there are no ssh scripts.
 - `scripts/install-gif/record.sh` — re-records `docs/images/install/vscode-install.gif` (official VS Code under
   Xvfb driven by Playwright, installing the published extension); needs node, xvfb-run, ffmpeg.
 
@@ -28,8 +29,8 @@ See README.md for setup and docs/reference.md for the tool list and architecture
   **3.14.8** (PyInstaller, extracted to `/tmp/_MEI*`). Plugin backends run as the loader's forkserver
   children; `py_modules/` is appended to `sys.path`. `aiohttp`, `yarl`, `multidict`, `certifi` are
   importable from the bundle. Do not ship cp311 wheels; prefer pure Python.
-- `~/homebrew/plugins` is root-owned 755. Our deploy rsyncs to a user staging dir then `sudo rsync`s
-  into place and restarts `plugin_loader`.
+- `~/homebrew/plugins` is root-owned 755. The install route unpacks to a staging dir next to it and
+  swaps the plugin dir in as root.
 - Loader HTTP API is `127.0.0.1:1337` (token via `GET /auth/token`, header `X-Decky-Auth`). Its
   websocket is single-client — never connect to it from the plugin.
 - Steam CEF debugger is `127.0.0.1:8080` (file `~/.steam/steam/.cef-enable-remote-debugging` exists).
@@ -46,8 +47,8 @@ See README.md for setup and docs/reference.md for the tool list and architecture
   on EOF and leaked 6 GB before the OOM killer got it (observed 2026-11-03). Python 3.14 uses the
   forkserver start method, so the parent PID is the forkserver helper, not the loader; the
   `_loader_watchdog` thread tracks the grandparent loader PID (plus start time) and `os._exit`s.
-- The loader's file watcher loads a plugin whose files change even while shutting down, so
-  `scripts/deploy.sh` stops the loader before syncing.
+- The loader's file watcher loads a plugin whose files change even while shutting down, so a
+  `restart=loader` install stops the loader before swapping the dir in.
 - Subprocesses inherit the PyInstaller `LD_LIBRARY_PATH`; `tools.system.clean_env` strips it.
 - `"debug"` in `plugin.json` flags enables hot reload on `dist/index.js`/`main.py` changes. An
   install through `/plugins/install` swaps the whole dir, so for a debug-flagged plugin the watcher
@@ -63,7 +64,7 @@ See README.md for setup and docs/reference.md for the tool list and architecture
   do it. The watcher never imports a brand-new plugin dir; a first install needs a loader restart.
 - A `restart=loader` install that swapped the plugin dir while the loader was running raced the watcher and
   left orphaned backends leaking memory; the install route now stages the dir and a systemd job stops the
-  loader, swaps, and starts it (same order as scripts/deploy.sh).
+  loader, swaps, and starts it.
 
 ## Screen streaming facts (verified 2026-11-03)
 - gamescope publishes a PipeWire `Video/Source` node named `gamescope` (BGRx/NV12 1920x1080) that
