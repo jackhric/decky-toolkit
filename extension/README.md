@@ -12,7 +12,7 @@ Bazzite, …) and gives you, inside VS Code or VSCodium:
 - Steam UI navigation (any page, a game's details, a plugin's panel, Back, Quick Access),
 - a live view of the device's display (30 fps MJPEG) in an editor tab,
 - one-click deploy of the Decky plugin open in your workspace: it is detected automatically, built
-  only when its sources changed, and reloaded on its own in about a second (no loader restart),
+  only when its sources changed, and reloaded on its own (no loader restart),
   optionally on every change; plus install of any plugin zip,
 - live loader and plugin logs in output channels,
 - a JavaScript console for the Steam UI (`SharedJSContext`) and toasts on the device,
@@ -26,7 +26,7 @@ The Decky Toolkit plugin must already be installed and enabled on the device.
    your saved devices. The first time, it contains the device from the `decky-toolkit.host` setting; use
    the **+** in the view title to add another (see [Adding a device](#adding-a-device)).
 2. **Click the device** (or its plug icon). If it is not paired yet, pairing starts at once; see
-   [Pairing](#pairing). If it is paired, it connects in a second.
+   [Pairing](#pairing). If it is paired, it connects.
 3. **Work.** When it is connected, the **Actions**, **Plugins**, **Controllers** and **Preview** views appear below
    the list, with the device's name in their title bars. The screen panel opens automatically after
    the first connect of a session (setting `decky-toolkit.openScreenOnConnect`). If your workspace is a

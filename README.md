@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <b>Build, deploy and test Decky Loader plugins with improved DX and speed straight from your IDE (VSCode / VSCodium)</b>
+  <b>Build, deploy and test Decky Loader plugins straight from your IDE (VS Code / VSCodium)</b>
 </p>
 
 <p align="center">
@@ -29,7 +29,7 @@
 
 ## Features
 
-- One-click deploy from VS Code / VSCodium that reloads just your plugin in seconds.
+- One-click deploy from VS Code / VSCodium that reloads just your plugin, with no loader restart.
 - Hot reloading: the device follows your edits as you save.
 - Live view of the Deck's screen, with sound, inside the extension.
 - Keyboard, mouse and gamepad input sent straight to the device.
