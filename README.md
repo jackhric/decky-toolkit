@@ -1,4 +1,33 @@
-# Decky Toolkit
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/decky-toolkit-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="assets/decky-toolkit-light.svg">
+    <img alt="Decky Toolkit" src="assets/decky-toolkit-light.svg" width="480">
+  </picture>
+</p>
+
+<p align="center">
+  <b>Let AI coding agents see and drive your Steam Deck while you build Decky plugins.</b>
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img alt="License: BSD-3-Clause" src="https://img.shields.io/badge/license-BSD--3--Clause-blue"></a>
+  <img alt="Plugin version 0.2.0" src="https://img.shields.io/badge/plugin-v0.2.0-9C6AEC">
+  <a href="extension/README.md"><img alt="VS Code extension version 0.6.0" src="https://img.shields.io/badge/VS%20Code%20extension-v0.6.0-0AA5FF"></a>
+  <a href="https://github.com/SteamDeckHomebrew/decky-loader"><img alt="Decky Loader 3.3+" src="https://img.shields.io/badge/Decky%20Loader-3.3%2B-1B1B1B?logo=steam&logoColor=white"></a>
+  <a href="https://modelcontextprotocol.io"><img alt="MCP Streamable HTTP" src="https://img.shields.io/badge/MCP-Streamable%20HTTP-1B1B1B"></a>
+  <img alt="Python 3.14" src="https://img.shields.io/badge/python-3.14-3776AB?logo=python&logoColor=white">
+  <img alt="Platform: SteamOS and Bazzite" src="https://img.shields.io/badge/platform-SteamOS%20%7C%20Bazzite-555">
+</p>
+
+<p align="center">
+  <a href="#tools">Tools</a> ·
+  <a href="#pairing">Pairing</a> ·
+  <a href="#live-screen-viewer">Screen viewer</a> ·
+  <a href="docs/api.md">HTTP API</a> ·
+  <a href="extension/README.md">VS Code extension</a> ·
+  <a href="#development">Development</a>
+</p>
 
 A [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) plugin (with a companion VS Code
 extension, a browser screen viewer and an HTTP API) that runs a
