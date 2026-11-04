@@ -78,8 +78,8 @@ export class ActionsTreeProvider implements vscode.TreeDataProvider<ActionNode>,
     ]);
     screen.description = screenDescription(this.conn);
     screen.tooltip = 'Live device display';
-    screen.children![1].tooltip = `Opens ${viewerUrl(d)} in your browser. The browser is paired separately: press "Pair a browser" ` +
-      'in the device\'s Decky-MCP panel, unless it still has the cookie from an earlier pairing.';
+    screen.children![1].tooltip = `Opens ${viewerUrl(d)} in your browser. The browser is paired separately: it asks for access and you ` +
+      'allow it in the device\'s Decky-MCP panel, unless it still has the cookie from an earlier pairing.';
     screen.children![2].tooltip = 'Save the current frame (/frame.jpg) as a JPEG';
 
     return [

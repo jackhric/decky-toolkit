@@ -5,7 +5,7 @@ import assert from 'assert/strict';
 import Module, { createRequire } from 'module';
 import { execFileSync } from 'child_process';
 import { mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'fs';
-import { tmpdir } from 'os';
+import { hostname, tmpdir } from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -128,6 +128,7 @@ const vscode = {
       const entry = { title: o.title, messages: [] };
       calls.progress.push(entry);
       const cancel = new EventEmitter();
+      entry.cancel = () => cancel.fire();
       return fn(
         { report: m => { entry.messages.push(m.message); if (entry.messages.length === 1) ui.onProgress(entry); } },
         { isCancellationRequested: false, onCancellationRequested: cancel.event },
@@ -168,7 +169,7 @@ const vscode = {
     },
     asRelativePath: p => String(p),
   },
-  env: { asExternalUri: async u => u, openExternal: async u => { calls.opened.push(u.toString()); return true; }, clipboard: { writeText: async t => { calls.clipboard.push(t); } } },
+  env: { appName: 'Visual Studio Code', asExternalUri: async u => u, openExternal: async u => { calls.opened.push(u.toString()); return true; }, clipboard: { writeText: async t => { calls.clipboard.push(t); } } },
 };
 
 const realLoad = Module._load;
@@ -200,7 +201,7 @@ let plugins = [
   { dir: 'decky-mcp', name: 'Decky-MCP', author: 'jackh', flags: ['root', 'debug'], api_version: 1, version: '0.1.0', has_backend: true },
   { dir: 'romm-tender', name: 'Tender', author: 'x', flags: [], api_version: 1, version: '0.33.0', has_backend: true },
 ];
-const device = { up: true, pairQueue: [], installs: [], journal: ['boot'], pluginLog: {}, installMeta: { name: 'My Plugin', version: '1.2.3' }, downFor: 0 };
+const device = { up: true, pairQueue: [], pairRequests: [], pairCancelled: [], pairUnsupported: false, installs: [], journal: ['boot'], pluginLog: {}, installMeta: { name: 'My Plugin', version: '1.2.3' }, downFor: 0 };
 const frameJpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 0xff, 0xd9]);
 const fetched = [];
 globalThis.fetch = async (url, init = {}) => {
@@ -214,10 +215,26 @@ globalThis.fetch = async (url, init = {}) => {
   fetched.push(u.pathname);
   const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
   if (u.pathname === '/health') return json(health);
-  if (u.pathname === '/pair') {
-    return device.pairQueue.shift() === 'grant'
-      ? json({ token: 'fake-token', url: `http://${u.host}/viewer`, api_version: 1 })
-      : json({ error: 'no pairing window open' }, 403);
+  // Pairing requests: each poll answers with the next entry of pairQueue ('pending' once it is empty).
+  if (u.pathname === '/pair/request' && init.method === 'POST') {
+    if (device.pairUnsupported) return new Response('Unauthorized', { status: 401 });
+    const n = device.pairRequests.length;
+    const req = { id: `req${n}`, code: String(4821 + n), body: JSON.parse(init.body) };
+    device.pairRequests.push(req);
+    return json({ id: req.id, code: req.code, poll_after_ms: 1000 }, 201);
+  }
+  const pairReq = /^\/pair\/request\/([^/]+)$/.exec(u.pathname);
+  if (pairReq && init.method === 'DELETE') {
+    device.pairCancelled.push(pairReq[1]);
+    return json({ cancelled: true });
+  }
+  if (pairReq) {
+    const next = device.pairQueue.shift() ?? 'pending';
+    if (next === 'down') throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET', message: 'socket hang up' } });
+    if (next === 'gone') return json({ error: 'unknown or expired pairing request' }, 404);
+    if (next === 'approved') return json({ status: 'approved', token: 'fake-token', url: `http://${u.host}`, api_version: 1 });
+    if (next === 'pending') await new Promise(r => setTimeout(r, 5));
+    return json({ status: next });
   }
   if (auth !== 'Bearer fake-token') return new Response('unauthorized', { status: 401 });
   if (u.pathname === '/stream/stats') return json(stats);
@@ -298,7 +315,7 @@ const tokenKey = 'decky-mcp.token:10.1.2.3:8765';
 const lastMessage = kind => calls.messages.filter(m => m.kind === kind).at(-1);
 
 ext.connectionTimings.healthPollMs = 40;
-ext.pairingTimings.pollMs = 20;
+ext.pairingTimings.retryMs = 20;
 
 await ext.activate(ctx);
 await settle();
@@ -478,19 +495,22 @@ await check('preview webview: CSP and proxy URL, no token', async () => {
   return 'ok';
 });
 
-await check('Connect on an unpaired device pairs (403, then token) and connects', async () => {
+await check('Connect on an unpaired device files a pairing request, waits for approval and connects', async () => {
   fetched.length = 0;
-  device.pairQueue = ['closed', 'grant'];
+  device.pairQueue = ['pending', 'approved'];
   let rowDuringPairing;
   ui.onProgress = () => { rowDuringPairing = devicesProvider().getChildren()[0]; };
   await run('decky-mcp.connect', seedId());
   await settle();
-  assert.deepEqual(fetched.filter(p => p === '/pair').length, 2, 'polled /pair twice');
-  assert.ok(!fetched.slice(0, fetched.indexOf('/pair')).includes('/stream/stats'), 'no token, so no token check before pairing');
+  assert.equal(fetched.filter(p => p === '/pair/request').length, 1, 'one request');
+  assert.equal(fetched.filter(p => p === '/pair/request/req0').length, 2, 'polled until approved');
+  assert.ok(!fetched.slice(0, fetched.indexOf('/pair/request')).includes('/stream/stats'), 'no token, so no token check before pairing');
+  assert.deepEqual(device.pairRequests[0].body, { client_name: `VS Code on ${hostname()}`, client_kind: 'vscode' });
   const prog = calls.progress.at(-1);
-  assert.equal(prog.title, 'Pairing with 10.1.2.3');
-  assert.match(prog.messages[0], /^on the device, open Quick Access → Decky-MCP → Pair a browser\. Waiting… \d+ s$/);
-  assert.equal(rowDuringPairing.description, 'pairing…');
+  assert.equal(prog.title, 'Decky-MCP');
+  assert.equal(prog.messages[0], 'Waiting for approval on 10.1.2.3 · code 4821. On the device: Quick Access → Decky-MCP → Approve.');
+  assert.ok(!prog.messages.some(m => /\d+ s\b|120/.test(m)), 'no countdown');
+  assert.equal(rowDuringPairing.description, 'waiting for approval · code 4821');
   assert.equal(rowDuringPairing.contextValue, 'deck.busy');
   assert.equal(secrets.get(tokenKey), 'fake-token');
   assert.equal(calls.context.get('decky-mcp.connected'), true);
@@ -530,7 +550,7 @@ await check('connected, no plugin.json: Actions roots Screen / Plugin / Loader /
   const [screen, plugin] = roots;
   assert.equal(screen.description, '30 fps · 19.5 Mbps', 'stats polled because the Actions view is visible');
   assert.match(kids.Screen[1].tooltip, /http:\/\/10\.1\.2\.3:8765\/viewer/);
-  assert.match(kids.Screen[1].tooltip, /Pair a browser/);
+  assert.match(kids.Screen[1].tooltip, /asks for access/);
   assert.match(kids.Screen[1].tooltip, /cookie/);
   assert.equal(plugin.description, 'no plugin.json in workspace');
   for (const c of kids.Plugin) {
@@ -843,7 +863,7 @@ await check('Connect with a stored token checks /health and connects without pai
   await run('decky-mcp.connect', seedId());
   await settle();
   assert.ok(fetched.includes('/health'));
-  assert.ok(!fetched.includes('/pair'));
+  assert.ok(!fetched.includes('/pair/request'));
   assert.equal(calls.context.get('decky-mcp.connected'), true);
   assert.match(calls.statusMessages.at(-1), /Connected to 10\.1\.2\.3/);
   assert.equal(calls.panels.length, 1, 'screen opens only after the first connect of a session');
@@ -855,10 +875,10 @@ await check('a rejected token (401) goes straight into pairing', async () => {
   await ctx.secrets.store(tokenKey, 'stale-token');
   await settle();
   fetched.length = 0;
-  device.pairQueue = ['grant'];
+  device.pairQueue = ['approved'];
   await run('decky-mcp.connect', seedId());
   await settle();
-  assert.ok(fetched.includes('/pair'));
+  assert.ok(fetched.includes('/pair/request'));
   assert.equal(secrets.get(tokenKey), 'fake-token');
   assert.equal(calls.context.get('decky-mcp.connected'), true);
   await run('decky-mcp.disconnectDevice');
@@ -893,28 +913,64 @@ await check('reachability error: one message with Retry / Edit device, no pairin
   assert.equal(row.description, 'unreachable');
   assert.equal(row.iconPath.id, 'warning');
   assert.equal(row.iconPath.color.id, 'problemsWarningIcon.foreground');
-  assert.ok(!fetched.includes('/pair'));
+  assert.ok(!fetched.includes('/pair/request'));
   assert.equal(calls.context.get('decky-mcp.connected'), true, 'Retry connected once the device answered');
   await run('decky-mcp.disconnectDevice');
   return `"${calls.lastError.m}" [${calls.lastError.buttons.join(', ')}], row was "${row.description}"`;
 });
 
-await check('pairing timeout (short injected timeout): Try again / Enter token manually', async () => {
+await check('pairing denied on the device: "Pairing denied" with Try again, which files a new request', async () => {
   await ctx.secrets.delete(tokenKey);
   await settle();
-  ext.pairingTimings.timeoutMs = 200;
-  device.pairQueue = [];
-  const start = Date.now();
+  device.pairRequests = [];
+  device.pairQueue = ['pending', 'denied', 'approved'];
+  const offered = [];
+  ui.warning = (m, buttons) => { offered.push({ m, buttons }); return 'Try again'; };
   await run('decky-mcp.connect', seedId());
-  const took = Date.now() - start;
-  ext.pairingTimings.timeoutMs = 120000;
-  const w = lastMessage('warning');
-  assert.match(w.m, /Pairing timed out/);
-  assert.deepEqual(w.buttons, ['Try again', 'Enter token manually']);
+  await settle();
+  assert.deepEqual(offered, [{ m: 'Decky-MCP: Pairing denied on 10.1.2.3.', buttons: ['Try again'] }]);
+  assert.equal(device.pairRequests.length, 2, 'Try again filed a second request');
+  assert.equal(secrets.get(tokenKey), 'fake-token');
+  assert.equal(calls.context.get('decky-mcp.connected'), true);
+  await run('decky-mcp.disconnectDevice');
+  return `"${offered[0].m}" [${offered[0].buttons.join(', ')}], then approved`;
+});
+
+await check('pairing has no time limit: survives a lost connection and a forgotten request (new code); Cancel sends DELETE', async () => {
+  await ctx.secrets.delete(tokenKey);
+  await settle();
+  device.pairRequests = [];
+  device.pairCancelled = [];
+  device.pairQueue = ['pending', 'down', 'pending', 'gone'];
+  const warningsBefore = calls.messages.filter(m => m.kind === 'warning').length;
+  const done = run('decky-mcp.connect', seedId());
+  for (let i = 0; i < 200 && (device.pairRequests.length < 2 || device.pairQueue.length); i++) await settle(10);
+  await settle(60);
+  const row = devicesProvider().getChildren()[0];
+  const prog = calls.progress.at(-1);
+  prog.cancel();
+  await done;
+  await settle();
+  assert.equal(row.description, 'waiting for approval · code 4822', 'the row shows the new code');
+  assert.ok(prog.messages.some(m => /^Lost contact with 10\.1\.2\.3 \(cannot reach the device \(socket hang up\)\), retrying… Code 4821\.$/.test(m)));
+  assert.equal(prog.messages.at(-1), 'Waiting for approval on 10.1.2.3 · code 4822. On the device: Quick Access → Decky-MCP → Approve.');
+  assert.deepEqual(device.pairCancelled, ['req1']);
+  assert.equal(calls.messages.filter(m => m.kind === 'warning').length, warningsBefore, 'cancel is silent');
   assert.equal(calls.context.get('decky-mcp.connected'), false);
-  const [r] = devicesProvider().getChildren();
-  assert.equal(r.description, 'not paired');
-  return `"${w.m}" [${w.buttons.join(', ')}] after ${took} ms`;
+  assert.equal(devicesProvider().getChildren()[0].description, 'not paired');
+  return `${prog.messages.length} progress updates, codes 4821 → 4822, DELETE ${device.pairCancelled[0]}`;
+});
+
+await check('a device without pairing requests (401): "Update Decky-MCP" with Enter token manually', async () => {
+  device.pairUnsupported = true;
+  let offered;
+  ui.warning = (m, buttons) => { offered = { m, buttons }; return undefined; };
+  await run('decky-mcp.connect', seedId());
+  device.pairUnsupported = false;
+  assert.equal(offered.m, 'Decky-MCP: Update Decky-MCP on 10.1.2.3 to pair. Until then, copy the token from its Decky-MCP panel.');
+  assert.deepEqual(offered.buttons, ['Enter token manually']);
+  assert.equal(devicesProvider().getChildren()[0].description, 'not paired');
+  return `"${offered.m}" [${offered.buttons.join(', ')}]`;
 });
 
 await check('Add device: host + optional name, port only via "Change port", then offers Connect', async () => {

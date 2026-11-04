@@ -8,6 +8,22 @@ export interface Health {
   tools: number;
 }
 
+export type PairClientKind = 'vscode' | 'browser' | 'mcp' | 'other';
+
+export interface PairRequestCreated {
+  id: string;
+  code: string;
+  poll_after_ms: number;
+}
+
+/** `token`, `url` and `api_version` are present only on the first poll that sees the approval. */
+export interface PairPoll {
+  status: 'pending' | 'approved' | 'denied';
+  token?: string;
+  url?: string;
+  api_version?: number;
+}
+
 export interface PairGrant {
   token: string;
   url: string;

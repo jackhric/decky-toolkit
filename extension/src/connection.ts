@@ -45,6 +45,8 @@ export interface ConnectionState {
   readonly connectedDevice: SavedDevice | undefined;
   readonly onDidChangeStatus: vscode.Event<void>;
   statusOf(device: SavedDevice): DeviceStatus;
+  /** The code the device shows for a pairing request that is waiting for approval. */
+  pairingCodeOf?(id: string): string | undefined;
   authedClient(): DeckyClient | undefined;
   /** Polls `/stream/stats` while at least one returned lease is undisposed. */
   watchStats(): vscode.Disposable;
@@ -225,6 +227,18 @@ export class Connection implements ConnectionState, vscode.Disposable {
   setBusy(id: string, state: 'connecting' | 'pairing' | undefined): void {
     if (state) this.busy.set(id, state);
     else this.busy.delete(id);
+    this.fireStatus();
+  }
+
+  private readonly pairingCodes = new Map<string, string>();
+
+  pairingCodeOf(id: string): string | undefined {
+    return this.pairingCodes.get(id);
+  }
+
+  setPairingCode(id: string, code: string | undefined): void {
+    if (code) this.pairingCodes.set(id, code);
+    else this.pairingCodes.delete(id);
     this.fireStatus();
   }
 
