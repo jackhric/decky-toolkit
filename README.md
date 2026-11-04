@@ -55,15 +55,7 @@ plugin zip, `extension-v…` releases the `.vsix`. Both are built by this repo's
 build provenance, so you can check a download with
 `gh attestation verify <file> -R jackhric/decky-toolkit`.
 
-### 1. Install the plugin on the device
-
-Download `decky-toolkit-<version>.zip` from the latest `plugin-v…` release. On the device, enable
-Decky's developer mode (Decky settings → **General** → **Developer mode**), then go to
-**Developer** → **Install Plugin From ZIP File** and pick the zip.
-
-Open Quick Access (…) → **Decky Toolkit** on the device. The panel shows the device's IP address.
-
-### 2. Install the VS Code extension
+### 1. Install the VS Code extension
 
 <p align="center">
   <img alt="Installing Decky Toolkit from the Extensions view in VS Code" src="docs/images/install/vscode-install.gif" width="800">
@@ -82,6 +74,14 @@ codium --install-extension jackhric.decky-toolkit   # VSCodium
 
 Offline or a specific version: download `decky-toolkit-<version>.vsix` from an `extension-v…`
 release and use Extensions view → **…** → **Install from VSIX…**.
+
+### 2. Install the plugin on the device
+
+Download `decky-toolkit-<version>.zip` from the latest `plugin-v…` release. On the device, enable
+Decky's developer mode (Decky settings → **General** → **Other** → **Developer mode**), then go
+to **Developer** → **Third-Party Plugins** → **Install Plugin from ZIP File** and pick the zip.
+
+Open Quick Access (…) → **Decky Toolkit** on the device. The panel shows the device's IP address.
 
 ### Building from source
 
