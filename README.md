@@ -16,11 +16,15 @@ protected by a bearer token shown in the plugin's Quick Access panel.
 | `list_plugins` | Plugins under `~/homebrew/plugins` with their `plugin.json` metadata |
 | `read_plugin_log` | Tail a plugin's backend log from `~/homebrew/logs/<plugin>/` |
 | `loader_log` | Tail `journalctl -u plugin_loader`, optional substring filter |
-| `restart_loader` | Restart `plugin_loader.service` (scheduled 1 s out so the call returns) |
-| `install_plugin` | Install a plugin zip (device path or base64) atomically, then restart the loader, reload the plugin, or neither |
+| `restart_loader` | Restart `plugin_loader.service` (scheduled 1 s out so the call returns); needs `confirm: true` |
+| `install_plugin` | Install a plugin zip (device path or base64) atomically, then restart the loader (needs `confirm: true`), reload the plugin, or neither |
 | `reload_plugin` | Reload one plugin's backend through Decky without restarting the loader |
+| `plugin_methods` | List a plugin's frontend-callable backend methods (public async methods of `class Plugin`, with args and docstrings) |
+| `call_plugin_method` | Call a plugin's backend method the way its frontend does; returns the result or Decky's Python traceback |
+| `plugin_frontend_check` | Find `callable("x")`/`call("x")` names in a plugin's frontend that have no backend method |
 | `cef_targets` | List Steam CEF DevTools tabs on `localhost:8080` |
 | `cef_evaluate` | Run JS in a Steam tab (default `SharedJSContext`, where `window.DeckyPluginLoader` lives) |
+| `cef_console` / `cef_console_clear` | Steam UI console output (console calls, uncaught exceptions, browser log), captured in the background per tab |
 | `cef_screenshot` | PNG screenshot of a Steam tab via `Page.captureScreenshot` |
 | `screen_capture` | JPEG of the full gamescope display (games included) from its PipeWire video node |
 | `stream_status` | Live stream state: running, fps, bitrate, resolution, viewer count, settings |
@@ -34,7 +38,10 @@ protected by a bearer token shown in the plugin's Quick Access panel.
 | `add_virtual_controller` / `remove_virtual_controller` | Plug in or unplug a virtual Xbox 360 pad; returns once Steam Input lists it |
 | `ui_routes` | Steam and Decky pages you can navigate to, plugin routes, current page and menu state |
 | `ui_navigate` | Go to a page (`/settings/display`, `/decky/settings`), back, open Quick Access / a Decky plugin panel / a game page |
-| `read_file` / `write_file` | Read or write files on the device (runs as root) |
+| `ui_query` | Find elements by CSS selector or text, with screen coordinates ready for `input_mouse` |
+| `ui_focus` | The element that has gamepad focus, plus the current route |
+| `ui_wait_for` | Wait until an element appears or disappears, or a route is shown, instead of sleeping |
+| `read_file` / `write_file` | Read or write files on the device (runs as root); Steam credential/session files and SSH keys are refused |
 
 ## Pairing
 

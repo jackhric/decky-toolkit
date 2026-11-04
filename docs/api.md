@@ -180,6 +180,97 @@ request: approval needs someone at the device.
 | `GET /logs/stream` | bearer/cookie | live | `text/event-stream`. Query: `source=loader` (journal, default) \| `plugin`, `plugin=<dir>` for plugin logs (giving `plugin` alone implies `source=plugin`), `tail=<n>` initial lines (default 100, max 5000). Events: `data: <one log line>`; a comment `: keepalive` every 15 s. Plugin logs follow the newest file in `~/homebrew/logs/<dir>/` and switch when Decky starts a new one. |
 | `GET /logs/tail` | bearer/cookie | live | Same filters, returns `{lines: [...]}` once. `404` if the plugin has no log dir. |
 
+## Console
+
+The Steam UI's own console, captured in the background from plugin start. One long-lived DevTools
+session per watched tab (`SharedJSContext`, where Decky and every plugin frontend run, and `Steam Big
+Picture Mode`) with `Runtime.enable` + `Log.enable`; it reconnects with backoff (1, 2, 5, 10 s) when CEF
+restarts, e.g. after a loader restart, and starting it never waits for CEF. `Runtime.enable` makes V8
+replay the messages it still holds, so the first attach after a plugin start also brings in the Steam
+UI's history since its last reload; replays after a reconnect to the same page are skipped.
+
+Entries: `{id, target, time, source, type, level, text, url?, line?, column?, function?}`. `id` is unique
+and increasing across targets. `source`: `console` (`Runtime.consoleAPICalled`: `type` is the console
+method, args rendered like DevTools from `Runtime.RemoteObject` previews, `%c` styling dropped, `%s`/`%d`/`%o`
+substituted; `url`/`line`/`column`/`function` from the top stack frame, lines and columns 1-based),
+`exception` (`Runtime.exceptionThrown`: `text` is e.g. `Uncaught Error: msg\n    at ...` or `Uncaught (in
+promise) TypeError: ...`), or `log` (`Log.entryAdded`: `type` is the browser source, e.g. `network` for
+failed resource loads, `violation`). `level`: `debug` < `log` = `info` < `warn` < `error`
+(`console.warning`, `assert` -> `warn`/`error`; Log `verbose` -> `debug`). Each tab keeps 2000 entries,
+plus a separate ring of 2000 for `debug`: Decky's WSRouter logs every backend call at debug level (a
+plugin polling twice a second adds ~4 entries/s), which would otherwise push errors out within minutes.
+Text is capped at 8000 characters.
+
+| Route | Auth | Status | Notes |
+| --- | --- | --- | --- |
+| `GET /cef/console` | bearer/cookie | live | Query: `target` (`SharedJSContext` default, `Steam Big Picture Mode`, or `all`), `lines` (default 200), `level` (minimum, default `info`, i.e. everything but debug), `since` (entry id: newer entries; or ISO time, naive = device local time), `grep` (case-insensitive substring of text or url). `{target, status: [{target, connected, buffered, buffered_debug, dropped, connected_since, error}], last_id, count, entries}`. `400` for an unknown target/level or a bad `since`. |
+| `GET /cef/console/stream` | bearer/cookie | live | `text/event-stream`. Query: `target` (as above, or `all`), `tail` (entries replayed first, default 100, max 5000), `level` (default `info`). Events: `data: <entry JSON>`; `: keepalive` every 15 s; a client disconnect stops the subscription within ~1 s (same handling as `/logs/stream`). |
+
+Tools: `cef_console(target?, lines=200, level?="info", since?, grep?)` returns the same object as
+`GET /cef/console`; `cef_console_clear(target?)` empties one tab's buffer, or all of them: `{cleared:
+{target: n}}`.
+
+## UI query
+
+MCP tools only. They evaluate in a Steam UI tab (default `Steam Big Picture Mode`; `QuickAccess` and
+`MainMenu` are the side menus, which are separate CEF child views; any tab title or title prefix works).
+
+Element: `{tag, id, classes, text, label?, rect, norm, px, visible, focused}`. `text` is the element's
+`innerText` with whitespace collapsed (160 characters max), `label` its `aria-label` (Steam's icon buttons
+have only that). `rect` is the bounding rect in the tab's CSS px. `norm` `{x, y}` is the centre of the
+element's on-screen part normalised 0..1 across the display, for `input_mouse` `x`/`y`; `px` the same
+point in display pixels (1920x1080 stream). The Big Picture tab is 1353x761 CSS px at `devicePixelRatio`
+1.42, so `norm` = centre / `innerWidth`,`innerHeight`. The side menus are placed by the parent window's
+`m_rgChildBrowserViews[i].GetBounds()` (Quick Access: x 1005.5, y 40, 854x681 CSS px, mostly off screen to
+the right; its own `screenX`/`screenY` read 0 after a Steam UI reload). `visible`: non-zero size,
+`checkVisibility()` (display, visibility, opacity) and at least partly on the display. `focused`: Steam's
+gamepad focus class `gpfocus` (its ancestors carry `gpfocuswithin`) or `document.activeElement`.
+
+| Tool | Notes |
+| --- | --- |
+| `ui_query(selector?, text?, target?, limit=20)` | CSS selector and/or text (case-insensitive substring of `textContent` or `aria-label`; with text alone the innermost matching elements). Visible elements first, then exact text matches. `{target, total, elements}`. An invalid selector is an error naming it. |
+| `ui_focus(target?)` | `{route, side_menu, target, window_focused, element, gpfocus?, active_element?}`. Without `target` it looks in the Quick Access or main menu view when one is open, else in Big Picture. `element` is the visible `.gpfocus` element (else `document.activeElement`); `gpfocus` lists all when there are several; `active_element` appears when `document.activeElement` is a different element. |
+| `ui_wait_for(selector?, text?, route?, gone=false, timeout=10, interval=0.25, target?)` | Polls until a visible match exists (or, with `gone`, none does), or until the current route (`LocationPathName`) equals `route` (or, with `gone`, differs). `{ok, elapsed_s, element \| route}`. On timeout an error: `timed out after 10s waiting for route /x; current route /y, focus <div> 'System' at {...}`. CEF errors while polling (a tab briefly missing during a reload) count as "not yet". |
+
+## Plugin calls
+
+MCP tools only.
+
+| Tool | Notes |
+| --- | --- |
+| `plugin_methods(dir)` | Parses (does not import) `<dir>/main.py` with `ast`: public `async def` methods of the top-level `class Plugin`. `{dir, file, methods: [{name, args: [{name, annotation?, default?}], doc, line}]}`; `*args`/`**kw` appear as `*name`/`**name`, `doc` is the first docstring line. |
+| `call_plugin_method(plugin, method, args=[], timeout=30)` | `plugin` is the `plugin.json` name (e.g. `Decky-MCP`). Runs `window.DeckyBackend.call('loader/call_plugin_method', plugin, method, ...args)` in SharedJSContext, i.e. exactly what the plugin's frontend `callable()` does, over the frontend's existing loader connection. `{ok: true, result}`, or `{ok: false, error, traceback}`: Decky rejects with a `PyError` whose message is empty and whose `pythonTraceback` ends in the exception line (e.g. `Exception: port must be 1024-65535`); an unknown method also fails this way. Methods starting with `_` (lifecycle hooks) are refused before anything is sent. |
+| `plugin_frontend_check(dir)` | Scans `<dir>/src/**/*.ts(x)` when sources are installed, else `dist/index.js`, for `callable("x")` / `call("x", ...)` (also `callable$1` and TS generics), and compares with `plugin_methods`. `{source: "src"\|"dist", files_scanned, frontend_calls: {name: ["file:line"]}, backend_methods, missing_backend, unused_backend}`. `missing_backend` entries fail at runtime. |
+
+## Security
+
+- Every route except the public ones needs the bearer token or the viewer cookie; state-changing plugin
+  and loader routes need the bearer token (see the top of this file).
+- **Sensitive files.** `read_file` refuses, and `write_file` refuses to write, Steam login/session
+  material and keys: `*/config/loginusers.vdf`, `*/config/config.vdf`, `ssfn*`, `*/local.vdf`, Steam's
+  CEF cookie store (`*/htmlcache/*Cookies*`), `~/.ssh/id_*` (not `.pub`), `/etc/shadow`, `/etc/gshadow`.
+  `write_file` also refuses `*/config/libraryfolders.vdf` and `*/steamapps/libraryfolders.vdf` (readable).
+  Matching is case-insensitive on both the given and the symlink-resolved path. The list lives in
+  `py_modules/decky_mcp/tools/guard.py` (`is_sensitive`, `is_write_protected`, `check_read`,
+  `check_write`); every tool that takes a device path calls it. The error is `PermissionError: refusing
+  to read ...`.
+- **Confirm.** `restart_loader` and `install_plugin` with `restart: "loader"` (the default) need
+  `confirm: true`; without it they fail with a message saying so and do nothing. Future delete-type
+  tools follow the same rule. The REST routes (`POST /loader/restart`, `POST /plugins/install`) need the
+  bearer token instead.
+- **Audit log.** Calls of `cef_evaluate`, `write_file`, `install_plugin`, `reload_plugin`,
+  `restart_loader`, `call_plugin_method`, `input_*`, `set_input_enabled`, `remove_virtual_controller` and
+  `ui_navigate` write one line to the plugin log (and the loader journal), before the tool runs:
+  `audit tool=write_file origin=10.0.0.30 via=mcp args=content,path`. Only argument names the tool's
+  schema declares are listed (others are counted, `+1 unknown`); values never are. Every authenticated
+  `POST`/`PUT`/`DELETE` REST request except `/mcp` logs `audit route=POST /plugins/install origin=<ip>
+  via=http`. The origin comes from the `audit.request_origin` context variable, set per request by an
+  app middleware (`via=mcp` for `/mcp`, `http` otherwise).
+- **Planned: per-token access levels.** Not implemented. A pairing could grant `observe` (screen, logs,
+  console, routes, status), `standard` (plus input and navigation) or `full` (plus `cef_evaluate`,
+  file writes, installs, plugin calls), checked in the tool registry and the REST routes, with the
+  level shown in the approval prompt.
+
 ## MCP tools (live)
 
 `decky_status`, `list_plugins`, `read_plugin_log`, `loader_log`, `restart_loader`, `cef_targets`,
@@ -193,7 +284,10 @@ request: approval needs someone at the device.
 `sequence`, `pad`: a virtual pad id, default the implicit `auto` pad). Every input tool takes `capture: true` to append a fresh screen frame, and refuses with
 an error while input is disabled. `list_controllers`, `add_virtual_controller` (`name`),
 `remove_virtual_controller` (`id`): as `/controllers`. `ui_routes`, `ui_navigate` (`path` or `action` plus
-`tab`/`plugin`/`appid`, and `capture: true` for a frame 0.7 s later): as `/ui/...`.
+`tab`/`plugin`/`appid`, and `capture: true` for a frame 0.7 s later): as `/ui/...`. `ui_query`, `ui_focus`,
+`ui_wait_for`: see [UI query](#ui-query). `cef_console`, `cef_console_clear`: see [Console](#console).
+`plugin_methods`, `call_plugin_method`, `plugin_frontend_check`: see [Plugin calls](#plugin-calls).
+`restart_loader` and `install_plugin` with `restart: "loader"` need `confirm: true` (see [Security](#security)).
 
 ## Events (backend → Decky frontend)
 
