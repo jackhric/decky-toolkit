@@ -16,12 +16,12 @@ import { fileURLToPath } from 'url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
 const pluginRoot = process.argv[2];
-const host = process.argv[3] ?? process.env.DECKY_HOST ?? '10.0.70.18';
+const host = process.argv[3] ?? process.env.DECKY_HOST;
 const port = Number(process.argv[4] ?? process.env.DECKY_PORT ?? 8765);
-const sshTarget = process.env.DECKY_SSH ?? `jackh@${host}`;
+const sshTarget = process.env.DECKY_SSH ?? (process.env.DECKY_USER && `${process.env.DECKY_USER}@${host}`);
 const tokenFile = process.env.DECKY_TOKEN_FILE;
-if (!tokenFile || !pluginRoot) {
-  console.error('Usage: DECKY_TOKEN_FILE=<file> node scripts/deploy-check.mjs <plugin-root> [host] [port]');
+if (!tokenFile || !pluginRoot || !host || !sshTarget) {
+  console.error('Usage: DECKY_TOKEN_FILE=<file> DECKY_USER=<ssh user> node scripts/deploy-check.mjs <plugin-root> <host> [port]\n(DECKY_HOST and DECKY_SSH=<user@host> also work)');
   process.exit(2);
 }
 const token = readFileSync(tokenFile, 'utf8').trim();

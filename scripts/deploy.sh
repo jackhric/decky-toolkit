@@ -5,8 +5,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 [ -f deploy.env ] && . ./deploy.env
 
-DECK_HOST=${DECK_HOST:-10.0.70.18}
-DECK_USER=${DECK_USER:-jackh}
+: "${DECK_HOST:?set DECK_HOST in deploy.env (see deploy.env.example)}"
+: "${DECK_USER:?set DECK_USER in deploy.env (see deploy.env.example)}"
 DECK_SSH_OPTS=${DECK_SSH_OPTS:-}
 PLUGIN_DIR_NAME=${PLUGIN_DIR_NAME:-decky-toolkit}
 BUILD=${BUILD:-1}

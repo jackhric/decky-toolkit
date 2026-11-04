@@ -3,7 +3,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 [ -f deploy.env ] && . ./deploy.env
-DECK_HOST=${DECK_HOST:-10.0.70.18}; DECK_USER=${DECK_USER:-jackh}; DECK_SSH_OPTS=${DECK_SSH_OPTS:-}
+: "${DECK_HOST:?set DECK_HOST in deploy.env (see deploy.env.example)}"
+: "${DECK_USER:?set DECK_USER in deploy.env (see deploy.env.example)}"
+DECK_SSH_OPTS=${DECK_SSH_OPTS:-}
 PORT=${MCP_PORT:-8765}
 TOKEN=${MCP_TOKEN:-$(ssh $DECK_SSH_OPTS "$DECK_USER@$DECK_HOST" "sudo python3 -c \"import json;print(json.load(open('/home/$DECK_USER/homebrew/settings/decky-toolkit/settings.json'))['token'])\"")}
 URL="http://$DECK_HOST:$PORT/mcp"
