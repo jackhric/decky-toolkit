@@ -158,8 +158,8 @@ def register(reg: ToolRegistry, service: InputService | None, capturer: ScreenCa
 
     @reg.add(
         "input_gamepad",
-        "Drive a virtual Xbox 360 pad (created on first use, removed after 60 s idle; Steam sees it as a "
-        "real controller). buttons: {a,b,x,y,lb,rb,back,start,guide,ls,rs,dpad_up/down/left/right: bool}; "
+        "Drive a virtual Xbox 360 pad through Steam Input. pad: a virtual pad id from add_virtual_controller; "
+        "without it an implicit 'auto' pad is created on first use and removed after 60 s idle. buttons: {a,b,x,y,lb,rb,back,start,guide,ls,rs,dpad_up/down/left/right: bool}; "
         "axes: {lx,ly,rx,ry: -1..1 (y down = +1), lt,rt: 0..1}; hat: [x,y] in -1..1. The state is held for "
         "hold_ms, then everything returns to neutral. sequence runs steps in order instead: "
         "{\"press\":\"a\",\"ms\":100}, {\"stick\":\"l\",\"x\":0,\"y\":-1,\"ms\":300}, "
@@ -169,11 +169,15 @@ def register(reg: ToolRegistry, service: InputService | None, capturer: ScreenCa
             "hat": {"type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 2},
             "hold_ms": {"type": "integer", "default": 100, "minimum": 0, "maximum": 10000},
             "sequence": {"type": "array", "items": {"type": "object"}},
+            "pad": {"type": "string", "description": "Virtual pad id (default: the implicit auto pad)."},
             "capture": CAPTURE_PROP,
         }},
     )
     async def input_gamepad(buttons: dict | None = None, axes: dict | None = None, hat: list | None = None,
-                            hold_ms: int = 100, sequence: list | None = None, capture: bool = False) -> Any:
+                            hold_ms: int = 100, sequence: list | None = None, pad: str | None = None,
+                            capture: bool = False) -> Any:
+        if pad is not None and (not isinstance(pad, str) or (pad != "auto" and svc().get_pad(pad) is None)):
+            raise ValueError(f"unknown virtual gamepad {pad!r}; have {', '.join(p.id for p in svc().pads()) or 'none'}")
         steps: list[tuple[dict, float]] = []
         if sequence is not None:
             if not isinstance(sequence, list) or not sequence:
@@ -201,14 +205,14 @@ def register(reg: ToolRegistry, service: InputService | None, capturer: ScreenCa
 
         async def act(s: InputService, session: Session) -> str:
             first = next((v for v, _ in steps if v), None)
-            if first is not None and await s.gamepad(session, {k: 0 for k in first}):
+            if first is not None and await s.gamepad(session, {k: 0 for k in first}, pad):
                 await asyncio.sleep(PAD_SETTLE_SECONDS)
             for values, hold in steps:
                 if values:
-                    await s.gamepad(session, values)
+                    await s.gamepad(session, values, pad)
                 await asyncio.sleep(hold)
                 if values:
-                    await s.gamepad(session, {k: 0 for k in values})
-            return f"ran {len(steps)} gamepad step(s)"
+                    await s.gamepad(session, {k: 0 for k in values}, pad)
+            return f"ran {len(steps)} gamepad step(s) on pad {pad or 'auto'}"
 
         return await run(act, None, capture)

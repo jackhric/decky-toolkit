@@ -1,4 +1,4 @@
-"""InputService: owns the input backends, the enabled flag, held-key tracking and the virtual gamepad."""
+"""InputService: owns the input backends, the enabled flag, held-key tracking and the virtual gamepads."""
 import asyncio
 import logging
 import os
@@ -11,6 +11,8 @@ from . import ei, keymap, uinput
 from ..capture import _user_runtime_dir
 
 PAD_IDLE_SECONDS = 60.0
+MAX_PADS = 4
+AUTO_PAD = "auto"
 RATE_PER_SECOND = 1000
 FOCUS_CACHE_SECONDS = 1.0
 DEFAULT_FOCUS = (1920, 1080)
@@ -169,8 +171,34 @@ class Gamepad:
     def neutral(self) -> None:
         self.apply({k: 0 for k, v in self.state.items() if v})
 
+    @property
+    def sysname(self) -> str | None:
+        return self.dev.sysname
+
     def close(self) -> None:
         self.dev.close()
+
+
+@dataclass(eq=False)
+class VirtualPad:
+    id: str
+    name: str
+    dev: Any
+    auto: bool = False
+    type: str = "x360"
+    created_at: float = field(default_factory=time.time)
+    last_event_at: float | None = None
+    last_used: float = field(default_factory=time.monotonic)
+    # Steam Input's strSerialNumber for this pad once seen, so the controller list can pair them exactly.
+    steam_serial: str | None = None
+
+    @property
+    def sysname(self) -> str | None:
+        return getattr(self.dev, "sysname", None)
+
+    def info(self) -> dict[str, Any]:
+        return {"id": self.id, "name": self.name, "type": self.type, "created_at": self.created_at,
+                "last_event_at": self.last_event_at, "auto": self.auto}
 
 
 @dataclass(eq=False)
@@ -179,7 +207,7 @@ class Session:
     kind: str = "ws"
     keys: set[int] = field(default_factory=set)
     buttons: set[int] = field(default_factory=set)
-    used_pad: bool = False
+    used_pads: set[str] = field(default_factory=set)
     started: bool = False
 
 
@@ -293,9 +321,10 @@ class InputService:
         self._backend: Backend | None = None
         self._backend_lock = asyncio.Lock()
         self._ei_failed_at = -EI_RETRY_SECONDS
-        self._pad: Gamepad | None = None
-        self._pad_last = 0.0
+        self._pads: dict[str, VirtualPad] = {}
+        self._pad_seq = 0
         self._pad_task: asyncio.Task[None] | None = None
+        self._pad_listeners: set[Callable[[], None]] = set()
         self._sessions: set[Session] = set()
         self._listeners: set[Callable[[dict[str, Any]], None]] = set()
         self._announced: dict[str, float] = {}
@@ -354,7 +383,7 @@ class InputService:
             self.log.info("remote input %s", "enabled" if enabled else "disabled")
             if not enabled:
                 await self.release_all()
-                self._close_devices()
+                self._close_devices(keep_explicit_pads=True)
             self._notify()
         return self.status()
 
@@ -405,23 +434,82 @@ class InputService:
             self._notify()
             return backend
 
-    def _close_devices(self) -> None:
+    def _close_devices(self, keep_explicit_pads: bool = False) -> None:
         if self._backend is not None:
             self._backend.close()
             self._backend = None
-        self._close_pad()
+        for pad in list(self._pads.values()):
+            if pad.auto or not keep_explicit_pads:
+                self._close_pad(pad.id)
+            else:
+                try:
+                    pad.dev.neutral()
+                except OSError:
+                    pass
 
-    def _close_pad(self) -> None:
-        if self._pad is not None:
+    # ---- virtual gamepads ----
+
+    def pads(self) -> list[VirtualPad]:
+        return sorted(self._pads.values(), key=lambda p: p.created_at)
+
+    def get_pad(self, pad_id: str) -> VirtualPad | None:
+        return self._pads.get(pad_id)
+
+    def add_pad_listener(self, fn: Callable[[], None]) -> None:
+        self._pad_listeners.add(fn)
+
+    def remove_pad_listener(self, fn: Callable[[], None]) -> None:
+        self._pad_listeners.discard(fn)
+
+    def _pads_changed(self) -> None:
+        for fn in list(self._pad_listeners):
+            fn()
+
+    def _create_pad(self, pad_id: str, name: str, auto: bool) -> VirtualPad:
+        if not self._uinput_available():
+            raise InputUnavailable(f"{uinput.DEV_PATH} is not writable; no virtual gamepad")
+        try:
+            dev = self._make_gamepad()
+        except OSError as e:
+            raise InputUnavailable(f"cannot create the virtual gamepad: {e}") from None
+        pad = VirtualPad(pad_id, name, dev, auto=auto)
+        self._pads[pad_id] = pad
+        self.log.info("virtual gamepad %s (%s) created as %s", pad_id, name, pad.sysname)
+        self._pads_changed()
+        return pad
+
+    def add_pad(self, name: Any = None) -> VirtualPad:
+        """An explicit pad: lives until removed (no idle timeout) and does not need input enabled to exist."""
+        if name is not None and not isinstance(name, str):
+            raise ValueError("name must be a string")
+        name = " ".join((name or "").split())[:64]
+        explicit = [p for p in self._pads.values() if not p.auto]
+        if len(explicit) >= MAX_PADS:
+            raise ValueError(f"at most {MAX_PADS} virtual gamepads; remove one first")
+        self._pad_seq += 1
+        return self._create_pad(f"pad{self._pad_seq}", name or f"Virtual pad {self._pad_seq}", auto=False)
+
+    def remove_pad(self, pad_id: str) -> bool:
+        if pad_id not in self._pads:
+            return False
+        self._close_pad(pad_id)
+        return True
+
+    def _close_pad(self, pad_id: str) -> None:
+        pad = self._pads.pop(pad_id, None)
+        if pad is not None:
             try:
-                self._pad.neutral()
+                pad.dev.neutral()
+            except OSError:
+                pass
             finally:
-                self._pad.close()
-                self._pad = None
-            self.log.info("virtual gamepad removed")
-        if self._pad_task is not None and self._pad_task is not asyncio.current_task():
-            self._pad_task.cancel()
-        self._pad_task = None
+                pad.dev.close()
+            self.log.info("virtual gamepad %s removed", pad_id)
+            self._pads_changed()
+        if AUTO_PAD not in self._pads and self._pad_task is not None:
+            if self._pad_task is not asyncio.current_task():
+                self._pad_task.cancel()
+            self._pad_task = None
 
     async def focus_size(self) -> tuple[int, int]:
         async with self._focus_lock:
@@ -466,12 +554,13 @@ class InputService:
                     self.log.warning("releasing held input failed: %s", e)
             s.keys.clear()
             s.buttons.clear()
-        if s.used_pad and self._pad is not None:
-            try:
-                self._pad.neutral()
-            except OSError:
-                pass
-        s.used_pad = False
+        for pad_id in s.used_pads:
+            if (pad := self._pads.get(pad_id)) is not None:
+                try:
+                    pad.dev.neutral()
+                except OSError:
+                    pass
+        s.used_pads.clear()
 
     async def release_all(self) -> None:
         for s in list(self._sessions):
@@ -567,31 +656,30 @@ class InputService:
                 await self.key(s, keymap.SHIFT, False)
         return len(keys)
 
-    async def gamepad(self, s: Session, values: dict[tuple[int, int], int]) -> bool:
-        """Apply pad state; returns True if the pad was just created (Steam needs ~1 s to open it)."""
+    async def gamepad(self, s: Session, values: dict[tuple[int, int], int], pad_id: str | None = None) -> bool:
+        """Apply pad state to pad_id, or to the implicit auto pad (created on demand, removed after
+        pad_idle). Returns True if the auto pad was just created (Steam needs ~1 s to open it)."""
+        if pad_id is not None and pad_id != AUTO_PAD and pad_id not in self._pads:
+            raise ValueError(f"unknown virtual gamepad {pad_id!r}; have {', '.join(self._pads) or 'none'}")
         await self._begin(s)
         created = False
-        if self._pad is None:
-            if not self._uinput_available():
-                raise InputUnavailable(f"{uinput.DEV_PATH} is not writable; no virtual gamepad")
-            try:
-                self._pad = self._make_gamepad()
-            except OSError as e:
-                raise InputUnavailable(f"cannot create the virtual gamepad: {e}") from None
+        pad = self._pads.get(pad_id or AUTO_PAD)
+        if pad is None:
+            pad = self._create_pad(AUTO_PAD, "Auto pad", auto=True)
             created = True
-            self.log.info("virtual gamepad created")
-        self._pad_last = time.monotonic()
-        if self._pad_task is None or self._pad_task.done():
+        pad.last_used = time.monotonic()
+        pad.last_event_at = time.time()
+        if pad.auto and (self._pad_task is None or self._pad_task.done()):
             self._pad_task = asyncio.create_task(self._pad_reaper())
-        s.used_pad = True
-        self._pad.apply(values)
+        s.used_pads.add(pad.id)
+        pad.dev.apply(values)
         return created
 
     async def _pad_reaper(self) -> None:
-        while self._pad is not None:
-            wait = self._pad_last + self.pad_idle - time.monotonic()
+        while (pad := self._pads.get(AUTO_PAD)) is not None:
+            wait = pad.last_used + self.pad_idle - time.monotonic()
             if wait <= 0:
-                self._close_pad()
+                self._close_pad(AUTO_PAD)
                 return
             await asyncio.sleep(min(wait, 5.0))
 
@@ -629,9 +717,12 @@ class InputService:
             if dx or dy:
                 await self.wheel(s, dx, dy)
         elif kind == "gamepad":
+            pad_id = msg.get("pad")
+            if pad_id is not None and not isinstance(pad_id, str):
+                raise ValueError("pad must be a virtual gamepad id")
             values = pad_values(msg.get("buttons"), msg.get("axes"), msg.get("hat"))
             if values:
-                await self.gamepad(s, values)
+                await self.gamepad(s, values, pad_id)
         elif kind == "release_all":
             await self.release(s)
         else:

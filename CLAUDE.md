@@ -11,7 +11,10 @@ See README.md for the tool list and architecture.
   `docs/api.md`), `auth.py`, `tools/` (tool registry and tools), `install.py` (plugin zip
   validation + atomic install), `logs.py` (journal / plugin log tail and follow), `cdp.py` (Chrome
   DevTools client for Steam CEF on 127.0.0.1:8080), `settings.py`, `input/` (remote input: `ei.py`
-  libei over ctypes, `uinput.py`, `keymap.py`, `service.py` owning state; tools in `tools/input.py`).
+  libei over ctypes, `uinput.py`, `keymap.py`, `service.py` owning state and the virtual pad registry; tools
+  in `tools/input.py`), `controllers.py` (Steam Input controller list + evdev merge, virtual pad
+  creation confirmed by Steam; tools in `tools/controllers.py`), `ui.py` (Steam UI navigation; tools
+  in `tools/ui.py`).
 - `src/index.tsx` — Quick Access panel (React, `@decky/ui`, `@decky/api`). Built by `pnpm run build`
   into `dist/index.js`.
 - `scripts/deploy.sh`, `scripts/smoke.sh`, `scripts/logs.sh` — read `deploy.env` (gitignored).
@@ -130,6 +133,42 @@ See README.md for the tool list and architecture.
 - The uinput X360 pad (045e:028e) appears in `/proc/bus/input/devices` and Steam wraps it as
   "Microsoft X-Box 360 pad 1" (28de:11ff) within ~2 s; removing our device removes Steam's wrapper.
 - Hidden cursor rests at 1919,1079 in the Steam UI.
+
+## Controllers and UI navigation facts (verified 2026-11-04, Steam client 1792618285)
+- Steam Input is the source of the controller list; never bypass it (user requirement: no CDP gamepad
+  emulation, no XTest, no writing to Steam's own virtual devices; gamepad events only go into our uinput pads).
+- `SteamClient.Input` on this build has **no** `GetControllerInfo`/`RegisterForControllerListChanges`
+  (enumerated with `Object.keys`; it has `RegisterForActiveControllerChanges`,
+  `RegisterForUnboundControllerListChanges`, `RegisterForControllerInputMessages`, ...). The list lives in
+  `window.ControllerStore` (SharedJSContext): its `Init` registers `RegisterForNotifyControllerListChanged`
+  on Steam's protobuf Input service and `DoControllerListQuery` fills `m_controllerList`. We read
+  `ControllerStore.GetControllers()` (ControllerInfo: `nControllerIndex`, `nXInputIndex`, `eControllerType`,
+  `strName`, `unVendorID`, `unProductID`, `strSerialNumber`, `bWireless`, `bBluetooth`, `ucBatteryLevel`; the
+  `unCapabilities` field is a BigInt, so `JSON.stringify` of the raw object throws), plus
+  `GetControllerTypeString(eControllerType)` (`controller_xbox360`), `m_nLastValidActiveControllerIndex`
+  and `LocalizationManager.LocalizeString('#controller_xboxone')` -> "Xbox One controller". Field names from
+  decky-frontend-lib `src/globals/steam-client/Input.ts` (`ControllerInfo`, `EControllerType`).
+- Our uinput X360 pad is listed by Steam Input within ~1 s as type 31 `controller_xbox360`, name
+  "Controller N", vendor 1118 product 654, serial like `45e-28e-5b2bb70` (a second pad got the same with a
+  `g` suffix; serials get reused). Steam keeps listing a removed pad for 1-2 s. Steam also creates its own
+  output pad per controller (`28de:11ff` "Microsoft X-Box 360 pad N" under `/devices/virtual/input`);
+  those are excluded from the list. `controller.txt` logs "Product: Xbox 360 Controller" per pad.
+- Navigation: `window.DFL.Navigation` (@decky/ui `Navigation`, source `decky-frontend-lib`
+  `src/modules/Router.ts`) is reachable in SharedJSContext. It calls `Navigate`/`NavigateBack` on
+  `SteamUIStore.GetFocusedWindowInstance()` (falls back to `WindowStore.GamepadUIMainWindowInstance`) and
+  `OpenQuickAccessMenu`/`OpenMainMenu`/`CloseSideMenus` on its `MenuStore`. `DFL.QuickAccessTab` is the enum
+  (Notifications 0 ... VRBatteries 8, Decky 999). `MenuStore.GetOpenSideMenu()` 0 none/1 main/2 quick access.
+- Visible page: `SteamUIStore.WindowStore.GamepadUIMainWindowInstance.LocationPathName` (e.g.
+  `/library/home`); SharedJSContext's `location.pathname` is `/routes/library/home` and the
+  "Steam Big Picture Mode" tab's location is just `index.html?...`.
+- `LocationPathName` echoes any path you navigate to, valid or not, so it cannot validate a route. Steam's
+  route table is `DeckyPluginLoader.routerHook.routes` (React route elements, `props.path`); settings
+  sub-pages are the `identifier`s of the settings dialog's `pages` prop (found through the React fiber of
+  the sidebar), and an unknown `/settings/<x>` silently shows System. The verified list is `ui.OFFICIAL`.
+- Decky: plugin routes are `DeckyPluginLoader.routerHook.routerState._routes` (Map path -> {component,
+  props}) and `_routePatches`; the owner plugin is not recorded (decky-loader `frontend/src/router-hook.tsx`).
+  Opening a plugin panel = `DeckyPluginLoader.deckyState.setActivePlugin(name)` (decky-loader
+  `frontend/src/components/DeckyState.tsx`) then `OpenQuickAccessMenu(999)`.
 
 ## Pairing
 A client files `POST /pair/request` and long-polls `GET /pair/request/{id}?wait=25`; the device owner

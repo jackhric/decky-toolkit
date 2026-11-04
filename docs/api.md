@@ -52,13 +52,14 @@ starts with the first client and stops 10 s after the last one leaves.
 Remote keyboard, mouse and gamepad. **Off by default** (`input_enabled` in `settings.json`); while
 off, the WebSocket closes with `4003` and the MCP input tools return an error. Keyboard and mouse go
 through gamescope's libei server (`backend: "ei"`, `$XDG_RUNTIME_DIR/gamescope-{0,1}-ei`), else
-through uinput devices (`"uinput"`). The gamepad is always a uinput Xbox 360 pad (045e:028e), created
-on first use and removed 60 s after the last gamepad message.
+through uinput devices (`"uinput"`). The gamepad is always a uinput Xbox 360 pad (045e:028e): either one
+from `/controllers/virtual` (message field `pad`) or the implicit `auto` pad, created on first use and
+removed 60 s after the last gamepad message.
 
 | Route | Auth | Status | Notes |
 | --- | --- | --- | --- |
 | `GET /input/settings` | bearer/cookie | live | `{enabled, backend: "ei"\|"uinput"\|null, available, reason}`. `reason` explains `available: false`. `404` on servers without input support. |
-| `PUT /input/settings` | bearer/cookie | live | `{"enabled": true\|false}` (strict boolean; anything else or extra fields: `400`). Persists. Disabling releases every held key/button, removes the virtual devices and closes open `/input` sockets with `4003`. Same shape as `GET`. Cookie auth is accepted so the viewer can toggle it. |
+| `PUT /input/settings` | bearer/cookie | live | `{"enabled": true\|false}` (strict boolean; anything else or extra fields: `400`). Persists. Disabling releases every held key/button, removes the keyboard/mouse devices and the implicit `auto` pad (pads from `/controllers/virtual` stay, back at neutral) and closes open `/input` sockets with `4003`. Same shape as `GET`. Cookie auth is accepted so the viewer can toggle it. |
 | `GET /input` | bearer/cookie | live | WebSocket. Closes with code `4003` (reason text) while input is disabled. On connect and whenever it changes the server sends `{"type":"state","enabled","backend","focus_size":[w,h]}`. Invalid messages get `{"type":"error","message"}`; the socket stays open. Any message with an `id` field is answered with `{"type":"ack","id"}` once injected. Everything the socket still holds (keys, mouse buttons, pad state) is released when it closes. The first input of a session from a new address logs it and emits `decky_mcp_input_session` (at most once per address per 60 s). Rate cap about 1000 events/s; releases are never dropped. |
 
 Client messages on `/input`:
@@ -71,13 +72,74 @@ Client messages on `/input`:
 | `{"type":"mouse_move","dx":3,"dy":-1}` | relative, pixels (for API clients and the MCP tools; the viewers only send absolute moves) |
 | `{"type":"mouse_button","button":"left","down":true}` | `left`, `right`, `middle`, `back`, `forward` (or DOM button numbers 0-4) |
 | `{"type":"wheel","dx":0,"dy":-1}` | detents, positive `dy` scrolls down; sent to libei as 120 per detent |
-| `{"type":"gamepad","buttons":{"a":true},"axes":{"lx":0,"ly":-1,"lt":0.5},"hat":[0,-1]}` | partial update of the pad. Buttons `a b x y lb rb back start guide ls rs` and `dpad_up/down/left/right`; sticks `lx ly rx ry` -1..1 (down = +1), triggers `lt rt` 0..1; `hat` [x, y] in -1..1 |
+| `{"type":"gamepad","buttons":{"a":true},"axes":{"lx":0,"ly":-1,"lt":0.5},"hat":[0,-1]}` | partial update of the pad (`"pad":"pad1"` targets a virtual pad from `/controllers/virtual`; default the implicit `auto` pad). Buttons `a b x y lb rb back start guide ls rs` and `dpad_up/down/left/right`; sticks `lx ly rx ry` -1..1 (down = +1), triggers `lt rt` 0..1; `hat` [x, y] in -1..1 |
 | `{"type":"release_all"}` | release everything this socket holds (the viewer sends it on blur) |
 
 `focus_size` is the focused X window on `:0` (`xdotool getwindowfocus getwindowgeometry` as the
 desktop user, cached 1 s, `[1920,1080]` if unknown). libei absolute coordinates are in that window's
 pixels, so for a game rendering below the display resolution `x`/`y` map onto the game window, not
 the whole screen.
+
+## Controllers
+
+Steam Input is the source of truth. The list comes from `window.ControllerStore` in the Steam UI's
+SharedJSContext, the store Steam itself fills from its Input service (`RegisterForNotifyControllerListChanged`
+plus `DoControllerListQuery`; `SteamClient.Input` on this Steam build has no controller-list call).
+Each Steam entry is paired with a kernel evdev node from `/proc/bus/input/devices` (gamepads = devices with
+`BTN_GAMEPAD` in their key bitmap; Steam Input's own output pads, `28de:11ff` "Microsoft X-Box 360 pad N",
+are not inputs and are left out). An evdev gamepad Steam Input does not list is still shown, with
+`seen_by_steam: false` and `steam: null`. If the Steam UI is unreachable (2 s timeout) every entry has
+`steam: null` and `steam_available` is `false`.
+
+Virtual pads are uinput Xbox 360 pads (045e:028e) that Steam Input opens and maps like a real controller;
+gamepad events go only into that device, so Steam Input's remapping and per-game configs apply.
+
+| Route | Auth | Status | Notes |
+| --- | --- | --- | --- |
+| `GET /controllers` | bearer/cookie | live | `{controllers: [Controller], virtual: [VirtualPad], input_enabled, steam_available}`. `404` on servers without input support. |
+| `POST /controllers/virtual` | bearer/cookie | live | Body `{"name"?: str}` (optional; empty body allowed). Creates a pad, then waits up to 3 s for Steam Input to list it: `201 {id, name, type: "x360"}`. `503 {"error"}` if Steam Input is unreachable or never lists it (the pad is removed again) or uinput is unavailable; `400` for a bad body or when 4 explicit pads exist. Works while input is disabled (the pad exists; sending events needs input enabled). Explicit pads are never idle-removed. |
+| `DELETE /controllers/virtual/{id}` | bearer/cookie | live | `200 {"removed": id}`, `404` if unknown. `auto` removes the implicit pad. |
+| `GET /controllers/events` | bearer/cookie | live | `text/event-stream`. First event: the current state (`{"type":"controllers", controllers, virtual, input_enabled, steam_available}`), then `data: {"type":"controllers","controllers":[...],"virtual":[...]}` on every change: evdev polled every 1 s, Steam Input every 3 s and on evdev changes, immediately on pad add/remove. `last_event_at` alone does not count as a change. `: keepalive` every 15 s; the poller stops when the last client leaves. |
+
+`Controller`: `{id, name, kind: "physical"|"virtual", virtual_id, vendor, product, device, evdev_name,
+seen_by_steam, steam}`. `id` is the virtual pad id for our pads, else `steam:<serial>` or `evdev:<inputN>`.
+`vendor`/`product` are 4-digit lowercase hex. `device` is `/dev/input/eventN` or `null` (Steam reads some
+controllers, e.g. the Deck's own, through hidraw). `steam` (all from Steam Input's `ControllerInfo`):
+`{type, slot, name, index, type_name, active}` = `GetControllerTypeString(eControllerType)` (e.g.
+`controller_xbox360`), `nXInputIndex` (null when negative), `strName` localised through
+`LocalizationManager.LocalizeString` (Steam names virtual pads "Controller N"), `nControllerIndex`, the
+localised type name ("Xbox 360 controller"), and whether `nControllerIndex` equals
+`ControllerStore.m_nLastValidActiveControllerIndex`. Our pads are paired with Steam's entries by the
+`strSerialNumber` Steam assigned when it confirmed the pad. Steam keeps listing a removed pad for a second or
+two; the list hides it for up to 5 s.
+
+`VirtualPad`: `{id, name, type: "x360", created_at, last_event_at, auto}` (epoch seconds). `auto: true` is the
+implicit pad (`id: "auto"`) that a gamepad message without `pad` creates; it is removed 60 s after its last
+event and when input is disabled. Explicit pads (`pad1`, `pad2`, ...) survive input being disabled (they are
+returned to neutral) and are removed by `DELETE`, a plugin restart or the plugin unloading.
+
+## UI navigation
+
+Uses @decky/ui's `Navigation` (`window.DFL.Navigation` in SharedJSContext): `Navigate`, `NavigateBack`,
+`OpenQuickAccessMenu(QuickAccessTab)`, `OpenMainMenu`, `CloseSideMenus`. A Decky plugin's panel opens through
+`window.DeckyPluginLoader.deckyState.setActivePlugin(name)` plus the Quick Access menu on the Decky tab. The
+visible page is `SteamUIStore.WindowStore.GamepadUIMainWindowInstance.LocationPathName` (SharedJSContext's own
+`location` is `/routes/...` of the hidden context).
+
+| Route | Auth | Status | Notes |
+| --- | --- | --- | --- |
+| `GET /ui/routes` | bearer/cookie | live | `{current, side_menu: "none"\|"main"\|"quick_access", quick_access_tab, active_plugin, official: [{path, title, template?}], plugins: [{plugin, path, title}], patched: [{plugin, path}], decky_plugins: [name], quick_access_tabs: [str], steam_routes: [str]}`. `official` is the verified list below; `template: true` entries take `{appid}` etc. `plugins` are routes registered through Decky's router hook (`DeckyPluginLoader.routerHook.routerState._routes`), `patched` its route patches (`_routePatches`); `plugin` is `Decky Loader` for `/decky/...`, else the plugin whose name appears in the path, else `unknown` (Decky does not record the owner). `steam_routes` is Steam's own route table (`routerHook.routes`). `502` if the Steam UI is unreachable. |
+| `POST /ui/navigate` | bearer/cookie | live | Exactly one of: `{"path": "/library/home"}`, `{"action": "back"}`, `{"action": "quick_access", "tab"?: "decky"\|"notifications"\|"friends"\|"settings"\|"perf"\|"help"\|"soundtrack"\|...}`, `{"action": "main_menu"}`, `{"action": "close_menus"}`, `{"action": "plugin", "plugin": "<Decky plugin name>"}` (case-insensitive), `{"action": "app", "appid": 730}` (must be in the library). A path must be in `official` (or match a template), a plugin route, or Steam's route table; `/settings/<x>` only for the listed pages (Steam shows System for anything else). `/settings/controller` opens the first Steam Input controller's page. Navigating a path also closes open side menus. `200 {ok: true, current, side_menu, quick_access_tab, active_plugin}` read about 0.3 s later; `400 {"error"}` for an unknown route/action/tab/plugin/app (the message lists the known ones); `502` if the Steam UI is unreachable. |
+
+Official routes (each opened on the device and checked on screen, 2026-11-04): `/library/home`, `/library`,
+`/library/downloads`, `/library/app/{appid}`, `/search`, `/chat` (friends), `/steamweb` (store), `/about`,
+`/accessibility`, `/settings` and `/settings/` + `system`, `internet`, `storage`, `bluetooth`, `display`,
+`power`, `audio`, `keyboard`, `customization`, `accessibility`, `security`, `notifications`, `friends`,
+`downloads`, `cloud`, `ingame`, `compatibility`, `family`, `remoteplay`, `gamerecording`, `home`, `library`,
+`store`; `/settings/controller` and `/settings/controller/{type}/{index}`; `/decky/settings` + `/general`,
+`/plugins`, `/developer`, `/testing`; `/decky/store`. Dropped because they render an empty page: `/store`,
+`/downloads`, `/friends`, `/media`, `/settings/developer` (needs developer mode), `/settings/controller`
+without parameters (shows System).
 
 ## Pairing
 
@@ -128,8 +190,10 @@ request: approval needs someone at the device.
 (`keys` combo string such as `"ctrl+shift+a"` or a list of combos, `hold_ms`), `input_text` (`text`,
 `delay_ms`), `input_mouse` (`action` move/click/double/down/up/scroll, `x`/`y` 0..1 or pixels with
 `pixels: true`, `dx`/`dy`, `button`, `amount`), `input_gamepad` (`buttons`, `axes`, `hat`, `hold_ms`,
-`sequence`). Every input tool takes `capture: true` to append a fresh screen frame, and refuses with
-an error while input is disabled.
+`sequence`, `pad`: a virtual pad id, default the implicit `auto` pad). Every input tool takes `capture: true` to append a fresh screen frame, and refuses with
+an error while input is disabled. `list_controllers`, `add_virtual_controller` (`name`),
+`remove_virtual_controller` (`id`): as `/controllers`. `ui_routes`, `ui_navigate` (`path` or `action` plus
+`tab`/`plugin`/`appid`, and `capture: true` for a frame 0.7 s later): as `/ui/...`.
 
 ## Events (backend → Decky frontend)
 
