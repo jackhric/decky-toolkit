@@ -26,7 +26,8 @@ export async function findPluginFolders(): Promise<PluginFolder[]> {
 export async function pickPluginFolder(): Promise<PluginFolder | undefined> {
   const folders = await findPluginFolders();
   if (folders.length === 0) {
-    void vscode.window.showErrorMessage('Decky-MCP: no workspace folder contains a plugin.json.');
+    void vscode.window.showWarningMessage(
+      'Decky-MCP: no workspace folder contains a plugin.json. Open your Decky plugin folder (File → Open Folder) to deploy, reload or tail it.');
     return undefined;
   }
   if (folders.length === 1) return folders[0];

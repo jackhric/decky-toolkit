@@ -2,7 +2,7 @@
   "name": "decky-mcp",
   "displayName": "Decky-MCP",
   "description": "Live screen, deploy, logs and Steam console for Decky plugin development against a Decky-MCP device",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "jackhric",
   "icon": "media/icon.png",
   "license": "BSD-3-Clause",
@@ -25,10 +25,9 @@
   "activationEvents": [
     "workspaceContains:plugin.json",
     "onView:decky-mcp.devices",
-    "onView:decky-mcp.device",
+    "onView:decky-mcp.actions",
     "onView:decky-mcp.plugins",
-    "onView:decky-mcp.preview",
-    "onView:decky-mcp.unified"
+    "onView:decky-mcp.preview"
   ],
   "contributes": {
     "viewsContainers": {
@@ -45,33 +44,26 @@
         {
           "id": "decky-mcp.devices",
           "name": "Devices",
-          "icon": "media/decky.svg",
-          "when": "(decky-mcp.layout == devices-first || !decky-mcp.layout)"
+          "icon": "media/decky.svg"
         },
         {
-          "id": "decky-mcp.unified",
-          "name": "Decky",
+          "id": "decky-mcp.actions",
+          "name": "Actions",
           "icon": "media/decky.svg",
-          "when": "decky-mcp.layout == unified"
-        },
-        {
-          "id": "decky-mcp.device",
-          "name": "Device",
-          "icon": "media/decky.svg",
-          "when": "decky-mcp.layout == classic || (decky-mcp.layout == devices-first || !decky-mcp.layout) && decky-mcp.connected"
+          "when": "decky-mcp.connected"
         },
         {
           "id": "decky-mcp.plugins",
           "name": "Plugins",
           "icon": "media/decky.svg",
-          "when": "decky-mcp.layout == classic || (decky-mcp.layout == devices-first || !decky-mcp.layout) && decky-mcp.connected"
+          "when": "decky-mcp.connected"
         },
         {
           "type": "webview",
           "id": "decky-mcp.preview",
           "name": "Preview",
           "icon": "media/decky.svg",
-          "when": "decky-mcp.layout == classic || decky-mcp.connected"
+          "when": "decky-mcp.connected"
         }
       ]
     },
@@ -79,29 +71,9 @@
       {
         "view": "decky-mcp.devices",
         "contents": "No devices yet.\n[Add a Deck](command:decky-mcp.addDevice)"
-      },
-      {
-        "view": "decky-mcp.unified",
-        "contents": "No devices yet.\n[Add a Deck](command:decky-mcp.addDevice)"
-      },
-      {
-        "view": "decky-mcp.device",
-        "when": "decky-mcp.layout == classic && !decky-mcp.paired",
-        "contents": "Not paired with the active Deck yet.\nClick Pair, then on the Deck open the Quick Access menu (…), choose Decky-MCP and press \"Pair a browser\" within two minutes.\n[Pair with device](command:decky-mcp.pair)\nOlder device plugin without pairing? Paste the token shown in the Decky-MCP panel instead.\n[Enter token manually](command:decky-mcp.enterToken)\nWrong Deck? [Switch device](command:decky-mcp.switchDevice) · [Add device](command:decky-mcp.addDevice) · [Change host](command:decky-mcp.changeHost)"
-      },
-      {
-        "view": "decky-mcp.plugins",
-        "when": "decky-mcp.layout == classic && !decky-mcp.paired",
-        "contents": "Pair with the Deck to list, reload and install its Decky plugins.\n[Pair with device](command:decky-mcp.pair)"
       }
     ],
     "commands": [
-      {
-        "command": "decky-mcp.pair",
-        "title": "Pair with device",
-        "category": "Decky",
-        "icon": "$(plug)"
-      },
       {
         "command": "decky-mcp.enterToken",
         "title": "Enter token manually",
@@ -119,6 +91,18 @@
         "title": "Open screen",
         "category": "Decky",
         "icon": "$(device-desktop)"
+      },
+      {
+        "command": "decky-mcp.openViewer",
+        "title": "Open viewer in browser",
+        "category": "Decky",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "decky-mcp.snapshot",
+        "title": "Snapshot to file",
+        "category": "Decky",
+        "icon": "$(device-camera)"
       },
       {
         "command": "decky-mcp.deploy",
@@ -166,6 +150,18 @@
         "category": "Decky"
       },
       {
+        "command": "decky-mcp.copyMcpUrl",
+        "title": "Copy MCP URL",
+        "category": "Decky",
+        "icon": "$(link)"
+      },
+      {
+        "command": "decky-mcp.copyToken",
+        "title": "Copy token",
+        "category": "Decky",
+        "icon": "$(key)"
+      },
+      {
         "command": "decky-mcp.refresh",
         "title": "Refresh",
         "category": "Decky",
@@ -208,12 +204,6 @@
         "icon": "$(trash)"
       },
       {
-        "command": "decky-mcp.setActiveDevice",
-        "title": "Set active device",
-        "category": "Decky",
-        "icon": "$(check)"
-      },
-      {
         "command": "decky-mcp.switchDevice",
         "title": "Switch device",
         "category": "Decky",
@@ -248,12 +238,6 @@
         "title": "More actions…",
         "category": "Decky",
         "icon": "$(ellipsis)"
-      },
-      {
-        "command": "decky-mcp.switchLayout",
-        "title": "Switch sidebar layout",
-        "category": "Decky",
-        "icon": "$(gear)"
       }
     ],
     "configuration": {
@@ -274,21 +258,6 @@
           "default": "",
           "description": "Directory name under ~/homebrew/plugins to deploy to. Empty means the workspace folder's name."
         },
-        "decky-mcp.sidebarLayout": {
-          "type": "string",
-          "enum": [
-            "devices-first",
-            "unified",
-            "classic"
-          ],
-          "enumDescriptions": [
-            "A list of saved Decks; the Device, Plugins and Preview views appear once you connect to one.",
-            "One tree: every Deck is a row, the connected one expands to Screen, Plugins, Actions and Settings.",
-            "The 0.2 sidebar: active device, connection, Screen and Actions in the Device view."
-          ],
-          "default": "devices-first",
-          "description": "Layout of the Decky sidebar. Switch live with \"Decky: Switch sidebar layout\" (gear icon in each Decky view)."
-        },
         "decky-mcp.openScreenOnConnect": {
           "type": "boolean",
           "default": true,
@@ -299,33 +268,28 @@
     "menus": {
       "view/title": [
         {
-          "command": "decky-mcp.pair",
-          "when": "view == decky-mcp.device && decky-mcp.layout == classic",
+          "command": "decky-mcp.addDevice",
+          "when": "view == decky-mcp.devices",
           "group": "navigation@1"
         },
         {
-          "command": "decky-mcp.openScreen",
-          "when": "view == decky-mcp.device && (decky-mcp.layout == classic && decky-mcp.paired || decky-mcp.layout != classic)",
+          "command": "decky-mcp.refresh",
+          "when": "view == decky-mcp.devices",
           "group": "navigation@2"
         },
         {
+          "command": "decky-mcp.openScreen",
+          "when": "view == decky-mcp.actions",
+          "group": "navigation@1"
+        },
+        {
           "command": "decky-mcp.refresh",
-          "when": "view == decky-mcp.device && decky-mcp.layout == classic",
-          "group": "navigation@3"
-        },
-        {
-          "command": "decky-mcp.switchDevice",
-          "when": "view == decky-mcp.device && decky-mcp.layout == classic",
-          "group": "devices@1"
-        },
-        {
-          "command": "decky-mcp.addDevice",
-          "when": "view == decky-mcp.device && decky-mcp.layout == classic",
-          "group": "devices@2"
+          "when": "view == decky-mcp.actions",
+          "group": "navigation@2"
         },
         {
           "command": "decky-mcp.installZip",
-          "when": "view == decky-mcp.plugins && decky-mcp.paired",
+          "when": "view == decky-mcp.plugins",
           "group": "navigation@1"
         },
         {
@@ -335,152 +299,83 @@
         },
         {
           "command": "decky-mcp.openScreen",
-          "when": "view == decky-mcp.preview && decky-mcp.paired",
+          "when": "view == decky-mcp.preview",
           "group": "navigation@1"
-        },
-        {
-          "command": "decky-mcp.addDevice",
-          "when": "view == decky-mcp.devices || view == decky-mcp.unified",
-          "group": "navigation@1"
-        },
-        {
-          "command": "decky-mcp.refresh",
-          "when": "view == decky-mcp.devices || view == decky-mcp.unified",
-          "group": "navigation@2"
-        },
-        {
-          "command": "decky-mcp.disconnectDevice",
-          "when": "view == decky-mcp.device && decky-mcp.layout != classic",
-          "group": "navigation@3"
-        },
-        {
-          "command": "decky-mcp.switchLayout",
-          "when": "view =~ /^decky-mcp\\./",
-          "group": "navigation@9"
         }
       ],
       "view/item/context": [
         {
-          "command": "decky-mcp.addDevice",
-          "when": "view == decky-mcp.device && viewItem == devices",
-          "group": "inline"
-        },
-        {
-          "command": "decky-mcp.editDevice",
-          "when": "view == decky-mcp.device && viewItem =~ /^device(\\.active)?$/",
-          "group": "inline@1"
-        },
-        {
-          "command": "decky-mcp.removeDevice",
-          "when": "view == decky-mcp.device && viewItem =~ /^device(\\.active)?$/",
-          "group": "inline@2"
-        },
-        {
-          "command": "decky-mcp.setActiveDevice",
-          "when": "view == decky-mcp.device && viewItem == device",
-          "group": "1_device@1"
-        },
-        {
-          "command": "decky-mcp.editDevice",
-          "when": "view == decky-mcp.device && viewItem =~ /^device(\\.active)?$/",
-          "group": "1_device@2"
-        },
-        {
-          "command": "decky-mcp.removeDevice",
-          "when": "view == decky-mcp.device && viewItem =~ /^device(\\.active)?$/",
-          "group": "1_device@3"
-        },
-        {
-          "command": "decky-mcp.refresh",
-          "when": "view == decky-mcp.device && viewItem == connection",
-          "group": "inline@1"
-        },
-        {
-          "command": "decky-mcp.changeHost",
-          "when": "view == decky-mcp.device && viewItem == connection",
-          "group": "inline@2"
-        },
-        {
-          "command": "decky-mcp.openScreen",
-          "when": "view =~ /^decky-mcp\\.(device|unified)$/ && viewItem == screen",
-          "group": "inline"
-        },
-        {
           "command": "decky-mcp.reloadPlugin",
-          "when": "view =~ /^decky-mcp\\.(plugins|unified)$/ && viewItem == plugin",
+          "when": "view == decky-mcp.plugins && viewItem == plugin",
           "group": "inline@1"
         },
         {
           "command": "decky-mcp.pluginLogs",
-          "when": "view =~ /^decky-mcp\\.(plugins|unified)$/ && viewItem == plugin",
+          "when": "view == decky-mcp.plugins && viewItem == plugin",
           "group": "inline@2"
         },
         {
           "command": "decky-mcp.reloadPlugin",
-          "when": "view =~ /^decky-mcp\\.(plugins|unified)$/ && viewItem == plugin",
+          "when": "view == decky-mcp.plugins && viewItem == plugin",
           "group": "1_plugin@1"
         },
         {
           "command": "decky-mcp.pluginLogs",
-          "when": "view =~ /^decky-mcp\\.(plugins|unified)$/ && viewItem == plugin",
+          "when": "view == decky-mcp.plugins && viewItem == plugin",
           "group": "1_plugin@2"
         },
         {
           "command": "decky-mcp.connect",
-          "when": "view =~ /^decky-mcp\\.(devices|unified)$/ && viewItem =~ /^deck\\.(unpaired|paired)$/",
+          "when": "view == decky-mcp.devices && viewItem =~ /^deck\\.(unpaired|paired)$/",
           "group": "inline@1"
         },
         {
           "command": "decky-mcp.disconnectDevice",
-          "when": "view =~ /^decky-mcp\\.(devices|unified)$/ && viewItem == deck.session",
+          "when": "view == decky-mcp.devices && viewItem == deck.session",
           "group": "inline@1"
         },
         {
           "command": "decky-mcp.deviceActions",
-          "when": "view =~ /^decky-mcp\\.(devices|unified)$/ && viewItem =~ /^deck\\.(unpaired|paired|session)$/",
+          "when": "view == decky-mcp.devices && viewItem =~ /^deck\\.(unpaired|paired|session)$/",
           "group": "inline@2"
         },
         {
           "command": "decky-mcp.connect",
-          "when": "view =~ /^decky-mcp\\.(devices|unified)$/ && viewItem =~ /^deck\\.(unpaired|paired)$/",
+          "when": "view == decky-mcp.devices && viewItem =~ /^deck\\.(unpaired|paired)$/",
           "group": "1_connect@1"
         },
         {
           "command": "decky-mcp.disconnectDevice",
-          "when": "view =~ /^decky-mcp\\.(devices|unified)$/ && viewItem == deck.session",
+          "when": "view == decky-mcp.devices && viewItem == deck.session",
           "group": "1_connect@1"
         },
         {
           "command": "decky-mcp.pairAgain",
-          "when": "view =~ /^decky-mcp\\.(devices|unified)$/ && viewItem =~ /^deck\\.(paired|session)$/",
+          "when": "view == decky-mcp.devices && viewItem =~ /^deck\\.(paired|session)$/",
           "group": "2_pair@1"
         },
         {
           "command": "decky-mcp.enterToken",
-          "when": "view =~ /^decky-mcp\\.(devices|unified)$/ && viewItem =~ /^deck\\.(unpaired|paired|session)$/",
+          "when": "view == decky-mcp.devices && viewItem =~ /^deck\\.(unpaired|paired|session)$/",
           "group": "2_pair@2"
         },
         {
           "command": "decky-mcp.editDevice",
-          "when": "view =~ /^decky-mcp\\.(devices|unified)$/ && viewItem =~ /^deck\\.(unpaired|paired|session)$/",
+          "when": "view == decky-mcp.devices && viewItem =~ /^deck\\.(unpaired|paired|session)$/",
           "group": "3_device@1"
         },
         {
           "command": "decky-mcp.copyViewerUrl",
-          "when": "view =~ /^decky-mcp\\.(devices|unified)$/ && viewItem =~ /^deck\\./",
+          "when": "view == decky-mcp.devices && viewItem =~ /^deck\\./",
           "group": "3_device@2"
         },
         {
           "command": "decky-mcp.removeDevice",
-          "when": "view =~ /^decky-mcp\\.(devices|unified)$/ && viewItem =~ /^deck\\.(unpaired|paired|session)$/",
+          "when": "view == decky-mcp.devices && viewItem =~ /^deck\\.(unpaired|paired|session)$/",
           "group": "3_device@3"
         }
       ],
       "commandPalette": [
-        {
-          "command": "decky-mcp.setActiveDevice",
-          "when": "false"
-        },
         {
           "command": "decky-mcp.deviceActions",
           "when": "false"
