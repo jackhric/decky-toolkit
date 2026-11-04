@@ -1,0 +1,141 @@
+---
+import { Button } from '@/components/starwind/button';
+import { Card } from '@/components/starwind/card';
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@/components/starwind/input-group';
+import { Kbd, KbdGroup } from '@/components/starwind/kbd';
+import mp4 from '../assets/clips/install.mp4?url';
+import webm from '../assets/clips/install.webm?url';
+import poster from '../assets/clips/install.webp?url';
+import { editors } from '../data/editors';
+import Icon from './Icon.astro';
+
+interface Props { repo: string; pluginUrl: string }
+const { repo, pluginUrl } = Astro.props;
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+---
+
+<section id="get-started" class="cta" aria-labelledby="cta-title">
+  <Card class="cta-card relative overflow-hidden gap-0 p-0 rounded-[20px]">
+    <div class="grid">
+      <div class="copy">
+        <h2 id="cta-title">Ship your next plugin from the editor</h2>
+
+        <ol class="installs">
+          <li>
+            <span class="where"><b>1</b>On your computer</span>
+            <div class="buttons">
+              <Button href={editors.vscode.store} variant="default" class="select-none">
+                <Icon name="vscode" class="size-[18px]" />Install for VS Code
+              </Button>
+              <Button href={editors.vscodium.store} variant="outline" class="select-none">
+                <Icon name="vscodium" class="size-[18px]" />Install for VSCodium
+              </Button>
+            </div>
+          </li>
+          <li>
+            <span class="where"><b>2</b>On your SteamOS device</span>
+            <InputGroup class="bg-muted">
+              <InputGroupInput id="cta-plugin-url" readonly value={pluginUrl} aria-label="Plugin URL for Decky"
+                class="font-mono text-[0.8rem] min-w-0 bg-transparent" />
+              <InputGroupAddon align="inline-end">
+                <InputGroupButton variant="primary" data-copy="cta-plugin-url" class="font-semibold">Copy</InputGroupButton>
+              </InputGroupAddon>
+            </InputGroup>
+            <span class="hint">Decky → Developer → Install Plugin from URL</span>
+          </li>
+        </ol>
+
+        <p class="then">Then pair, open your plugin and press
+          <KbdGroup><Kbd>Ctrl</Kbd>+<Kbd>Alt</Kbd>+<Kbd>D</Kbd></KbdGroup>.</p>
+      </div>
+
+      <div class="media" aria-hidden="true">
+        <div class="window">
+          <div class="bar"><i></i><i></i><i></i></div>
+          <video muted loop playsinline preload="none" poster={poster} width="480" height="270" data-cta-clip>
+            <source src={webm} type="video/webm" />
+            <source src={mp4} type="video/mp4" />
+          </video>
+        </div>
+      </div>
+    </div>
+  </Card>
+</section>
+
+<footer class="site-footer">
+  <nav aria-label="Project links">
+    <a href={`${base}/docs/`}>Docs</a>
+    <a href={`${base}/docs/faq/`}>FAQ</a>
+    <a href={repo}>GitHub</a>
+    <a href={`${repo}/blob/main/docs/reference.md`}>Reference</a>
+    <a href={`${repo}/releases`}>Releases</a>
+    <a href={`${repo}/blob/main/LICENSE`}>MIT License</a>
+  </nav>
+  <p class="small">Not affiliated with Valve or the Decky Loader project.</p>
+</footer>
+
+<script>
+  const still = matchMedia('(prefers-reduced-motion: reduce)');
+  const observer = new IntersectionObserver(entries => {
+    for (const { target, isIntersecting } of entries) {
+      const video = target as HTMLVideoElement;
+      if (isIntersecting && !still.matches && !document.hidden) video.play().catch(() => {});
+      else video.pause();
+    }
+  }, { rootMargin: '100px' });
+  for (const video of document.querySelectorAll<HTMLVideoElement>('video[data-cta-clip]')) observer.observe(video);
+</script>
+
+<style>
+  .cta { max-width: 1040px; margin: 0 auto; padding: 8px 20px 40px; }
+  .cta :global(.cta-card)::before {
+    content: ''; position: absolute; right: -10%; top: -30%; width: 70%; height: 160%; pointer-events: none;
+    background: radial-gradient(closest-side, color-mix(in srgb, var(--primary) 18%, transparent), transparent 75%);
+  }
+  .grid {
+    position: relative; display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+    align-items: center; gap: 44px; padding: 44px 48px;
+  }
+  .copy { min-width: 0; }
+  h2 {
+    margin: 0 0 24px; text-align: left; font-size: clamp(1.5rem, 3vw, 2.1rem); line-height: 1.15;
+    letter-spacing: -0.02em; text-wrap: balance;
+  }
+  .installs { list-style: none; margin: 0; padding: 0; display: grid; gap: 18px; }
+  .installs li { display: grid; gap: 8px; min-width: 0; }
+  .where { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; font-weight: 700; }
+  .where b {
+    display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; font-size: 0.75rem;
+    background: var(--primary); color: var(--primary-foreground);
+  }
+  .buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+  .hint { font-size: 0.82rem; color: var(--muted-foreground); }
+  .then { margin: 20px 0 0; font-size: 0.92rem; color: var(--muted-foreground); }
+
+  .media { min-width: 0; user-select: none; -webkit-user-select: none; pointer-events: none; }
+  .window {
+    border-radius: 12px; overflow: hidden; background: var(--tile-surface); border: 1px solid var(--tile-border);
+    box-shadow: 0 20px 50px rgb(0 0 0 / 0.22);
+  }
+  .bar { display: flex; gap: 6px; padding: 9px 12px; border-bottom: 1px solid var(--tile-border); }
+  .bar i { width: 10px; height: 10px; border-radius: 50%; background: var(--tile-border); }
+  video { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; object-position: left top; }
+
+  .site-footer {
+    max-width: 1040px; margin: 0 auto; padding: 24px 20px 40px; display: flex; justify-content: space-between;
+    align-items: center; gap: 12px 24px; flex-wrap: wrap; color: var(--muted-foreground); font-size: 0.9rem;
+  }
+  nav { display: flex; gap: 6px 20px; flex-wrap: wrap; }
+  nav a { color: var(--foreground); text-decoration: none; font-weight: 500; }
+  nav a:hover { text-decoration: underline; text-underline-offset: 3px; }
+  .small { margin: 0; font-size: 0.85rem; }
+
+  @media (max-width: 860px) {
+    .grid { grid-template-columns: minmax(0, 1fr); gap: 32px; padding: 36px 32px; }
+  }
+  @media (max-width: 560px) {
+    .grid { padding: 28px 18px; }
+    .buttons :global(a) { flex: 1 1 100%; }
+    .site-footer, nav { justify-content: center; text-align: center; }
+  }
+</style>

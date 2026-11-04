@@ -1,0 +1,64 @@
+---
+title: FAQ
+description: Answers about developing Decky Loader plugins for the Steam Deck with Decky Toolkit, from hot reload and logs to CEF debugging and MCP.
+---
+
+export const faqs = [
+  {
+    q: 'What is Decky Toolkit?',
+    a: 'Decky Toolkit is a free, open-source (MIT) toolkit for developing Decky Loader plugins. It has two parts: a Decky Loader plugin on your Steam Deck or other SteamOS device, which runs an HTTP and MCP server on port 8765, and a VS Code / VSCodium extension that connects to it to deploy, debug and control the device.',
+  },
+  {
+    q: 'What do I need to use it?',
+    a: 'A Steam Deck, SteamOS or Bazzite device running Decky Loader 3.3 or newer, and VS Code 1.90+ or VSCodium on your computer.',
+  },
+  {
+    q: 'How do I develop a Decky Loader plugin with Decky Toolkit?',
+    a: 'Start from the decky-plugin-template, open the plugin folder (any folder with a plugin.json) in VS Code or VSCodium, pair the editor with your device and press Ctrl+Alt+D. The extension builds the plugin if its sources changed, installs it on the device and reloads it.',
+  },
+  {
+    q: 'How do I hot reload a Decky plugin without restarting Decky Loader?',
+    a: 'Turn on deploy on change in the extension and keep your bundler in watch mode (pnpm run watch). Every save then reloads just your plugin, backend and frontend, without restarting Decky Loader or the Steam UI.',
+  },
+  {
+    q: 'Do I need SSH or a sudo password to deploy?',
+    a: 'No. The editor pairs with the device instead: it shows a four-digit code, the device shows a toast with the same code, and you approve it in Quick Access → Decky Toolkit. Deploys then go over the plugin’s own server.',
+  },
+  {
+    q: 'Where are Decky plugin logs, and how do I see them?',
+    a: 'A plugin’s backend log is in ~/homebrew/logs/<plugin>/ and the loader logs to journalctl -u plugin_loader. Decky Toolkit streams both into output channels in your editor (Show plugin logs, Show loader logs).',
+  },
+  {
+    q: 'How do I debug the Steam UI side of a Decky plugin?',
+    a: 'Decky plugin frontends run in Steam’s SharedJSContext. Decky: Evaluate JS in Steam UI runs JavaScript there through Steam’s CEF DevTools endpoint and shows the result in your editor, so you can inspect and test UI code live.',
+  },
+  {
+    q: 'Can I see and control my Steam Deck from my computer?',
+    a: 'Yes. Decky: Open screen shows the device’s screen with sound in an editor tab. With remote input turned on (it is off by default) you can use your keyboard, mouse and gamepad, and add virtual Xbox 360 controllers that Steam Input sees.',
+  },
+  {
+    q: 'Does it work on Bazzite, SteamOS and other handhelds?',
+    a: 'It is tested on Bazzite with Decky Loader 3.3.1. Stock SteamOS 3.8 ships everything the plugin uses, so the same plugin zip should work there, but it has not been run on that hardware yet. Any device that runs Decky Loader is the target.',
+  },
+  {
+    q: 'How do I connect Claude Code or another MCP client?',
+    a: 'Run claude mcp add --transport http decky http://<deck-ip>:8765/mcp -H "Authorization: Bearer <token>", or use Decky: Write MCP config for this workspace to add the server to .mcp.json. The token is shown in the Decky Toolkit panel on the device.',
+  },
+  {
+    q: 'Why isn’t Decky Toolkit in the Decky Plugin Store?',
+    a: 'It was built with heavy use of Claude Code, and the Decky Plugin Store does not accept plugins that contain LLM-generated code. Install it from its URL or a ZIP file instead (see Get started).',
+  },
+];
+
+<script type="application/ld+json" set:html={JSON.stringify({
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: faqs.map(({ q, a }) => ({ '@type': 'Question', name: q, acceptedAnswer: { '@type': 'Answer', text: a } })),
+})} />
+
+{faqs.map(({ q, a }) => (
+  <>
+    <h2 id={q.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}>{q}</h2>
+    <p>{a}</p>
+  </>
+))}

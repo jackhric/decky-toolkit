@@ -1,0 +1,160 @@
+---
+import { Badge } from '@/components/starwind/badge';
+import { Card } from '@/components/starwind/card';
+import { Kbd, KbdGroup } from '@/components/starwind/kbd';
+import EditorBadge from './EditorBadge.astro';
+import Glyph from './Glyph.astro';
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const doc = (slug: string) => `${base}/docs/features/${slug}/`;
+const card = [
+  'bento-card group relative gap-0 px-6 py-[22px] rounded-2xl max-[600px]:p-5',
+  'has-[.title:focus-visible]:ring-2 has-[.title:focus-visible]:ring-foreground/60',
+].join(' ');
+const chips = ['Keyboard', 'Mouse', 'Your gamepad', 'Virtual controllers', 'Jump to page'];
+---
+
+<section id="features" class="features">
+  <h2>Everything you reach for, without leaving your IDE</h2>
+  <div class="grid">
+    <Card class={`${card} col-span-2 max-[600px]:col-span-1`}>
+      <svg class="go" viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 15.5 15.5 8.5M10 8.5h5.5V14" /></svg>
+      <div class="lead">
+        <div class="text">
+          <span class="mark"><Glyph name="deploy" /></span>
+          <h3><a class="title" href={doc('deploy')}>Hot reload your plugin</a></h3>
+          <p>Save a file and your plugin reloads on the device. Turn on deploy-on-change, or deploy on demand with the shortcut.</p>
+          <p class="key"><KbdGroup><Kbd>Ctrl</Kbd>+<Kbd>Alt</Kbd>+<Kbd>D</Kbd></KbdGroup></p>
+        </div>
+        <ol class="flow" aria-label="What happens when you save">
+          <li><b>Save</b><span>in your editor</span></li>
+          <li><b>Build</b><span>only when sources changed</span></li>
+          <li><b>Reload</b><span>just that plugin, no loader restart</span></li>
+        </ol>
+      </div>
+    </Card>
+
+    <Card class={card}>
+      <svg class="go" viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 15.5 15.5 8.5M10 8.5h5.5V14" /></svg>
+      <span class="mark"><Glyph name="screen" /></span>
+      <h3><a class="title" href={doc('screen')}>Remote control</a></h3>
+      <p>Remotely control and command your device from your editor.</p>
+      <ul class="chips" aria-label="Input you can send">
+        {chips.map(c => <li><Badge variant="secondary" size="sm" class="font-semibold select-none">{c}</Badge></li>)}
+      </ul>
+    </Card>
+
+    <Card class={card}>
+      <svg class="go" viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 15.5 15.5 8.5M10 8.5h5.5V14" /></svg>
+      <span class="mark"><Glyph name="logs" /></span>
+      <h3><a class="title" href={doc('logs')}>Logs where you work</a></h3>
+      <p>Decky Loader and plugin logs stream into output channels
+        in <span class="inline-link"><EditorBadge editor="vscode" /></span> and <span class="inline-link"><EditorBadge editor="vscodium" /></span>.</p>
+      <pre class="panel" aria-hidden="true"><span class="dim">[decky]</span> loading plugin
+<span class="dim">[toolkit]</span> MCP on :8765
+<span class="dim">[my-plugin]</span> settings loaded</pre>
+    </Card>
+
+    <Card class={card}>
+      <svg class="go" viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 15.5 15.5 8.5M10 8.5h5.5V14" /></svg>
+      <span class="mark"><Glyph name="console" /></span>
+      <h3><a class="title" href={doc('console')}>Poke the Steam UI</a></h3>
+      <p>A JavaScript console for Steam's <code>SharedJSContext</code>, for inspecting and testing UI code live.</p>
+      <pre class="panel" aria-hidden="true"><span class="dim">&gt;</span> location.pathname
+<span class="out">'/routes/library/home'</span></pre>
+    </Card>
+
+    <Card class={card}>
+      <svg class="go" viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 15.5 15.5 8.5M10 8.5h5.5V14" /></svg>
+      <span class="mark"><Glyph name="api" /></span>
+      <h3><a class="title" href={doc('api')}>Scriptable</a></h3>
+      <p>Everything is also available over a small HTTP API and MCP, for your own tools, scripts and coding agents.</p>
+      <pre class="panel" aria-hidden="true"><span class="dim">$</span> claude mcp add --transport http \
+    decky http://&lt;deck-ip&gt;:8765/mcp</pre>
+    </Card>
+  </div>
+</section>
+
+<style>
+  h2 { font-size: clamp(1.35rem, 2.6vw, 1.85rem); text-align: center; margin: 0 0 28px; letter-spacing: -0.015em; }
+  .features { padding-block: 32px 56px; }
+  .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+
+  /* Only translate and opacity change on hover, so the browser composites it on the GPU instead of repainting a blurred box-shadow every frame. */
+  .grid :global(.bento-card) { transition: translate 0.15s ease-in-out; will-change: translate; }
+  .grid :global(.bento-card)::after {
+    content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; opacity: 0;
+    box-shadow: 0 0 0 1px var(--feature-hover-ring), 0 18px 40px -14px var(--feature-hover-shadow);
+    transition: opacity 0.15s ease-in-out;
+  }
+  @media (hover: hover) {
+    .grid :global(.bento-card:hover) { translate: 0 -4px; }
+    .grid :global(.bento-card:hover)::after { opacity: 1; }
+  }
+
+  .lead { display: flex; gap: 28px; align-items: center; }
+  .text { flex: 1 1 260px; min-width: 0; }
+  .mark {
+    display: inline-grid; place-items: center; width: 42px; height: 42px; margin-bottom: 14px; border-radius: 12px;
+    color: var(--feature-mark-fg); background: var(--feature-mark-bg); border: 1px solid var(--border);
+  }
+  .mark :global(svg) { width: 22px; height: 22px; }
+
+  h3 { margin: 0 0 6px; padding-right: 32px; font-size: 1.05rem; }
+  .text h3 { font-size: 1.3rem; letter-spacing: -0.01em; }
+  .title { color: inherit; text-decoration: none; outline: none; }
+  .title::after { content: ''; position: absolute; inset: 0; z-index: 1; border-radius: inherit; }
+  .inline-link { position: relative; z-index: 2; }
+  p { margin: 0; color: var(--muted-foreground); }
+  code { font: 0.92em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--foreground); }
+  .key { margin-top: 14px; color: var(--muted-foreground); font-size: 0.9rem; }
+
+  .flow {
+    flex: 0 1 250px; list-style: none; margin: 0; padding: 4px 0 4px 2px; display: grid; gap: 18px; position: relative;
+  }
+  .flow::before {
+    content: ''; position: absolute; left: 13px; top: 18px; bottom: 18px; width: 2px;
+    background: var(--border);
+  }
+  .flow li { position: relative; padding-left: 40px; display: grid; gap: 1px; line-height: 1.35; }
+  .flow li::before {
+    content: ''; position: absolute; left: 7px; top: 0.35em; width: 10px; height: 10px; border-radius: 50%;
+    background: var(--feature-flow); outline: 4px solid var(--card);
+  }
+  .flow b { font-weight: 700; }
+  .flow span { color: var(--muted-foreground); font-size: 0.92rem; }
+
+  .chips { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+
+  .panel {
+    margin: auto 0 0; padding: 10px 12px; border-radius: 10px; overflow: hidden; white-space: pre;
+    font: 0.74rem/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background: var(--feature-panel-bg); border: 1px solid var(--feature-panel-border); color: var(--feature-panel-text);
+    user-select: none; -webkit-user-select: none;
+  }
+  p:has(+ .panel) { margin-bottom: 16px; }
+  .panel .dim { color: var(--feature-panel-dim); }
+  .panel .out { color: var(--feature-panel-accent); }
+
+  .go {
+    position: absolute; top: 20px; right: 20px; width: 22px; height: 22px; pointer-events: none;
+    fill: none; stroke: var(--feature-arrow); stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round;
+    transition: translate 0.15s ease-in-out;
+  }
+  .grid :global(.bento-card:hover) .go, .grid :global(.bento-card:focus-within) .go { translate: 2px -2px; }
+
+  @media (max-width: 900px) {
+    .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .text { flex-basis: 220px; }
+  }
+  @media (max-width: 600px) {
+    .grid { grid-template-columns: minmax(0, 1fr); }
+    .lead { flex-direction: column; align-items: stretch; gap: 20px; }
+    .text, .flow { flex-basis: auto; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .grid :global(.bento-card) { transition: none; translate: none !important; }
+    .grid :global(.bento-card)::after { transition: none; }
+    .go { transition: none; }
+  }
+</style>
