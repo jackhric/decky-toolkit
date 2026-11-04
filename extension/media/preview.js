@@ -17,7 +17,7 @@
     inflight = new AbortController();
     try {
       const res = await fetch(base + '/frame.jpg?t=' + Date.now(), { signal: inflight.signal, cache: 'no-store' });
-      if (res.status === 401) show('Token rejected.\nRe-pair the Deck from the Devices view.');
+      if (res.status === 401) show('Token rejected.\nRe-pair the device from the Devices view.');
       else if (!res.ok) show('No frame: ' + (await res.text()).slice(0, 200));
       else {
         const url = URL.createObjectURL(await res.blob());
@@ -27,7 +27,7 @@
       }
     } catch (e) {
       if (e.name === 'AbortError') return;
-      show('Deck unreachable');
+      show('Device unreachable');
     } finally {
       inflight = null;
     }
@@ -38,7 +38,7 @@
   function stop() { gen++; clearTimeout(timer); timer = null; if (inflight) inflight.abort(); }
   function restart() {
     stop();
-    if (!paired) return show('Not connected.\nConnect to a Deck in the Devices view.');
+    if (!paired) return show('Not connected.\nConnect to a device in the Devices view.');
     if (visible) tick();
   }
 

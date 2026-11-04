@@ -2,12 +2,13 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import { createZip, ZipEntry } from './zip';
 
-// Same file set as scripts/deploy.sh, plus bin/ which some plugins ship.
+// What decky-plugin-template ships; backend/ (sources for bin/), src/ and tests stay behind.
 export const PLUGIN_FILES = [
   'dist', 'plugin.json', 'package.json', 'main.py', 'LICENSE', 'README.md',
-  'defaults', 'py_modules', 'static', 'bin',
+  'defaults', 'py_modules', 'static', 'bin', 'assets',
 ];
-const SKIP_DIRS = new Set(['__pycache__']);
+const SKIP = new Set(['__pycache__', 'node_modules', '.git']);
+const skipped = (name: string) => SKIP.has(name) || name.endsWith('.pyc');
 
 async function exists(p: string): Promise<boolean> {
   return fs.stat(p).then(() => true, () => false);
@@ -18,7 +19,7 @@ async function walk(abs: string, rel: string, out: ZipEntry[]): Promise<void> {
   if (st.isDirectory()) {
     out.push({ name: rel + '/', mtime: st.mtime });
     for (const child of (await fs.readdir(abs)).sort()) {
-      if (SKIP_DIRS.has(child)) continue;
+      if (skipped(child)) continue;
       await walk(path.join(abs, child), `${rel}/${child}`, out);
     }
   } else if (st.isFile()) {

@@ -1,9 +1,15 @@
 import * as vscode from 'vscode';
 import type { ConnectionState } from './connection';
-import { PluginFolder, findPluginFolders, pluginDirName } from './deploy';
+import { DeployController, pluginSummary } from './deploy';
 import { viewerUrl } from './devices';
+import type { WorkspacePlugin } from './pluginDeploy';
 
-/** Argument the Plugin group passes to reload/logs: resolve the dir from the workspace, not the Deck. */
+export interface PluginSource {
+  ready(): Promise<WorkspacePlugin[]>;
+  readonly onDidChange: vscode.Event<void>;
+}
+
+/** Argument the Plugin group passes to reload/logs: resolve the dir from the workspace, not the device. */
 export const WORKSPACE_PLUGIN = { workspacePlugin: true } as const;
 
 export class ActionNode extends vscode.TreeItem {
@@ -42,22 +48,16 @@ export class ActionsTreeProvider implements vscode.TreeDataProvider<ActionNode>,
   private readonly changed = new vscode.EventEmitter<undefined>();
   readonly onDidChangeTreeData = this.changed.event;
   private readonly subs: vscode.Disposable[];
-  // Cached because the tree refreshes with every stats poll.
-  private plugins?: Promise<PluginFolder[]>;
 
-  constructor(private readonly conn: ConnectionState) {
-    const watcher = vscode.workspace.createFileSystemWatcher('**/plugin.json');
-    const rescan = () => this.refresh();
+  constructor(private readonly conn: ConnectionState, private readonly ws?: PluginSource) {
     this.subs = [
       conn.onDidChange(() => this.changed.fire(undefined)),
-      vscode.workspace.onDidChangeWorkspaceFolders(rescan),
-      vscode.workspace.onDidChangeConfiguration(e => { if (e.affectsConfiguration('decky-mcp.pluginDirName')) rescan(); }),
-      watcher, watcher.onDidCreate(rescan), watcher.onDidDelete(rescan), watcher.onDidChange(rescan),
+      vscode.workspace.onDidChangeConfiguration(e => { if (e.affectsConfiguration('decky-mcp.deploy')) this.refresh(); }),
     ];
+    if (ws) this.subs.push(ws.onDidChange(() => this.refresh()));
   }
 
   refresh(): void {
-    this.plugins = undefined;
     this.changed.fire(undefined);
   }
 
@@ -69,8 +69,7 @@ export class ActionsTreeProvider implements vscode.TreeDataProvider<ActionNode>,
     if (node) return node.children ?? [];
     const d = this.conn.connectedDevice;
     if (!d) return [];
-    this.plugins ??= findPluginFolders();
-    const plugins = await this.plugins;
+    const plugins = this.ws ? await this.ws.ready() : [];
 
     const screen = group('screen', 'Screen', 'device-desktop', true, [
       leaf('openScreen', 'Open screen panel', 'window', 'decky-mcp.openScreen'),
@@ -78,9 +77,9 @@ export class ActionsTreeProvider implements vscode.TreeDataProvider<ActionNode>,
       leaf('snapshot', 'Snapshot to file', 'device-camera', 'decky-mcp.snapshot'),
     ]);
     screen.description = screenDescription(this.conn);
-    screen.tooltip = 'Live Deck display';
+    screen.tooltip = 'Live device display';
     screen.children![1].tooltip = `Opens ${viewerUrl(d)} in your browser. The browser is paired separately: press "Pair a browser" ` +
-      'in the Deck\'s Decky-MCP panel, unless it still has the cookie from an earlier pairing.';
+      'in the device\'s Decky-MCP panel, unless it still has the cookie from an earlier pairing.';
     screen.children![2].tooltip = 'Save the current frame (/frame.jpg) as a JPEG';
 
     return [
@@ -93,7 +92,7 @@ export class ActionsTreeProvider implements vscode.TreeDataProvider<ActionNode>,
       ]),
       group('steam', 'Steam', 'game', false, [
         leaf('evaluate', 'Evaluate JS in Steam UI', 'terminal', 'decky-mcp.evaluate'),
-        leaf('toast', 'Toast on Deck', 'bell', 'decky-mcp.toast'),
+        leaf('toast', 'Toast on device', 'bell', 'decky-mcp.toast'),
       ]),
       group('mcp', 'MCP', 'server-process', false, [
         leaf('mcpConfig', 'Write MCP config for this workspace', 'json', 'decky-mcp.writeMcpConfig'),
@@ -103,13 +102,21 @@ export class ActionsTreeProvider implements vscode.TreeDataProvider<ActionNode>,
     ];
   }
 
-  private pluginGroup(plugins: PluginFolder[]): ActionNode {
+  private pluginGroup(plugins: WorkspacePlugin[]): ActionNode {
     const args = [WORKSPACE_PLUGIN];
+    const auto = DeployController.autoDeployEnabled;
     const children = [
-      leaf('deploy', 'Deploy', 'cloud-upload', 'decky-mcp.deploy'),
+      leaf('deploy', 'Deploy', 'rocket', 'decky-mcp.deploy'),
+      leaf('deployFull', 'Deploy (full restart)', 'debug-restart', 'decky-mcp.deployFull'),
       leaf('reloadPlugin', 'Reload backend', 'refresh', 'decky-mcp.reloadPlugin', args),
       leaf('pluginLogs', 'Show plugin logs', 'output', 'decky-mcp.pluginLogs', args),
+      leaf('autoDeploy', `Auto-deploy on change: ${auto ? 'On' : 'Off'}`, auto ? 'sync' : 'sync-ignored', 'decky-mcp.toggleAutoDeploy'),
     ];
+    children[0].tooltip = 'Build if sources changed, install and reload only this plugin (no loader restart)';
+    children[1].tooltip = 'Build if sources changed, install and restart Decky Loader (reloads the Steam UI)';
+    children[4].tooltip = auto
+      ? 'On: every change to dist/index.js, main.py or py_modules/**/*.py deploys (no build; keep `pnpm run watch` running). Click to turn off'
+      : 'Off. Click to deploy automatically whenever dist/index.js, main.py or py_modules/**/*.py change';
     const g = group('plugin', 'Plugin', 'package', true, children);
     if (plugins.length === 0) {
       g.description = 'no plugin.json in workspace';
@@ -122,11 +129,15 @@ export class ActionsTreeProvider implements vscode.TreeDataProvider<ActionNode>,
       }
       return g;
     }
-    const dirs = plugins.map(pluginDirName);
-    g.description = dirs.join(', ');
-    g.tooltip = plugins.length === 1
-      ? `${plugins[0].name} from ${plugins[0].folder.uri.fsPath}, deployed to ~/homebrew/plugins/${dirs[0]}`
-      : 'Several workspace folders contain a plugin.json; each action asks which one';
+    if (plugins.length === 1) {
+      const [p] = plugins;
+      g.description = pluginSummary(p);
+      g.tooltip = `${p.name}${p.version ? ` ${p.version}` : ''} from ${p.root}, deployed to ~/homebrew/plugins/${p.dir}` +
+        `${p.hasDebugFlag ? ' (debug flag: the loader\'s watcher reloads it after each install)' : ''}`;
+    } else {
+      g.description = plugins.map(pluginSummary).join(', ');
+      g.tooltip = `Several plugins in the workspace (${plugins.map(p => `${p.name} → ${p.dir}`).join(', ')}); each action asks which one`;
+    }
     return g;
   }
 

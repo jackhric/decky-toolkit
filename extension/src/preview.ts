@@ -54,10 +54,10 @@ export class PreviewViewProvider implements vscode.WebviewViewProvider {
 <meta http-equiv="Content-Security-Policy" content="${csp}">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="${uri('preview.css')}">
-<title>Deck preview</title>
+<title>Device preview</title>
 </head>
 <body data-base="${attr(external)}" data-paired="${this.conn.paired}">
-<div class="frame"><img id="img" alt="Deck display"><div id="msg">Loading…</div></div>
+<div class="frame"><img id="img" alt="Device display"><div id="msg">Loading…</div></div>
 <button id="open">Open full screen view</button>
 <script nonce="${nonce}" src="${uri('preview.js')}"></script>
 </body>

@@ -4,7 +4,7 @@ import { STATUS_ICON, statusLabel } from './devices';
 
 const DEFAULT_PORT = 8765;
 
-export class DeckNode extends vscode.TreeItem {
+export class DeviceNode extends vscode.TreeItem {
   device?: SavedDevice;
 }
 
@@ -12,12 +12,12 @@ export class DeckNode extends vscode.TreeItem {
  * One row per saved device; the row is also the connection state, so nothing about the device is
  * repeated elsewhere. The name is left out when it is just the host.
  */
-export function deviceRow(conn: ConnectionState, d: SavedDevice): DeckNode {
+export function deviceRow(conn: ConnectionState, d: SavedDevice): DeviceNode {
   const status = conn.statusOf(d);
   const session = conn.connectedDevice?.id === d.id;
   const address = `${d.host}:${d.port}`;
   const nameIsHost = d.name === d.host;
-  const n = new DeckNode(nameIsHost && d.port === DEFAULT_PORT ? d.host : nameIsHost ? address : d.name);
+  const n = new DeviceNode(nameIsHost && d.port === DEFAULT_PORT ? d.host : nameIsHost ? address : d.name);
   n.id = `deck:${d.id}`;
   n.device = d;
   n.description = nameIsHost ? statusLabel(status) : `${address} · ${statusLabel(status)}`;
@@ -36,7 +36,7 @@ export function deviceRow(conn: ConnectionState, d: SavedDevice): DeckNode {
   return n;
 }
 
-export class DevicesTreeProvider implements vscode.TreeDataProvider<DeckNode>, vscode.Disposable {
+export class DevicesTreeProvider implements vscode.TreeDataProvider<DeviceNode>, vscode.Disposable {
   private readonly changed = new vscode.EventEmitter<undefined>();
   readonly onDidChangeTreeData = this.changed.event;
   private readonly sub: vscode.Disposable;
@@ -49,13 +49,13 @@ export class DevicesTreeProvider implements vscode.TreeDataProvider<DeckNode>, v
     this.changed.fire(undefined);
   }
 
-  getTreeItem(node: DeckNode): vscode.TreeItem {
+  getTreeItem(node: DeviceNode): vscode.TreeItem {
     return node;
   }
 
-  getChildren(node?: DeckNode): DeckNode[] {
+  getChildren(node?: DeviceNode): DeviceNode[] {
     if (node) return [];
-    // Empty list → viewsWelcome "Add a Deck".
+    // Empty list → viewsWelcome "Add a Decky device".
     return this.conn.devices.map(d => deviceRow(this.conn, d));
   }
 

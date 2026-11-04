@@ -4,7 +4,7 @@ import * as path from 'path';
 import { ActionsTreeProvider, WORKSPACE_PLUGIN } from './actionsTree';
 import { DeckyClient, describeError, isMissingRoute } from './client';
 import { Connection } from './connection';
-import { deploy, findPluginFolders, pickPluginFolder, pluginDirName } from './deploy';
+import { DeployController, PluginWorkspace } from './deploy';
 import {
   addDevice, changeHost, copyViewerUrl, deviceActions, deviceFrom, editDevice, removeDevice, switchDevice, viewerUrl,
 } from './devices';
@@ -27,17 +27,18 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   await c.refresh();
   const status = new StatusBar(c);
   const logs = new LogManager(c);
-  const deployOut = vscode.window.createOutputChannel('Decky-MCP Deploy');
+  const deployOut = vscode.window.createOutputChannel('Decky');
   const consoleOut = vscode.window.createOutputChannel('Decky-MCP Console');
   const devicesTree = new DevicesTreeProvider(c);
-  const actionsTree = new ActionsTreeProvider(c);
+  const workspacePlugins = new PluginWorkspace();
+  const actionsTree = new ActionsTreeProvider(c, workspacePlugins);
   const pluginsTree = new PluginsTreeProvider(c);
   const preview = new PreviewViewProvider(ctx.extensionUri, c);
   const devicesView = vscode.window.createTreeView('decky-mcp.devices', { treeDataProvider: devicesTree });
   const actionsView = vscode.window.createTreeView('decky-mcp.actions', { treeDataProvider: actionsTree });
   const pluginsView = vscode.window.createTreeView('decky-mcp.plugins', { treeDataProvider: pluginsTree });
   ctx.subscriptions.push(
-    c, status, logs, deployOut, consoleOut, devicesTree, actionsTree, pluginsTree, devicesView, actionsView, pluginsView,
+    c, status, logs, deployOut, consoleOut, workspacePlugins, devicesTree, actionsTree, pluginsTree, devicesView, actionsView, pluginsView,
     vscode.window.registerWebviewViewProvider(PreviewViewProvider.viewId, preview),
   );
   const refreshPlugins = () => pluginsTree.refresh();
@@ -77,6 +78,8 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     await c.checkHealth();
     refreshPlugins();
   };
+  const deployer = new DeployController(c, workspacePlugins, deployOut, afterDeviceChange);
+  ctx.subscriptions.push(deployer);
 
   const command = (id: string, fn: (arg?: unknown) => Promise<unknown>) =>
     ctx.subscriptions.push(vscode.commands.registerCommand(id, async (arg?: unknown) => {
@@ -124,14 +127,10 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     if (d) await vscode.env.openExternal(vscode.Uri.parse(viewerUrl(d)));
   });
   command('decky-mcp.snapshot', () => snapshot(c));
-  command('decky-mcp.deploy', async () => {
-    const client = await c.client();
-    if (!client) return;
-    try {
-      await deploy(client, deployOut);
-    } finally {
-      await afterDeviceChange();
-    }
+  command('decky-mcp.deploy', () => deployer.deploy());
+  command('decky-mcp.deployFull', () => deployer.deploy({ full: true }));
+  command('decky-mcp.toggleAutoDeploy', async () => {
+    if (await workspacePlugins.pick('Auto-deploy which plugin?')) await deployer.toggleAutoDeploy();
   });
   command('decky-mcp.installZip', async () => {
     try {
@@ -156,7 +155,7 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   });
   command('decky-mcp.reloadPlugin', async arg => {
     const client = await c.client();
-    const dir = client && await resolveDir(client, arg, 'Plugin to reload');
+    const dir = client && await resolveDir(client, workspacePlugins, arg, 'Plugin to reload');
     if (!client || !dir) return;
     try {
       await client.reloadPlugin(dir);
@@ -174,14 +173,14 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   });
   command('decky-mcp.pluginLogs', async arg => {
     const client = await c.client();
-    const dir = client && await resolveDir(client, arg, 'Show logs of which plugin?');
+    const dir = client && await resolveDir(client, workspacePlugins, arg, 'Show logs of which plugin?');
     if (dir) logs.show(`plugin:${dir}`, `Decky: ${dir}`, { source: 'plugin', plugin: dir });
   });
   command('decky-mcp.evaluate', () => evaluate(c, consoleOut, ctx));
   command('decky-mcp.toast', async () => {
     const client = await c.client();
     if (!client) return;
-    const body = await vscode.window.showInputBox({ prompt: 'Toast text to show on the Deck', value: 'Hello from VS Code' });
+    const body = await vscode.window.showInputBox({ prompt: 'Toast text to show on the device', value: 'Hello from VS Code' });
     if (!body) return;
     await client.callToolText('toast', { title: 'VS Code', body });
   });
@@ -197,7 +196,7 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     if (!token) return;
     await vscode.env.clipboard.writeText(token);
     void vscode.window.showWarningMessage(
-      `Decky-MCP: copied the bearer token for ${c.label}. It is a secret: anyone with it can control the Deck, so keep it out of shared files and chats.`);
+      `Decky-MCP: copied the bearer token for ${c.label}. It is a secret: anyone with it can control the device, so keep it out of shared files and chats.`);
   });
 
   const last = c.lastSessionDevice;
@@ -212,16 +211,13 @@ export function deactivate(): void {
 
 /**
  * Plugins view rows pass themselves, the Actions view's Plugin group passes WORKSPACE_PLUGIN, and the
- * palette passes nothing (then pick from the workspace and the Deck).
+ * palette passes nothing (then pick from the workspace and the device).
  */
-async function resolveDir(client: DeckyClient, arg: unknown, placeHolder: string): Promise<string | undefined> {
-  if (arg === WORKSPACE_PLUGIN) {
-    const p = await pickPluginFolder();
-    return p && pluginDirName(p);
-  }
+async function resolveDir(client: DeckyClient, ws: PluginWorkspace, arg: unknown, placeHolder: string): Promise<string | undefined> {
+  if (arg === WORKSPACE_PLUGIN) return (await ws.pick(placeHolder))?.dir;
   if (typeof arg === 'string') return arg;
   const dir = (arg as { info?: { dir?: unknown } } | undefined)?.info?.dir;
-  return typeof dir === 'string' ? dir : pickDeviceDir(client, placeHolder);
+  return typeof dir === 'string' ? dir : pickDeviceDir(client, ws, placeHolder);
 }
 
 async function snapshot(c: Connection): Promise<void> {
@@ -229,7 +225,7 @@ async function snapshot(c: Connection): Promise<void> {
   if (!client) return;
   const jpeg = await client.frame();
   const stamp = new Date().toISOString().replace(/\.\d+Z$/, '').replace(/:/g, '-');
-  const name = `deck-${stamp}.jpg`;
+  const name = `screen-${stamp}.jpg`;
   const folder = vscode.workspace.workspaceFolders?.[0]?.uri;
   const uri = await vscode.window.showSaveDialog({
     defaultUri: folder ? vscode.Uri.joinPath(folder, name) : vscode.Uri.file(path.join(homedir(), name)),
@@ -249,7 +245,7 @@ async function installZip(c: Connection): Promise<void> {
   const [uri] = await vscode.window.showOpenDialog({
     canSelectMany: false,
     filters: { 'Plugin zip': ['zip'] },
-    openLabel: 'Install on Deck',
+    openLabel: 'Install on device',
     title: `Install a Decky plugin zip on ${c.label}`,
   }) ?? [];
   if (!uri) return;
@@ -273,8 +269,8 @@ async function installZip(c: Connection): Promise<void> {
   });
 }
 
-async function pickDeviceDir(client: DeckyClient, placeHolder: string): Promise<string | undefined> {
-  const local = (await findPluginFolders()).map(pluginDirName);
+async function pickDeviceDir(client: DeckyClient, ws: PluginWorkspace, placeHolder: string): Promise<string | undefined> {
+  const local = (await ws.ready()).map(p => p.dir);
   let remote: string[] = [];
   try {
     remote = (await client.listPlugins()).map(p => p.dir);

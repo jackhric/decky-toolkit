@@ -1,8 +1,8 @@
 {
   "name": "decky-mcp",
   "displayName": "Decky-MCP",
-  "description": "Live screen, deploy, logs and Steam console for Decky plugin development against a Decky-MCP device",
-  "version": "0.4.0",
+  "description": "Live screen, one-click deploy, logs and Steam console for Decky plugin development on devices running Decky Loader (Steam Deck, SteamOS, Bazzite)",
+  "version": "0.5.0",
   "publisher": "jackhric",
   "icon": "media/icon.png",
   "license": "BSD-3-Clause",
@@ -19,11 +19,15 @@
   "keywords": [
     "decky",
     "steam deck",
+    "steamos",
+    "bazzite",
     "mcp"
   ],
   "main": "./dist/extension.js",
   "activationEvents": [
     "workspaceContains:plugin.json",
+    "workspaceContains:*/plugin.json",
+    "workspaceContains:*/*/plugin.json",
     "onView:decky-mcp.devices",
     "onView:decky-mcp.actions",
     "onView:decky-mcp.plugins",
@@ -70,7 +74,7 @@
     "viewsWelcome": [
       {
         "view": "decky-mcp.devices",
-        "contents": "No devices yet.\n[Add a Deck](command:decky-mcp.addDevice)"
+        "contents": "No devices yet. Add a Decky device (any machine running Decky Loader: Steam Deck, Bazzite, SteamOS, …).\n[Add device](command:decky-mcp.addDevice)"
       }
     ],
     "commands": [
@@ -108,7 +112,19 @@
         "command": "decky-mcp.deploy",
         "title": "Deploy plugin",
         "category": "Decky",
-        "icon": "$(cloud-upload)"
+        "icon": "$(rocket)"
+      },
+      {
+        "command": "decky-mcp.deployFull",
+        "title": "Deploy plugin (full restart)",
+        "category": "Decky",
+        "icon": "$(debug-restart)"
+      },
+      {
+        "command": "decky-mcp.toggleAutoDeploy",
+        "title": "Toggle auto-deploy on change",
+        "category": "Decky",
+        "icon": "$(sync)"
       },
       {
         "command": "decky-mcp.restartLoader",
@@ -141,7 +157,7 @@
       },
       {
         "command": "decky-mcp.toast",
-        "title": "Toast on Deck",
+        "title": "Toast on device",
         "category": "Decky"
       },
       {
@@ -246,7 +262,7 @@
         "decky-mcp.host": {
           "type": "string",
           "default": "10.0.70.18",
-          "description": "IP address or hostname of the Steam Deck running the Decky-MCP plugin."
+          "description": "IP address or hostname of the device running the Decky-MCP plugin."
         },
         "decky-mcp.port": {
           "type": "number",
@@ -262,9 +278,36 @@
           "type": "boolean",
           "default": true,
           "description": "Open the live screen panel after the first successful connect of a session."
+        },
+        "decky-mcp.deploy.build": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "always",
+            "never"
+          ],
+          "enumDescriptions": [
+            "Run the package.json build script only when src/ (or tsconfig/rollup config) is newer than dist/index.js",
+            "Always run the build script before deploying",
+            "Never build; deploy dist/ as it is"
+          ],
+          "default": "auto",
+          "description": "Whether Deploy runs `pnpm run build` (or npm/yarn, from the lockfile) first. Python files never need a build."
+        },
+        "decky-mcp.deploy.onChange": {
+          "type": "boolean",
+          "default": false,
+          "description": "Deploy the workspace plugin (fast, without building) whenever dist/index.js, main.py or py_modules/**/*.py change. Keep your build running in watch mode (`pnpm run watch`)."
         }
       }
     },
+    "keybindings": [
+      {
+        "command": "decky-mcp.deploy",
+        "key": "ctrl+alt+d",
+        "mac": "cmd+alt+d"
+      }
+    ],
     "menus": {
       "view/title": [
         {
