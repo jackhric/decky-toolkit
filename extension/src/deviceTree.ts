@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { ConnectionState, SavedDevice } from './connection';
+import type { Layout } from './layout';
 
 type Kind = 'devices' | 'device' | 'connection' | 'screen' | 'actions' | 'action';
 
@@ -15,13 +16,13 @@ export class DeviceNode extends vscode.TreeItem {
   }
 }
 
-function action(id: string, label: string, icon: string, command: string): DeviceNode {
+export function action(id: string, label: string, icon: string, command: string, args?: unknown[]): DeviceNode {
   const n = new DeviceNode('action', `action.${id}`, label, icon);
-  n.command = { command, title: label };
+  n.command = { command, title: label, arguments: args };
   return n;
 }
 
-const ACTIONS: [string, string, string, string][] = [
+export const ACTIONS: [string, string, string, string][] = [
   ['deploy', 'Deploy plugin', 'cloud-upload', 'decky-mcp.deploy'],
   ['restart', 'Restart loader', 'debug-restart', 'decky-mcp.restartLoader'],
   ['reload', 'Reload plugin', 'refresh', 'decky-mcp.reloadPlugin'],
@@ -50,12 +51,20 @@ export function screenDescription(conn: ConnectionState): string {
   return `${Math.round(s.fps)} fps · ${(s.kbps / 1000).toFixed(1)} Mbps`;
 }
 
+export function screenNode(conn: ConnectionState): DeviceNode {
+  const n = new DeviceNode('screen', 'screen', 'Screen', 'device-desktop');
+  n.description = screenDescription(conn);
+  n.tooltip = 'Open the live Deck screen';
+  n.command = { command: 'decky-mcp.openScreen', title: 'Open screen' };
+  return n;
+}
+
 export class DeviceTreeProvider implements vscode.TreeDataProvider<DeviceNode>, vscode.Disposable {
   private readonly changed = new vscode.EventEmitter<DeviceNode | undefined>();
   readonly onDidChangeTreeData = this.changed.event;
   private readonly sub: vscode.Disposable;
 
-  constructor(private readonly conn: ConnectionState) {
+  constructor(private readonly conn: ConnectionState, private readonly layout: () => Layout = () => 'classic') {
     this.sub = conn.onDidChange(() => this.changed.fire(undefined));
   }
 
@@ -69,9 +78,13 @@ export class DeviceTreeProvider implements vscode.TreeDataProvider<DeviceNode>, 
 
   getChildren(node?: DeviceNode): DeviceNode[] {
     if (node) return node.children ?? [];
+    if (this.layout() !== 'classic') {
+      if (!this.conn.connectedDevice) return [];
+      return [screenNode(this.conn), ...ACTIONS.map(a => action(...a))];
+    }
     // Empty while unpaired so the viewsWelcome content (pair buttons) is shown instead.
     if (!this.conn.paired) return [];
-    return [this.devicesNode(), this.connectionNode(), this.screenNode(), this.actionsNode()];
+    return [this.devicesNode(), this.connectionNode(), screenNode(this.conn), this.actionsNode()];
   }
 
   private devicesNode(): DeviceNode {
@@ -107,14 +120,6 @@ export class DeviceTreeProvider implements vscode.TreeDataProvider<DeviceNode>, 
       action('changeHost', 'Change host', 'server', 'decky-mcp.changeHost'),
       action('disconnect', 'Disconnect', 'debug-disconnect', 'decky-mcp.disconnect'),
     ];
-    return n;
-  }
-
-  private screenNode(): DeviceNode {
-    const n = new DeviceNode('screen', 'screen', 'Screen', 'device-desktop');
-    n.description = screenDescription(this.conn);
-    n.tooltip = 'Open the live Deck screen';
-    n.command = { command: 'decky-mcp.openScreen', title: 'Open screen' };
     return n;
   }
 

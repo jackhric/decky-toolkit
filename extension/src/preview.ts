@@ -5,9 +5,19 @@ import { Connection, externalProxyBase } from './connection';
 export class PreviewViewProvider implements vscode.WebviewViewProvider {
   static readonly viewId = 'decky-mcp.preview';
 
+  private view?: vscode.WebviewView;
+  private description?: string;
+
   constructor(private readonly extensionUri: vscode.Uri, private readonly conn: Connection) {}
 
+  setDescription(description: string | undefined): void {
+    this.description = description;
+    if (this.view) this.view.description = description;
+  }
+
   async resolveWebviewView(view: vscode.WebviewView): Promise<void> {
+    this.view = view;
+    view.description = this.description;
     const media = vscode.Uri.joinPath(this.extensionUri, 'media');
     view.webview.options = { enableScripts: true, localResourceRoots: [media] };
     const { external } = await externalProxyBase(this.conn);
@@ -19,7 +29,10 @@ export class PreviewViewProvider implements vscode.WebviewViewProvider {
         if (m?.type === 'open') void vscode.commands.executeCommand('decky-mcp.openScreen');
       }),
     ];
-    view.onDidDispose(() => subs.forEach(s => s.dispose()));
+    view.onDidDispose(() => {
+      subs.forEach(s => s.dispose());
+      if (this.view === view) this.view = undefined;
+    });
   }
 
   private html(webview: vscode.Webview, media: vscode.Uri, external: string): string {

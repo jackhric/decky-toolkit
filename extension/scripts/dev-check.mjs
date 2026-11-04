@@ -108,8 +108,11 @@ await check('/stream.mjpeg via proxy (5 s)', async () => {
     if (e.name !== 'AbortError') throw e;
   }
   const mbps = (bytes * 8 / 5 / 1e6).toFixed(1);
-  if (parts < 100) throw new Error(`only ${parts} parts in 5 s (${mbps} Mbit/s, ${ctype})`);
-  return `${parts} parts in 5 s (${(parts / 5).toFixed(1)} fps, ${mbps} Mbit/s, ${ctype})`;
+  // The stream fps is configurable on the device; expect two thirds of its cap (100 parts at 30 fps).
+  const cap = (await new DeckyClient({ host, port }, token).streamStats()).settings?.fps || 30;
+  const min = Math.floor(cap * 5 * 2 / 3);
+  if (parts < min) throw new Error(`only ${parts} parts in 5 s, expected ${min} at the ${cap} fps cap (${mbps} Mbit/s, ${ctype})`);
+  return `${parts} parts in 5 s (${(parts / 5).toFixed(1)} fps, cap ${cap}, min ${min}, ${mbps} Mbit/s, ${ctype})`;
 });
 
 await check('/plugins via proxy and client', async () => {
