@@ -65,3 +65,6 @@ extension/dist
 
 # Playwright MCP output
 .playwright-mcp/
+
+# Agent worktrees
+.claude/worktrees/

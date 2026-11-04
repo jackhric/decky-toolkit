@@ -31,9 +31,21 @@ Status key: **live** = implemented and deployed, **planned** = agreed design, no
 | `GET /viewer` | self | live | HTML viewer. `?token=<t>` sets the cookie and redirects. Without a valid cookie: `401` with the "Request access" page (`static/pair.html`), which files a pairing request (`client_kind: "browser"`) and, once it is allowed on the device, gets the cookie through `?cookie=1`. |
 | `GET /stream.mjpeg` | bearer/cookie | live | `multipart/x-mixed-replace; boundary=frame`, JPEG parts with `Content-Length`. 30 fps default; see `/stream/settings`. A settings change keeps the connection open (about 0.1 s without frames, then the new rate/size). |
 | `GET /frame.jpg` | bearer/cookie | live | One current JPEG frame. `503` with a reason if capture is unavailable. |
-| `GET /stream/stats` | bearer/cookie | live | `{available, running, subscribers, fps, kbps, frames_total, uptime_s, width, height, settings{fps,quality,width}, limits, error}` |
-| `GET /stream/settings` | bearer/cookie | live | `{fps, quality, width, limits: {fps: [1, 60], quality: [10, 100], widths: [0, 1600, 1280, 960, 640]}}`. `width` 0 = native; height follows the aspect ratio. `widths` lists suggested values; any width up to 3840 is accepted. `404` if capture is not configured. |
-| `PUT /stream/settings` | bearer/cookie | live | JSON object with any subset of `fps`, `quality`, `width` (integers or integer strings). Out-of-range values are clamped (fps 1-60, quality 10-100, width 0-3840); non-integers or unknown fields get `400 {"error"}` and change nothing. Persists to `settings.json` and, if the pipeline is running and something changed, restarts it. Response: same shape as `GET`. Settings are device-wide: one pipeline serves every viewer, the last change wins. Cookie auth is accepted so the browser viewer can change them. |
+| `GET /stream/stats` | bearer/cookie | live | `{available, running, subscribers, fps, kbps, frames_total, uptime_s, width, height, settings{fps,quality,width,audio}, limits, audio, error}`. `audio` is the same object as `GET /audio/stats` (`null` without audio support). |
+| `GET /stream/settings` | bearer/cookie | live | `{fps, quality, width, audio, limits: {fps: [1, 60], quality: [10, 100], widths: [0, 1600, 1280, 960, 640], audio: [false, true]}}`. `width` 0 = native; height follows the aspect ratio. `widths` lists suggested values; any width up to 3840 is accepted. `audio` (default `true`) streams what the device plays on `/audio`. `404` if capture is not configured. |
+| `PUT /stream/settings` | bearer/cookie | live | JSON object with any subset of `fps`, `quality`, `width` (integers or integer strings) and `audio` (strict boolean). Out-of-range values are clamped (fps 1-60, quality 10-100, width 0-3840); non-integers, a non-boolean `audio` or unknown fields get `400 {"error"}` and change nothing. Persists to `settings.json` and, if the video pipeline is running and fps/quality/width changed, restarts it. `audio: false` closes every `/audio` socket with `4003` and stops the audio pipeline. Response: same shape as `GET`. Settings are device-wide: one pipeline serves every viewer, the last change wins. Cookie auth is accepted so the browser viewer can change them. |
+
+## Audio
+
+What the device is playing: the default PipeWire sink's monitor (it follows changes of the default
+sink; if no default sink can be linked, gamescope's own `gamescope` sink), as raw PCM. **On by
+default** (`audio_enabled` in `settings.json`; `audio` in `/stream/settings`). The capture pipeline
+starts with the first client and stops 10 s after the last one leaves.
+
+| Route | Auth | Status | Notes |
+| --- | --- | --- | --- |
+| `GET /audio` | bearer/cookie | live | WebSocket. First a text frame `{"type":"format","codec":"pcm_s16le","rate":48000,"channels":2,"chunk_ms":20}`, then one binary frame per 20 ms: 3840 bytes of interleaved little-endian 16-bit stereo at 48 kHz (1536 kbit/s). Closes with `4003` (reason text) while audio is disabled or when it is disabled; `1011` if the pipeline fails. A client that falls behind loses the oldest chunks (at most 0.5 s is queued per client), so it never drifts. Client messages are ignored. |
+| `GET /audio/stats` | bearer/cookie | live | `{enabled, available, running, subscribers, kbps, chunks_total, rms_db, uptime_s, source, format{codec,rate,channels,chunk_ms}, error}`. `rms_db` is the level of the last second in dBFS (`-120` for digital silence, `null` while stopped). `404` on servers without audio support. |
 
 ## Input
 
@@ -56,7 +68,7 @@ Client messages on `/input`:
 | `{"type":"key","code":30,"down":true}` | evdev key code; or `"key":"KeyA"` (KeyboardEvent.code, `KEY_*` name, alias such as `ctrl`) |
 | `{"type":"text","text":"hello"}` | US-layout ASCII, typed as key presses; other characters are an error |
 | `{"type":"mouse_move","x":0.5,"y":0.5}` | absolute, normalised 0..1 across the focused window (scaled by `focus_size`) |
-| `{"type":"mouse_move","dx":3,"dy":-1}` | relative, pixels (pointer-lock / game mode) |
+| `{"type":"mouse_move","dx":3,"dy":-1}` | relative, pixels (for API clients and the MCP tools; the viewers only send absolute moves) |
 | `{"type":"mouse_button","button":"left","down":true}` | `left`, `right`, `middle`, `back`, `forward` (or DOM button numbers 0-4) |
 | `{"type":"wheel","dx":0,"dy":-1}` | detents, positive `dy` scrolls down; sent to libei as 120 per detent |
 | `{"type":"gamepad","buttons":{"a":true},"axes":{"lx":0,"ly":-1,"lt":0.5},"hat":[0,-1]}` | partial update of the pad. Buttons `a b x y lb rb back start guide ls rs` and `dpad_up/down/left/right`; sticks `lx ly rx ry` -1..1 (down = +1), triggers `lt rt` 0..1; `hat` [x, y] in -1..1 |
@@ -109,8 +121,8 @@ request: approval needs someone at the device.
 ## MCP tools (live)
 
 `decky_status`, `list_plugins`, `read_plugin_log`, `loader_log`, `restart_loader`, `cef_targets`,
-`cef_evaluate`, `cef_screenshot`, `toast`, `screen_capture`, `stream_status` (includes `settings`
-and `limits`), `set_stream_settings` (`fps`, `quality`, `width`, as `PUT /stream/settings`), `read_file`,
+`cef_evaluate`, `cef_screenshot`, `toast`, `screen_capture`, `stream_status` (includes `settings`,
+`limits` and `audio`), `set_stream_settings` (`fps`, `quality`, `width`, `audio`, as `PUT /stream/settings`), `read_file`,
 `write_file`, `install_plugin` (`path` on the device or `zip_base64`, plus `restart` as for
 `POST /plugins/install`), `reload_plugin` (`dir`), `set_input_enabled` (`enabled`), `input_key`
 (`keys` combo string such as `"ctrl+shift+a"` or a list of combos, `hold_ms`), `input_text` (`text`,

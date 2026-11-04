@@ -94,6 +94,29 @@ See README.md for the tool list and architecture.
   with PipeWire always on, libturbojpeg.so.0, libjpeg.so.8 (not .62), libva.so.2, libx264.so.164.
   No GStreamer VA/x264 encoders. `holo-base` Docker image lacks all of these and is not a proxy.
 
+## Audio streaming facts (verified 2026-11-04)
+- Sinks: only `alsa_output.pci-0000_01_00.1.hdmi-surround` (5.1 HDMI, DENON-AVR), which is
+  `default.audio.sink`; no `gamescope` Audio/Sink existed at the time (`audio.py` falls back to
+  `target-object=gamescope` only if the default fails with "target not found").
+- WirePlumber 0.5.17 spells the monitor flag **`stream.capture.sink`** (dots). `stream.capture-sink`
+  is silently ignored and every capture stream fails with "target not found"/"no target node
+  available". `pulsesrc` as root fails too (pipewire-pulse refuses a root client on uid 1000's dir).
+- Pipeline (as root with `XDG_RUNTIME_DIR=/run/user/1000`): `gst-launch-1.0 -q pipewiresrc
+  stream-properties=props,stream.capture.sink=true,node.name=decky-mcp-audio ! audioconvert !
+  audioresample ! audio/x-raw,format=S16LE,rate=48000,channels=2,layout=interleaved ! fdsink fd=1
+  sync=false`. Without `target-object` it follows the default sink. audioconvert downmixes the 5.1
+  monitor: a stereo 440 Hz test tone at amplitude 3000 arrives at -23.8 dBFS (rms 2121, unchanged).
+- Cost: gst-launch 0.4-0.7 % of one core, 16 MB RSS; the backend adds well under 1 % per client.
+  1536 kbit/s, 50.1 chunks/s of 3840 bytes. First chunk ~50 ms after connect (cold pipeline start).
+- `date` on the device right before `pw-play` to the first loud chunk at a LAN client: 175-215 ms,
+  which includes pw-play's own startup; browser playback adds its ~120 ms buffer.
+- Stopped with SIGINT like the video pipeline; it is gone 10 s after the last client (checked at 16 s).
+- AudioWorklet only exists in secure contexts: the viewer on `http://<ip>:8765` falls back to
+  scheduled AudioBufferSources; via localhost or the VS Code webview it uses the worklet. Both paths
+  measured -25.7 dBFS at the output node for the -23.8 dBFS tone at volume 0.8 (headless Chromium).
+- Chromium checks AudioWorklet modules against `script-src` (not `worker-src`), so the webview CSP
+  needs `blob:` in `script-src` for the inline worklet.
+
 ## Remote input facts (verified 2026-11-04)
 - gamescope's EIS socket is `/run/user/1000/gamescope-0-ei`; `ctypes.CDLL("libei.so.1")` (1.6.0) works
   from the loader's bundled Python as root, and the bundle ships `_ctypes`/`libffi`. gamescope offers

@@ -169,21 +169,35 @@ in the device's Decky-MCP panel and the **⌨ Input** button in the browser view
   status bar shows `$(keyboard)` after the device's name. If the device cannot inject input, the button
   is disabled and its tooltip gives the reason. A Deck whose plugin predates remote input shows
   *not supported by this device version*.
-- **UI mode** (default): click the picture to capture input (a focus outline shows it). Mouse
+- **Mouse and keyboard**: click the picture to capture input (a focus outline shows it). Mouse
   moves, clicks and the wheel land on the matching spot of the device screen, and keys are sent by
   physical position (`KeyboardEvent.code`), so VS Code keybindings do not fire while the picture
   has focus. Click the toolbar, switch tabs or leave the window to give the keyboard back; every
   held key and button is released.
-- **Game mode**: clicking the picture asks for pointer lock and sends relative mouse motion, for
-  games with mouse look. Esc releases the pointer. VS Code webviews may refuse pointer lock; the
-  toolbar then says *Pointer lock unavailable in this webview, use the browser viewer for Game
-  mode*. Use **Open viewer in browser** for Game mode in that case.
 - **Gamepad**: a controller connected to this computer is forwarded about 60 times a second while
   the panel has focus ("Gamepad connected" in the toolbar). It appears on the device as an Xbox 360
   pad. Whether the Gamepad API works inside a webview depends on the VS Code build.
 
 The panel's WebSocket (`/input`) goes through the same loopback proxy as the stream, which adds the
-token during the handshake. The UI/Game switch appears only while input is on.
+token during the handshake.
+
+## Stream settings and audio
+
+The screen panel toolbar has the same controls as the browser viewer:
+
+- **Stream** opens frame rate (15/24/30/60 fps), JPEG quality (50-90), size (native, 1600, 1280,
+  960, 640 px wide) and **Audio** on/off. These are device-wide (`/stream/settings`, the same values
+  the browser viewer and the `set_stream_settings` tool change). Like the input toggle, the panel
+  asks the extension, which sends the `PUT`; the controls show *Applying…* until the first frame of
+  the restarted stream arrives. Changes made elsewhere show up within one 5 s stats poll. A device
+  without the route hides the button.
+- **Sound** is on by default: the panel plays what the device is playing (`/audio`, raw 48 kHz
+  stereo PCM, about 1.5 Mbit/s, through the same loopback proxy) with an AudioWorklet that keeps
+  about 120 ms buffered and drops back when it falls 300 ms behind. **🔊 / 🔇** mutes this window
+  only and the slider sets the local volume; both are kept with the panel's state. Until VS Code
+  allows sound (it may need a click in the panel first) the toolbar says *Click anywhere to enable
+  audio*. The audio socket closes while the panel is hidden, like the video stream.
+- **Fullscreen** appears only where the webview allows the Fullscreen API.
 
 ## Pairing
 
@@ -244,7 +258,7 @@ All of these are also in the command palette under the `Decky:` category.
 | Decky: Switch device / Add device… / Edit device / Remove device | Connect to another saved device, manage saved devices |
 | Decky: Copy viewer URL | Copies `http://host:port/viewer` for a browser |
 | Decky: Change host | Changes the active device's host/port and writes the `decky-mcp.host`/`port` settings |
-| Decky: Open screen | Live screen panel with fps / Mbps / resolution, pause, fit/actual, snapshot and the remote input toggle |
+| Decky: Open screen | Live screen panel with sound, fps / Mbps / resolution / audio kbps, stream settings, mute and volume, pause, fit/actual, snapshot and the remote input toggle |
 | Decky: Open viewer in browser | Opens `http://host:port/viewer` in the default browser (pair the browser on the device) |
 | Decky: Snapshot to file | Saves the current `/frame.jpg` with a Save dialog |
 | Decky: Deploy plugin | Build if needed, zip, `POST /plugins/install`, reload just this plugin and confirm it (<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd>) |
@@ -282,9 +296,10 @@ Tokens are stored per `host:port` in secret storage.
 - **Token handling.** The token lives in `context.secrets`. Webviews never see it: the extension runs
   a loopback proxy (`127.0.0.1`, random port, random path prefix) that adds the
   `Authorization: Bearer` header and strips browser `Origin`/`Cookie` headers before forwarding to
-  the device. WebSocket upgrades (`/input`) are forwarded the same way. The screen panel and the
+  the device. WebSocket upgrades (`/input`, `/audio`) are forwarded the same way. The screen panel and the
   preview only know the proxy URL, and their CSP allows only that origin (plus its `ws:` form for
-  the screen panel) and `blob:`. The one place the token leaves secret storage is `.mcp.json`, after a
+  the screen panel) and `blob:` (images, and the screen panel's inline AudioWorklet module, which
+  Chromium checks against `script-src`). The one place the token leaves secret storage is `.mcp.json`, after a
   confirmation.
 - **Theme.** The screen panel and preview use only VS Code theme colours (`--vscode-*` variables);
   only the video area itself is black.
@@ -342,7 +357,11 @@ full restart, a failing build and auto-deploy on change. It also checks that Con
 again, waiting through a lost connection and a forgotten request (new code) and Cancel sending
 `DELETE`, the "Update Decky-MCP" path for an older device, the reachability error with Retry, the 15 s health check going unreachable and back, Add device, snapshot, Copy MCP URL /
 token and Open viewer, and the remote input toggle (screen panel message, palette command, status
-bar indicator, unavailable and unsupported devices).
+bar indicator, unavailable and unsupported devices), and the screen panel's stream settings and
+audio: `ready` loads `/stream/settings`, `setStream` sends only known fields, a stats tick mirrors
+outside changes, a 404 hides the button, and `media/screen.js` run in a minimal DOM toggles mute
+and volume, posts `setStream` with the *Applying…* state and hides the audio controls when audio is
+off device-wide.
 
 ### Deploy check (device)
 
@@ -374,5 +393,7 @@ It checks `/health`, `/stream.mjpeg` (at least two thirds of the device's fps ca
 `/plugins` and `/frame.jpg` through the proxy, runs `media/screen.js` in a minimal DOM against the
 proxy and compares its fps readout with `/stream/stats` (within 10 %), calls MCP `tools/list`
 through the client, opens a WebSocket to `/input` through the proxy and expects close code 4003
-(input must be off on the Deck; the check never turns it on), probes the newer routes, and validates a staged zip with `unzip -t`. The
+(input must be off on the Deck; the check never turns it on), opens `/audio` through the proxy and
+expects the format frame and at least 10 PCM chunks within 1 s (audio must be on; the check never
+changes it), probes the newer routes, and validates a staged zip with `unzip -t`. The
 stream checks need a screen that changes: gamescope sends no frames while the screen is static.

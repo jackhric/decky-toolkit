@@ -173,6 +173,20 @@ export class DeckyClient {
     });
   }
 
+  /** Throws HttpError(404) on devices without capture. */
+  getStreamSettings(): Promise<import('./api').StreamSettings> {
+    return this.json<import('./api').StreamSettings>('/stream/settings', { timeoutMs: 5000 });
+  }
+
+  setStreamSettings(patch: { fps?: number; quality?: number; width?: number; audio?: boolean }): Promise<import('./api').StreamSettings> {
+    return this.json<import('./api').StreamSettings>('/stream/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+      timeoutMs: 15000,
+    });
+  }
+
   async frame(): Promise<Uint8Array> {
     const res = await this.fetch('/frame.jpg', { timeoutMs: 10000 });
     if (!res.ok) throw new HttpError(res.status, await res.text(), '/frame.jpg');

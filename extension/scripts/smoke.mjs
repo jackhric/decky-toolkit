@@ -199,7 +199,8 @@ const ctx = {
 
 // Fake device behind global fetch so the real DeckyClient is exercised. 10.9.9.9 never answers.
 const health = { ok: true, name: 'decky-mcp', version: '0.2.0', api_version: 1, tools: 15 };
-const stats = { available: true, running: true, subscribers: 1, fps: 30, kbps: 19542, frames_total: 10, uptime_s: 1, width: 1920, height: 1080, settings: { fps: 30, quality: 70, width: 0 }, error: null };
+const stats = { available: true, running: true, subscribers: 1, fps: 30, kbps: 19542, frames_total: 10, uptime_s: 1, width: 1920, height: 1080, settings: { fps: 30, quality: 70, width: 0, audio: true }, error: null };
+const streamLimits = { fps: [1, 60], quality: [10, 100], widths: [0, 1600, 1280, 960, 640], audio: [false, true] };
 let plugins = [
   { dir: 'decky-mcp', name: 'Decky-MCP', author: 'jackh', flags: ['root', 'debug'], api_version: 1, version: '0.1.0', has_backend: true },
   { dir: 'romm-tender', name: 'Tender', author: 'x', flags: [], api_version: 1, version: '0.33.0', has_backend: true },
@@ -241,6 +242,14 @@ globalThis.fetch = async (url, init = {}) => {
   }
   if (auth !== 'Bearer fake-token') return new Response('unauthorized', { status: 401 });
   if (u.pathname === '/stream/stats') return json(stats);
+  if (u.pathname === '/stream/settings') {
+    if (device.streamSettingsMissing) return json({ error: 'capture not available' }, 404);
+    if (init.method === 'PUT') {
+      device.streamPuts = [...(device.streamPuts ?? []), JSON.parse(init.body)];
+      stats.settings = { ...stats.settings, ...JSON.parse(init.body) };
+    }
+    return json({ ...stats.settings, limits: streamLimits });
+  }
   if (u.pathname === '/plugins') return json(plugins);
   if (u.pathname === '/plugins/install' && init.method === 'POST') {
     const file = init.body.get('file');
@@ -821,7 +830,7 @@ await check('remote input: screen panel toggle, toggle command, status bar, unav
   const lastState = () => panel._posted.filter(m => m.type === 'input').at(-1)?.state;
   assert.match(panel.webview.html, /connect-src http:\/\/127\.0\.0\.1:(\d+) ws:\/\/127\.0\.0\.1:\1;/);
   assert.match(panel.webview.html, /<button id="inp"[^>]*>Input<\/button>/);
-  assert.match(panel.webview.html, /<span class="seg" id="mode" hidden>/);
+  assert.doesNotMatch(panel.webview.html, /id="mode|>Game<|ointer lock/i, 'no UI/Game switch, no pointer lock');
   assert.equal(pkg.contributes.commands.find(c => c.command === 'decky-mcp.toggleInput').title, 'Toggle remote input');
   assert.ok(!(await actionsTree()).kids.Screen.some(c => /input/i.test(c.label)), 'no input leaf in the Actions view');
 
@@ -867,6 +876,108 @@ await check('remote input: screen panel toggle, toggle command, status bar, unav
   await settle(100);
   assert.equal(lastState().available, true);
   return 'panel Input on → $(keyboard) in status bar → palette toggle off → unavailable warning → 404 → "not supported by this device version"';
+});
+
+await check('screen panel: stream settings popover, audio controls, mute/volume in screen.js', async () => {
+  const panel = calls.panels[0];
+  const html = panel.webview.html;
+  for (const id of ['gear', 's-fps', 's-quality', 's-width', 's-audio', 'mute', 'vol', 'a-hint', 'akbps', 'full']) assert.match(html, new RegExp(`id="${id}"`), id);
+  assert.match(html, /<option value="24">24 fps<\/option>/);
+  assert.match(html, /<option value="640">640 px<\/option>/);
+  assert.match(html, /script-src 'nonce-[^']+' blob:; worker-src blob:/);
+  const streamMsgs = () => panel._posted.filter(m => m.type === 'stream');
+
+  // ready → GET /stream/settings → settings posted (with audio).
+  panel._posted.length = 0; fetched.length = 0;
+  panel._received.fire({ type: 'ready' });
+  await settle();
+  assert.ok(fetched.includes('/stream/settings'));
+  assert.deepEqual(streamMsgs().at(-1).settings, { fps: 30, quality: 70, width: 0, audio: true, limits: streamLimits });
+
+  // setStream goes through the extension (PUT); unknown or ill-typed fields are dropped.
+  panel._posted.length = 0;
+  panel._received.fire({ type: 'setStream', patch: { fps: 60, audio: false, bitrate: 9, quality: '80' } });
+  await settle();
+  assert.deepEqual(device.streamPuts.at(-1), { fps: 60, audio: false });
+  const reply = streamMsgs().at(-1);
+  assert.deepEqual(reply.applied, ['fps', 'audio']);
+  assert.equal(reply.settings.fps, 60);
+  assert.equal(reply.settings.audio, false);
+
+  // A change made elsewhere arrives with the stats tick.
+  stats.settings = { ...stats.settings, audio: true };
+  panel._posted.length = 0;
+  await run('decky-mcp.refresh');
+  await settle(100);
+  assert.ok(streamMsgs().some(m => m.settings?.audio === true && !m.applied), 'tick posted the new audio flag');
+
+  // 404 hides the popover.
+  device.streamSettingsMissing = true;
+  panel._posted.length = 0;
+  panel._received.fire({ type: 'ready' });
+  await settle();
+  assert.equal(streamMsgs().at(-1).settings, null);
+  device.streamSettingsMissing = false;
+  stats.settings = { fps: 30, quality: 70, width: 0, audio: true };
+
+  // The real media/screen.js in a minimal DOM: mute and volume are local, settings go out as setStream.
+  const src = readFileSync(path.join(root, 'media', 'screen.js'), 'utf8');
+  const els = new Map();
+  const el = id => {
+    if (!els.has(id)) {
+      const classes = new Set();
+      els.set(id, {
+        id, textContent: '', hidden: false, value: '', checked: false, disabled: false, title: '',
+        addEventListener() {}, setAttribute() {}, focus() {},
+        classList: { add: c => classes.add(c), remove: c => classes.delete(c), contains: c => classes.has(c), toggle: (c, on) => ((on ?? !classes.has(c)) ? classes.add(c) : classes.delete(c), classes.has(c)) },
+      });
+    }
+    return els.get(id);
+  };
+  const listeners = [], posted = [];
+  let state;
+  const fakeVscode = { postMessage: m => posted.push(m), getState: () => state, setState: s => { state = s; } };
+  const document = { getElementById: el, body: { dataset: { base: 'http://127.0.0.1:1/x' } }, addEventListener() {} };
+  const window = { addEventListener: (t, fn) => { if (t === 'message') listeners.push(fn); } };
+  const fakeFetch = () => new Promise(() => {});
+  class FakeWs { constructor(url) { this.url = url; FakeWs.opened.push(url); } close() {} }
+  FakeWs.opened = [];
+  new Function('acquireVsCodeApi', 'document', 'window', 'fetch', 'WebSocket', 'requestAnimationFrame', src)(
+    () => fakeVscode, document, window, fakeFetch, FakeWs, () => 0);
+  const post = data => listeners.forEach(fn => fn({ data }));
+  assert.deepEqual(posted.at(-1), { type: 'ready' });
+  assert.equal(el('audio-ctl').hidden, true, 'audio controls hidden until the device says audio is on');
+  post({ type: 'stream', settings: { fps: 30, quality: 70, width: 0, audio: true } });
+  assert.equal(el('settings').hidden, false);
+  assert.equal(el('s-fps').value, '30');
+  assert.equal(el('s-audio').checked, true);
+  assert.equal(el('audio-ctl').hidden, false);
+  assert.equal(el('a-hint').hidden, false, 'no running AudioContext yet → "click to enable audio"');
+  assert.ok(FakeWs.opened.some(u => u.endsWith('/audio')), 'audio socket opened');
+  assert.equal(el('mute').textContent, '🔊', 'unmuted by default');
+  el('mute').onclick();
+  assert.equal(el('mute').textContent, '🔇');
+  assert.equal(state.muted, true);
+  el('vol').value = 35; el('vol').oninput();
+  assert.equal(el('mute').textContent, '🔊', 'moving the volume unmutes');
+  assert.deepEqual({ muted: state.muted, volume: state.volume }, { muted: false, volume: 0.35 });
+  el('s-width').value = '960'; el('s-width').onchange();
+  assert.deepEqual(posted.at(-1), { type: 'setStream', patch: { width: 960 } });
+  assert.equal(el('s-fps').disabled, true);
+  assert.equal(el('s-note').textContent, 'Applying…');
+  post({ type: 'stream', settings: { fps: 30, quality: 70, width: 0, audio: true } });
+  assert.equal(el('s-width').value, '960', 'stale tick ignored while applying');
+  post({ type: 'stream', settings: { fps: 30, quality: 70, width: 960, audio: true }, applied: ['width'] });
+  el('s-audio').checked = false; el('s-audio').onchange();
+  assert.deepEqual(posted.at(-1), { type: 'setStream', patch: { audio: false } });
+  post({ type: 'stream', settings: { fps: 30, quality: 70, width: 960, audio: false }, applied: ['audio'] });
+  assert.equal(el('audio-ctl').hidden, true, 'device-wide off hides the local controls');
+  assert.equal(el('s-fps').disabled, false);
+  post({ type: 'stream', error: 'boom' });
+  assert.equal(el('s-note').textContent, 'Failed: boom');
+  post({ type: 'stream', settings: null });
+  assert.equal(el('settings').hidden, true, '404 hides the Stream button');
+  return 'ready → GET, setStream → PUT {fps, audio} only, tick mirrors, 404 → hidden; screen.js: mute 🔇/🔊, volume 0.35 saved, Applying… → done, audio off hides controls';
 });
 
 await check('stats polling stops when the Actions view is hidden', async () => {
