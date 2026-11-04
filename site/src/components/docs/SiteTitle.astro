@@ -1,0 +1,30 @@
+---
+import dark from '../../../../assets/decky-toolkit-dark.svg?raw';
+import light from '../../../../assets/decky-toolkit-light.svg?raw';
+
+const { siteTitle, siteTitleHref } = Astro.locals.starlightRoute;
+
+// Both variants share gradient and mask ids; unprefixed, the visible logo can resolve url(#…) into the hidden one and lose its fills.
+const inline = (svg: string, prefix: string) =>
+  svg
+    .replace(/<title>.*?<\/title>/s, '')
+    .replace(/<svg[^>]*>/, tag => tag.replace(/\s(width|height)="[^"]*"/g, ''))
+    .replace(/\sid="([^"]+)"/g, ` id="${prefix}-$1"`)
+    .replace(/url\(#([^)]+)\)/g, `url(#${prefix}-$1)`)
+    .replace(/\srole="img"|\saria-label="[^"]*"/g, '')
+    .replace('<svg', '<svg aria-hidden="true" focusable="false"');
+---
+
+<a href={siteTitleHref} class="site-title sl-flex">
+  <span class="logo light:sl-hidden print:hidden" set:html={inline(dark, 'logo-dark')} />
+  <span class="logo dark:sl-hidden print:block" set:html={inline(light, 'logo-light')} />
+  <span class="sr-only" translate="no">{siteTitle}</span>
+</a>
+
+<style>
+  @layer starlight.core {
+    .site-title { align-items: center; min-width: 0; text-decoration: none; }
+    .logo { display: flex; height: calc(var(--sl-nav-height) - 2 * var(--sl-nav-pad-y)); }
+    .logo :global(svg) { height: 100%; width: auto; max-width: 100%; }
+  }
+</style>
