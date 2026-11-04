@@ -5,8 +5,11 @@ HTTP server on the device (port 8765; any machine running Decky Loader: Steam De
 Bazzite, …) and gives you, inside VS Code or VSCodium:
 
 - a **Decky** sidebar (Activity Bar icon) that lists your devices; connect to one and its actions
-  (grouped by Screen, Plugin, Loader, Steam and MCP), plugins and a small live preview appear, so
-  you never need the command palette,
+  (grouped by Screen, Plugin, Loader, Steam and MCP), plugins, controllers and a small live preview
+  appear, so you never need the command palette,
+- controller management: every controller Steam Input sees, virtual Xbox 360 pads you add or
+  remove with one click, and a choice of which pad your local gamepad drives,
+- Steam UI navigation (any page, a game's details, a plugin's panel, Back, Quick Access),
 - a live view of the device's display (30 fps MJPEG) in an editor tab,
 - one-click deploy of the Decky plugin open in your workspace: it is detected automatically, built
   only when its sources changed, and reloaded on its own in about a second (no loader restart),
@@ -24,7 +27,7 @@ The Decky-MCP plugin must already be installed and enabled on the device.
    the **+** in the view title to add another (see [Adding a device](#adding-a-device)).
 2. **Click the device** (or its plug icon). If it is not paired yet, pairing starts at once; see
    [Pairing](#pairing). If it is paired, it connects in a second.
-3. **Work.** When it is connected, the **Actions**, **Plugins** and **Preview** views appear below
+3. **Work.** When it is connected, the **Actions**, **Plugins**, **Controllers** and **Preview** views appear below
    the list, with the device's name in their title bars. The screen panel opens automatically after
    the first connect of a session (setting `decky-mcp.openScreenOnConnect`). If your workspace is a
    Decky plugin, you are offered to deploy it; afterwards use the `$(rocket) Deploy <name>` button in
@@ -38,8 +41,8 @@ otherwise. Click it to connect, switch device, disconnect, open the screen or ad
 
 ## Sidebar
 
-Before you connect, the sidebar shows only **Devices**. After you connect, **Actions**, **Plugins**
-and **Preview** appear below it, all for the connected device.
+Before you connect, the sidebar shows only **Devices**. After you connect, **Actions**, **Plugins**,
+**Controllers** and **Preview** appear below it, all for the connected device.
 
 ### Devices
 
@@ -84,7 +87,18 @@ you expand or collapse.
 - **Loader**
   - **Restart loader**, **Show loader logs**, **Install plugin zip…** (pick any `.zip`).
 - **Steam**
+  - **Navigate to…**: a picker built from `GET /ui/routes` with the current page as its
+    placeholder. Sections **Official** (Library, Settings, …; the current page is marked),
+    **Plugins** (pages plugins registered) and **Menus** (main menu, Quick Access and each Quick
+    Access tab). An entry with a placeholder such as `/library/app/{appid}` asks for the value
+    first (digits only for ids). The pick is sent as `POST /ui/navigate`.
+  - **Open plugin panel…**: picks an installed plugin (`/plugins`) and opens its Quick Access
+    panel (`{action: "plugin"}`). Also in the right-click menu of a row in the Plugins view.
+  - **Back**, **Quick Access**, **Close menus**: one click each.
   - **Evaluate JS in Steam UI**, **Toast on device**.
+
+  The status bar briefly shows the page the Steam UI ended up on. A device whose plugin predates
+  navigation answers 404; the commands then say *update Decky-MCP on the device*.
 - **MCP**
   - **Write MCP config for this workspace**, **Copy MCP URL** (`http://host:port/mcp`),
     **Copy token** (the bearer token; a warning reminds you it is a secret).
@@ -98,6 +112,33 @@ Lists the device's plugins (`GET /plugins`, falling back to the `list_plugins` t
 plugin's backend (`POST /plugins/{dir}/reload`) or open its log. The title bar has **Install
 plugin zip…** (pick a `.zip`, upload to `/plugins/install?restart=loader`, wait for the loader) and
 Refresh.
+
+### Controllers
+
+Every controller on the device, one row each (`GET /controllers`), as Steam Input sees it:
+
+| Row | Icon | Description |
+| --- | --- | --- |
+| physical controller | `game` | `physical · Steam Input: steamdeck (slot 0)` |
+| virtual pad | `game` (blue), name + `(virtual)` unless the name says so | `virtual · Steam Input: xbox360 (slot 1)` |
+| not picked up yet | as above | `physical · not seen by Steam Input` |
+
+Hover a row for the USB id, the device node, the Steam Input name and, for virtual pads, the id
+and whether it is the pad the device created on its own for forwarded input ("Auto").
+
+- **Add virtual controller** (`+` in the title, or the button in the empty view): asks for an
+  optional name (Enter takes `Virtual pad N`) and sends `POST /controllers/virtual`. On success:
+  *Virtual controller added and recognised by Steam Input*. The device allows 4 pads you add; when
+  they are all used, or when Steam Input does not pick the new pad up, the device's message is
+  shown as it is.
+- **Remove** (trash icon on a virtual row, or the right-click menu): `DELETE /controllers/virtual/{id}`,
+  no confirmation. From the palette it asks which pad.
+- **Live**: while the view is visible it follows `/controllers/events` (SSE through the loopback
+  proxy), so a controller plugged in on the device appears at once. If the stream fails it polls
+  every 5 s and retries the stream.
+- With no controllers the view says *No controllers seen by Steam Input.* with an **Add virtual
+  controller** button. A device whose plugin predates controller management shows one greyed-out
+  row, *update Decky-MCP on the device*, and recovers on its own once the plugin is updated.
 
 ### Preview
 
@@ -177,6 +218,12 @@ in the device's Decky-MCP panel and the **⌨ Input** button in the browser view
 - **Gamepad**: a controller connected to this computer is forwarded about 60 times a second while
   the panel has focus ("Gamepad connected" in the toolbar). It appears on the device as an Xbox 360
   pad. Whether the Gamepad API works inside a webview depends on the VS Code build.
+- **Forward to**: next to *Gamepad connected*, a select picks which pad on the device your gamepad
+  drives: **Auto** (the pad the device creates on its own, the default) or one of the virtual pads
+  from the [Controllers](#controllers) view; **New virtual pad…** adds one and selects it. The
+  choice goes into the `pad` field of every gamepad message; switching sends the old pad a neutral
+  state first. The panel remembers the choice and falls back to Auto when that pad is removed. A
+  device without controller management shows no select.
 
 The panel's WebSocket (`/input`) goes through the same loopback proxy as the stream, which adds the
 token during the handshake.
@@ -265,6 +312,10 @@ All of these are also in the command palette under the `Decky:` category.
 | Decky: Deploy plugin (full restart) | Same, but restarts Decky Loader and waits for `/health` |
 | Decky: Toggle auto-deploy on change | Flips `decky-mcp.deploy.onChange` for the workspace |
 | Decky: Toggle remote input | Turns remote keyboard, mouse and gamepad input on or off for the whole device (`PUT /input/settings`) |
+| Decky: Add virtual controller / Remove virtual controller / Refresh controllers | Manage virtual Xbox 360 pads on the device (`/controllers/virtual`) |
+| Decky: Navigate Steam UI to… | Picker of official pages, plugin pages and menus from `/ui/routes`; asks for template values such as the app id |
+| Decky: Open plugin panel… | Opens an installed plugin's Quick Access panel |
+| Decky: Steam UI: Back / Quick Access / Close menus | `POST /ui/navigate` with `back`, `quick_access` or `close_menus` |
 | Decky: Install plugin zip… | Uploads a plugin zip from disk to `/plugins/install?restart=loader` |
 | Decky: Restart loader | `POST /loader/restart` (falls back to the `restart_loader` tool) |
 | Decky: Reload plugin | `POST /plugins/{dir}/reload` for one plugin backend |
@@ -361,7 +412,14 @@ bar indicator, unavailable and unsupported devices), and the screen panel's stre
 audio: `ready` loads `/stream/settings`, `setStream` sends only known fields, a stats tick mirrors
 outside changes, a 404 hides the button, and `media/screen.js` run in a minimal DOM toggles mute
 and volume, posts `setStream` with the *Applying…* state and hides the audio controls when audio is
-off device-wide.
+off device-wide. For controllers it checks the Controllers view rows (empty, physical and virtual,
+404, error), live updates over SSE through the proxy, add (default name, success text) and remove,
+the 409 and Steam Input refusals shown as-is, the poll fallback and recovery after a 404; the
+screen panel's `pads` message and, in `media/screen.js`, the **Forward to** select (`pad` field,
+neutral state on switch, **New virtual pad…**, fallback to Auto); the Navigate to… picker
+(sections, current page, template prompt), Open plugin panel, Back / Quick Access / Close menus,
+a 400 and a 404; and the browser viewer's Controllers popover (`static/viewer.html` in a minimal
+DOM).
 
 ### Deploy check (device)
 
@@ -395,5 +453,6 @@ proxy and compares its fps readout with `/stream/stats` (within 10 %), calls MCP
 through the client, opens a WebSocket to `/input` through the proxy and expects close code 4003
 (input must be off on the Deck; the check never turns it on), opens `/audio` through the proxy and
 expects the format frame and at least 10 PCM chunks within 1 s (audio must be on; the check never
-changes it), probes the newer routes, and validates a staged zip with `unzip -t`. The
+changes it), probes the newer routes (including `/controllers`, `/ui/routes` and
+`/controllers/events` through the proxy, read-only and passing on 404), and validates a staged zip with `unzip -t`. The
 stream checks need a screen that changes: gamescope sends no frames while the screen is static.

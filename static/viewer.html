@@ -39,6 +39,19 @@
   main.capturing img { cursor: crosshair; }
   main:focus { outline: none; }
   main.capturing:focus { outline: 2px solid #2d6cdf; }
+  #ctl-pop { position: absolute; right: 0; top: calc(100% + 6px); z-index: 10; display: flex; flex-direction: column; gap: 8px; width: max-content; min-width: 300px; max-width: min(440px, 90vw); padding: 10px 12px; background: #15181d; border: 1px solid #353a43; border-radius: 6px; box-shadow: 0 6px 20px rgba(0,0,0,.5); }
+  #ctl-pop[hidden], #ctl-wrap[hidden], #pad-fwd[hidden] { display: none; }
+  .ctl-row { display: flex; align-items: center; gap: 10px; }
+  .ctl-row .meta { flex: 1; min-width: 0; }
+  .ctl-row .name { color: #e8ecf0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ctl-row.virtual .name { color: #8ab4ff; }
+  .ctl-sub, #ctl-pop .note { color: #9aa3ad; font-size: 12px; }
+  #ctl-pop .note { min-height: 1.4em; }
+  #ctl-add { display: flex; gap: 6px; border-top: 1px solid #262a31; padding-top: 8px; }
+  #ctl-add input, #pad-target { background: #262a31; color: #e8ecf0; border: 1px solid #353a43; border-radius: 4px; padding: 3px 6px; }
+  #ctl-add input { flex: 1; min-width: 0; }
+  #pad-fwd { color: #9aa3ad; font-size: 12px; }
+  #pad-target { max-width: 160px; font-size: 12px; }
 </style>
 </head>
 <body>
@@ -64,8 +77,20 @@
       <span class="note" id="s-note">Applies to every viewer.</span>
     </div>
   </span>
+  <span class="settings" id="ctl-wrap" hidden>
+    <button id="ctl-btn" title="Controllers on the device, as Steam Input sees them" aria-expanded="false">🎮 Controllers</button>
+    <div id="ctl-pop" hidden>
+      <div id="ctl-list"></div>
+      <form id="ctl-add">
+        <input id="ctl-name" maxlength="64" placeholder="Virtual pad 1" aria-label="Name of the new virtual controller">
+        <button id="ctl-add-btn" type="submit" title="Add a virtual Xbox 360 pad on the device">Add virtual</button>
+      </form>
+      <span class="note" id="ctl-note"></span>
+    </div>
+  </span>
   <span class="input-ctl" id="input-ctl" hidden>
     <span id="pad-ind" hidden>🎮 connected</span>
+    <label id="pad-fwd" hidden>Forward to <select id="pad-target" title="Which controller on the device receives this gamepad. Auto: the pad the device creates on its own."><option value="">Auto</option></select></label>
     <span id="inp-note"></span>
     <button id="inp" title="Remote keyboard, mouse and gamepad input (device-wide)">⌨ Input</button>
   </span>
@@ -209,13 +234,13 @@
   const togglePop = open => { el('pop').hidden = !open; el('gear').classList.toggle('on', open); el('gear').setAttribute('aria-expanded', open); };
   el('gear').onclick = e => { e.stopPropagation(); togglePop(el('pop').hidden); };
   el('pop').onclick = e => e.stopPropagation();
-  document.addEventListener('click', () => togglePop(false));
+  document.addEventListener('click', () => { togglePop(false); if (!el('ctl-pop').hidden) toggleCtl(false); });
 
   el('pause').onclick = () => { paused = !paused; el('pause').textContent = paused ? 'Resume' : 'Pause'; el('pause').classList.toggle('on', paused); };
   el('fit').onclick = () => { const fit = el('main').classList.toggle('actual'); el('fit').classList.toggle('on', !fit); el('fit').textContent = fit ? 'Actual' : 'Fit'; };
   el('snap').onclick = () => window.open('/frame.jpg?t=' + Date.now(), '_blank');
   el('full').onclick = () => document.fullscreenElement ? document.exitFullscreen() : el('main').requestFullscreen();
-  document.addEventListener('keydown', e => { if (capturing()) return; if (e.key === 'Escape') togglePop(false); if (e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT') return; if (e.key === ' ') { e.preventDefault(); el('pause').click(); } if (e.key === 'f') el('full').click(); });
+  document.addEventListener('keydown', e => { if (capturing()) return; if (e.key === 'Escape') { togglePop(false); if (!el('ctl-pop').hidden) toggleCtl(false); } if (e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT') return; if (e.key === ' ') { e.preventDefault(); el('pause').click(); } if (e.key === 'f') el('full').click(); });
 
   // ---- remote input ----
   const main = el('main');
@@ -232,7 +257,7 @@
     for (const k of heldKeys) send({ type: 'key', key: k, down: false });
     for (const b of heldButtons) send({ type: 'mouse_button', button: b, down: false });
     heldKeys.clear(); heldButtons.clear();
-    if (padSent) { send({ type: 'gamepad', ...NEUTRAL_PAD }); padSent = null; }
+    if (padSent) { send(padMsg(NEUTRAL_PAD)); padSent = null; }
     send({ type: 'release_all' });
   }
 
@@ -360,18 +385,155 @@
   function pollPad() {
     const st = readPad();
     el('pad-ind').hidden = !st;
+    updatePadUi();
     if (!st) { clearInterval(padTimer); padTimer = null; return; }
     if (!inp || !inp.enabled || !wsOpen() || !document.hasFocus()) {
-      if (padSent) { send({ type: 'gamepad', ...NEUTRAL_PAD }); padSent = null; }
+      if (padSent) { send(padMsg(NEUTRAL_PAD)); padSent = null; }
       return;
     }
     const json = JSON.stringify(st), now = performance.now();
     // Resend now and then so the server does not retire the pad while a stick is held still.
-    if (json !== padSent || now - padSentAt > 10000) { send({ type: 'gamepad', ...st }); padSent = json; padSentAt = now; }
+    if (json !== padSent || now - padSentAt > 10000) { send(padMsg(st)); padSent = json; padSentAt = now; }
   }
   const startPad = () => { if (!padTimer) padTimer = setInterval(pollPad, 16); pollPad(); };
   window.addEventListener('gamepadconnected', startPad);
-  window.addEventListener('gamepaddisconnected', () => { if (padSent) { send({ type: 'gamepad', ...NEUTRAL_PAD }); padSent = null; } pollPad(); });
+  window.addEventListener('gamepaddisconnected', () => { if (padSent) { send(padMsg(NEUTRAL_PAD)); padSent = null; } pollPad(); });
+
+  // ---- controllers ----
+  // Same model as the editor panel: GET /controllers, live over /controllers/events while the
+  // popover is open (5 s poll if the stream fails). A 404 (older device) hides all of it.
+  let ctl = null, ctlEs = null, ctlPoll = null, padTarget = '';
+  try { padTarget = localStorage.getItem('decky-mcp-pad') || ''; } catch (e) { /* Auto */ }
+  const ADD_PAD = '__add__';
+  const padMsg = st => padTarget ? { type: 'gamepad', ...st, pad: padTarget } : { type: 'gamepad', ...st };
+  const steamLabel = c => c.steam ? c.kind + ' · Steam Input: ' + c.steam.type + (c.steam.slot != null ? ' (slot ' + c.steam.slot + ')' : '') : c.kind + ' · not seen by Steam Input';
+  const ctlNote = t => { el('ctl-note').textContent = t || ''; };
+  function updatePadUi() { el('pad-fwd').hidden = !ctl || el('pad-ind').hidden; }
+  function nextPadName() {
+    const names = new Set(ctl ? ctl.virtual.map(v => v.name) : []);
+    let n = (ctl ? ctl.virtual.filter(v => !v.auto).length : 0) + 1;
+    while (names.has('Virtual pad ' + n)) n++;
+    return 'Virtual pad ' + n;
+  }
+  async function loadControllers() {
+    try {
+      const res = await fetch('/controllers', { cache: 'no-store' });
+      setControllers(res.ok ? await res.json() : null);
+    } catch (e) { /* keep the last list */ }
+  }
+  function setControllers(list) {
+    ctl = list;
+    el('ctl-wrap').hidden = !list;
+    if (!list && !el('ctl-pop').hidden) toggleCtl(false);
+    renderCtl(); renderPads();
+  }
+  function renderCtl() {
+    const box = el('ctl-list');
+    box.replaceChildren();
+    if (!ctl) return;
+    const pads = new Map(ctl.virtual.map(v => [v.id, v]));
+    const rows = ctl.controllers.map(c => ({ c, id: c.kind === 'virtual' ? c.virtual_id : null }));
+    const shown = new Set(ctl.controllers.map(c => c.virtual_id).filter(Boolean));
+    for (const v of ctl.virtual) if (!shown.has(v.id)) rows.push({ c: { name: v.name, kind: 'virtual', steam: null }, id: v.id });
+    if (!rows.length) {
+      const empty = document.createElement('div');
+      empty.className = 'ctl-sub'; empty.textContent = 'No controllers seen by Steam Input.';
+      box.append(empty);
+    }
+    for (const { c, id } of rows) {
+      const row = document.createElement('div');
+      row.className = 'ctl-row' + (c.kind === 'virtual' ? ' virtual' : '');
+      const meta = document.createElement('div'); meta.className = 'meta';
+      const name = document.createElement('div'); name.className = 'name';
+      name.textContent = '🎮 ' + c.name + (c.kind === 'virtual' && !/virtual/i.test(c.name) ? ' (virtual)' : '');
+      name.title = c.name + (c.device ? ' · ' + c.device : '') + (c.vendor ? ' · ' + c.vendor + ':' + c.product : '');
+      const sub = document.createElement('div'); sub.className = 'ctl-sub';
+      sub.textContent = steamLabel(c) + (pads.get(id) && pads.get(id).auto ? ' · auto' : '');
+      meta.append(name, sub);
+      row.append(meta);
+      if (id) {
+        const b = document.createElement('button');
+        b.textContent = 'Remove'; b.title = 'Remove this virtual controller from the device';
+        b.onclick = () => removePad(id, b);
+        row.append(b);
+      }
+      box.append(row);
+    }
+    el('ctl-name').placeholder = nextPadName();
+  }
+  function renderPads() {
+    const sel = el('pad-target');
+    const list = ctl ? ctl.virtual.filter(v => !v.auto) : [];
+    if (padTarget && (!ctl || !list.some(p => p.id === padTarget))) retarget('');
+    sel.replaceChildren(...[['', 'Auto'], ...list.map(p => [p.id, p.name]), [ADD_PAD, 'New virtual pad…']].map(([v, t]) => new Option(t, v)));
+    sel.value = padTarget;
+    updatePadUi();
+  }
+  // The old target gets a neutral state so nothing stays held there.
+  function retarget(id) {
+    if (id === padTarget) return;
+    if (padSent) send(padMsg(NEUTRAL_PAD));
+    padSent = null;
+    padTarget = id;
+    try { localStorage.setItem('decky-mcp-pad', id); } catch (e) { /* not persisted */ }
+  }
+  // Returns the new pad's id; the server's refusal text (all slots used, Steam Input did not pick it up) is shown as-is.
+  async function addPad(name, say) {
+    try {
+      const res = await fetch('/controllers/virtual', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) { say(body.error || 'HTTP ' + res.status); return null; }
+      say('Virtual controller added and recognised by Steam Input');
+      await loadControllers();
+      return body.id;
+    } catch (e) { say('Failed: ' + e.message); return null; }
+  }
+  async function removePad(id, b) {
+    b.disabled = true;
+    try {
+      const res = await fetch('/controllers/virtual/' + encodeURIComponent(id), { method: 'DELETE' });
+      if (!res.ok) ctlNote((await res.json().catch(() => ({}))).error || 'HTTP ' + res.status);
+      else ctlNote('');
+    } catch (e) { ctlNote('Failed: ' + e.message); }
+    b.disabled = false;
+    loadControllers();
+  }
+  el('ctl-add').onsubmit = async e => {
+    e.preventDefault();
+    el('ctl-add-btn').disabled = true;
+    ctlNote('Adding…');
+    if (await addPad(el('ctl-name').value.trim() || nextPadName(), ctlNote)) el('ctl-name').value = '';
+    el('ctl-add-btn').disabled = false;
+  };
+  function follow() {
+    if (ctlEs || ctlPoll) return;
+    const startPoll = () => { if (!ctlPoll) ctlPoll = setInterval(loadControllers, 5000); };
+    if (!window.EventSource) { startPoll(); return; }
+    ctlEs = new EventSource('/controllers/events');
+    ctlEs.onmessage = ev => {
+      let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
+      if (m.type === 'controllers' && ctl) setControllers({ ...ctl, controllers: m.controllers, virtual: m.virtual });
+    };
+    ctlEs.onerror = () => { ctlEs.close(); ctlEs = null; startPoll(); };
+  }
+  function unfollow() { if (ctlEs) { ctlEs.close(); ctlEs = null; } clearInterval(ctlPoll); ctlPoll = null; }
+  function toggleCtl(open) {
+    el('ctl-pop').hidden = !open;
+    el('ctl-btn').classList.toggle('on', open);
+    el('ctl-btn').setAttribute('aria-expanded', open);
+    if (open) { ctlNote(''); loadControllers(); follow(); } else unfollow();
+  }
+  el('ctl-btn').onclick = e => { e.stopPropagation(); togglePop(false); toggleCtl(el('ctl-pop').hidden); };
+  el('ctl-pop').onclick = e => e.stopPropagation();
+  el('gear').addEventListener('click', () => { if (!el('ctl-pop').hidden) toggleCtl(false); });
+  const sel = el('pad-target');
+  sel.addEventListener('focus', loadControllers);
+  sel.onchange = async () => {
+    if (sel.value !== ADD_PAD) { retarget(sel.value); return; }
+    sel.value = padTarget;
+    const id = await addPad(nextPadName(), note);
+    if (id) { retarget(id); renderPads(); }
+  };
 
   // ---- audio ----
   // Raw 48 kHz s16le stereo over /audio, played by an AudioWorklet with a ~120 ms ring buffer. When
@@ -514,6 +676,7 @@ registerProcessor('pcm-player', PcmPlayer);`;
   loadInput();
   setInterval(() => { if (!document.hidden) loadInput(); }, 5000);
   loadSettings();
+  loadControllers();
   run();
 })();
 </script>
