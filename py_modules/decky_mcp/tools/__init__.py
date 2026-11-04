@@ -2,11 +2,15 @@
 import json
 import traceback
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from .. import cdp
 from ..capture import CaptureUnavailable, ScreenCapturer
 from ..input.service import InputDisabled, InputService, InputUnavailable
+
+if TYPE_CHECKING:
+    from ..controllers import ControllerService
+    from ..ui import UiNavigator
 
 ToolFn = Callable[..., Awaitable[Any]]
 # Exceptions that are expected, user-facing failures: reported without a traceback.
@@ -69,8 +73,13 @@ def error_result(text: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": text}], "isError": True}
 
 
-def build_registry(capturer: ScreenCapturer | None = None, input_service: InputService | None = None) -> ToolRegistry:
-    from . import cef, input, plugins, screen, system
+def build_registry(capturer: ScreenCapturer | None = None, input_service: InputService | None = None,
+                   controllers: "ControllerService | None" = None, navigator: "UiNavigator | None" = None) -> ToolRegistry:
+    from . import cef, controllers as controller_tools, input, plugins, screen, system, ui
+
+    if controllers is None and input_service is not None:
+        from ..controllers import ControllerService
+        controllers = ControllerService(input_service, input_service.log)
 
     reg = ToolRegistry()
     system.register(reg)
@@ -78,4 +87,6 @@ def build_registry(capturer: ScreenCapturer | None = None, input_service: InputS
     cef.register(reg)
     screen.register(reg, capturer)
     input.register(reg, input_service, capturer)
+    controller_tools.register(reg, controllers)
+    ui.register(reg, navigator, capturer)
     return reg

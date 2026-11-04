@@ -12,12 +12,14 @@ from . import cdp, logs
 from .audio import FORMAT as AUDIO_FORMAT, AudioCapturer, AudioDisabled, AudioUnavailable
 from .auth import TokenAuth
 from .capture import BOUNDARY, CaptureUnavailable, ScreenCapturer
+from .controllers import ControllerService
 from .input.ei import EiError
 from .input.service import InputDisabled, InputService, InputUnavailable
 from .pairing import MAX_WAIT_SECONDS, POLL_AFTER_MS, PairingLimit, PairingRequests
 from .protocol import SERVER_INFO, McpServer
 from .tools import plugins
 from .tools.system import list_plugins, schedule_loader_restart
+from .ui import UiNavigator
 
 API_VERSION = 1
 LOG_KEEPALIVE_SECONDS = 15.0
@@ -35,7 +37,8 @@ def _error(status: int, message: str) -> web.Response:
 class Api:
     def __init__(self, *, auth: TokenAuth, mcp: McpServer, capturer: ScreenCapturer | None, static_dir: str | None,
                  logger: logging.Logger, pairing: PairingRequests | None = None, base_url: BaseUrl | None = None, log_keepalive: float = LOG_KEEPALIVE_SECONDS,
-                 input_service: InputService | None = None, audio: AudioCapturer | None = None):
+                 input_service: InputService | None = None, audio: AudioCapturer | None = None,
+                 controllers: ControllerService | None = None, ui: UiNavigator | None = None):
         self.auth = auth
         self.mcp = mcp
         self.capturer = capturer
@@ -46,6 +49,8 @@ class Api:
         self.log_keepalive = log_keepalive
         self.input = input_service
         self.audio = audio
+        self.controllers = controllers
+        self.ui = ui
 
     def build_app(self) -> web.Application:
         app = web.Application(client_max_size=64 * 1024 * 1024, middlewares=[self.auth.middleware()])
@@ -67,6 +72,12 @@ class Api:
             web.get("/input", self.handle_input_ws),
             web.get("/input/settings", self.handle_input_settings_get),
             web.put("/input/settings", self.handle_input_settings_put),
+            web.get("/controllers", self.handle_controllers),
+            web.post("/controllers/virtual", self.handle_controller_add),
+            web.delete("/controllers/virtual/{id}", self.handle_controller_remove),
+            web.get("/controllers/events", self.handle_controller_events),
+            web.get("/ui/routes", self.handle_ui_routes),
+            web.post("/ui/navigate", self.handle_ui_navigate),
             web.get("/plugins", self.handle_plugins),
             web.post("/plugins/install", self.handle_plugin_install),
             web.post("/plugins/{dir}/reload", self.handle_plugin_reload),
@@ -356,6 +367,87 @@ class Api:
             await svc.close_session(session)
         return ws
 
+    # ---- controllers ----
+
+    # Cookie auth is accepted on purpose (the viewer manages pads); a virtual pad sends nothing by itself.
+    async def handle_controllers(self, _request: web.Request) -> web.Response:
+        if self.controllers is None:
+            return _error(404, "controllers not available")
+        return web.json_response(await self.controllers.snapshot())
+
+    async def handle_controller_add(self, request: web.Request) -> web.Response:
+        if self.controllers is None:
+            return _error(404, "controllers not available")
+        body: object = {}
+        if request.can_read_body:
+            try:
+                body = await request.json()
+            except ValueError:
+                return _error(400, "expected a JSON object")
+        if not isinstance(body, dict):
+            return _error(400, "expected a JSON object")
+        unknown = set(body) - {"name"}
+        if unknown:
+            return _error(400, f"unknown field(s): {', '.join(sorted(unknown))}")
+        try:
+            return web.json_response(await self.controllers.add_virtual(body.get("name")), status=201)
+        except ValueError as e:
+            return _error(400, str(e))
+        except InputUnavailable as e:
+            return _error(503, str(e))
+
+    async def handle_controller_remove(self, request: web.Request) -> web.Response:
+        if self.controllers is None:
+            return _error(404, "controllers not available")
+        pad_id = request.match_info["id"]
+        if not self.controllers.remove_virtual(pad_id):
+            return _error(404, f"no virtual gamepad {pad_id!r}")
+        return web.json_response({"removed": pad_id})
+
+    async def handle_controller_events(self, request: web.Request) -> web.StreamResponse:
+        if self.controllers is None:
+            return _error(404, "controllers not available")
+        controllers = self.controllers
+
+        async def events():
+            source = controllers.subscribe()
+            try:
+                async for event in source:
+                    yield json.dumps(event)
+            finally:
+                await source.aclose()
+
+        return await self._sse(request, events())
+
+    # ---- ui navigation ----
+
+    async def handle_ui_routes(self, _request: web.Request) -> web.Response:
+        if self.ui is None:
+            return _error(404, "ui navigation not available")
+        try:
+            return web.json_response(await self.ui.routes())
+        except cdp.CdpError as e:
+            return _error(502, str(e))
+
+    async def handle_ui_navigate(self, request: web.Request) -> web.Response:
+        if self.ui is None:
+            return _error(404, "ui navigation not available")
+        try:
+            body = await request.json()
+        except ValueError:
+            return _error(400, "expected a JSON object")
+        if not isinstance(body, dict):
+            return _error(400, "expected a JSON object")
+        unknown = set(body) - {"path", "action", "tab", "plugin", "appid"}
+        if unknown:
+            return _error(400, f"unknown field(s): {', '.join(sorted(unknown))}")
+        try:
+            return web.json_response(await self.ui.navigate(**body))
+        except ValueError as e:
+            return _error(400, str(e))
+        except cdp.CdpError as e:
+            return _error(502, str(e))
+
     # ---- plugins ----
 
     def _require_bearer(self, request: web.Request) -> web.Response | None:
@@ -449,13 +541,16 @@ class Api:
             return _error(400, str(e))
         if source == "plugin" and not os.path.isdir(logs.plugin_log_dir(plugin or "")):
             return _error(404, f"no log dir {logs.plugin_log_dir(plugin or '')}")
+        return await self._sse(request, logs.follow(source, plugin, n))
+
+    async def _sse(self, request: web.Request, lines) -> web.StreamResponse:
+        """Stream an async iterator of strings as `data:` events with keepalive comments."""
         res = web.StreamResponse(headers={
             "Content-Type": "text/event-stream; charset=utf-8",
             "Cache-Control": "no-store",
             "X-Accel-Buffering": "no",
         })
         await res.prepare(request)
-        lines = logs.follow(source, plugin, n)
         pending: asyncio.Future[str] | None = None
         loop = asyncio.get_running_loop()
         last_write = loop.time()

@@ -262,7 +262,7 @@ def test_gamepad_removed_after_idle(tmp_path):
         assert await svc.gamepad(s, pad_values({"a": False})) is True
         assert await svc.gamepad(s, pad_values({"a": False})) is False
         await asyncio.sleep(0.3)
-        assert svc.t.pads[0].closed and svc._pad is None
+        assert svc.t.pads[0].closed and svc.get_pad("auto") is None
     asyncio.run(run())
 
 

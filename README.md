@@ -29,7 +29,11 @@ protected by a bearer token shown in the plugin's Quick Access panel.
 | `set_input_enabled` | Turn remote input on or off (off by default) |
 | `input_key` / `input_text` | Press key combos (`"ctrl+shift+a"`, `"enter"`) or type ASCII text |
 | `input_mouse` | Move, click, double-click, hold or scroll the pointer (normalised or pixel coordinates) |
-| `input_gamepad` | Press buttons, move sticks and triggers on a virtual Xbox 360 pad, or run a sequence |
+| `input_gamepad` | Press buttons, move sticks and triggers on a virtual Xbox 360 pad (`pad` picks one), or run a sequence |
+| `list_controllers` | Gamepads as Steam Input sees them (type, slot, active), merged with evdev detail |
+| `add_virtual_controller` / `remove_virtual_controller` | Plug in or unplug a virtual Xbox 360 pad; returns once Steam Input lists it |
+| `ui_routes` | Steam and Decky pages you can navigate to, plugin routes, current page and menu state |
+| `ui_navigate` | Go to a page (`/settings/display`, `/decky/settings`), back, open Quick Access / a Decky plugin panel / a game page |
 | `read_file` / `write_file` | Read or write files on the device (runs as root) |
 
 ## Pairing
@@ -150,6 +154,23 @@ Security notes for input:
   input session is written to the plugin log.
 - Keys, mouse buttons and the gamepad are released when a client disconnects, when input is turned
   off and when the plugin unloads.
+
+## Controllers
+
+`list_controllers` (or `GET /controllers`) shows what Steam Input has: each controller's Steam type,
+player slot and whether it is the active one, plus the kernel device it maps to.
+`add_virtual_controller` plugs in a virtual Xbox 360 pad (up to 4) and only returns once Steam
+Input lists it; drive it with `input_gamepad(pad=<id>)`, which goes through Steam Input like a real
+controller, and unplug it with `remove_virtual_controller`. Without `pad`, `input_gamepad` uses an
+implicit pad that disappears after 60 s idle. `GET /controllers/events` streams every change.
+
+## UI navigation
+
+`ui_navigate` moves the Steam UI with Decky's own navigation helpers: `path` for a page
+(`/library/home`, `/settings/audio`, `/settings/controller`, `/decky/settings/plugins`, routes Decky
+plugins registered), or `action` `back`, `quick_access` (with `tab`, e.g. `decky`), `main_menu`,
+`close_menus`, `plugin` (opens that Decky plugin's Quick Access panel) or `app` (a game page).
+`ui_routes` lists the verified pages. Both have HTTP twins (`GET /ui/routes`, `POST /ui/navigate`).
 
 ## REST endpoints
 

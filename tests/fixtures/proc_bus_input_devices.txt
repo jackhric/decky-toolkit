@@ -1,0 +1,140 @@
+I: Bus=0019 Vendor=0000 Product=0001 Version=0000
+N: Name="Power Button"
+P: Phys=PNP0C0C/button/input0
+S: Sysfs=/devices/platform/PNP0C0C:00/input/input0
+U: Uniq=
+H: Handlers=kbd event0 
+B: PROP=0
+B: EV=3
+B: KEY=8000 10000000000000 0
+
+I: Bus=0019 Vendor=0000 Product=0001 Version=0000
+N: Name="Power Button"
+P: Phys=LNXPWRBN/button/input0
+S: Sysfs=/devices/platform/LNXPWRBN:00/input/input1
+U: Uniq=
+H: Handlers=kbd event1 
+B: PROP=0
+B: EV=3
+B: KEY=8000 10000000000000 0
+
+I: Bus=0019 Vendor=0000 Product=0006 Version=0000
+N: Name="Video Bus"
+P: Phys=LNXVIDEO/video/input0
+S: Sysfs=/devices/pci0000:00/0000:00:08.1/acpi.video_bus.0/input/input3
+U: Uniq=
+H: Handlers=kbd event2 
+B: PROP=0
+B: EV=3
+B: KEY=3e000b00000000 0 0 0
+
+I: Bus=0010 Vendor=001f Product=0001 Version=0100
+N: Name="PC Speaker"
+P: Phys=isa0061/input0
+S: Sysfs=/devices/platform/pcspkr/input/input4
+U: Uniq=
+H: Handlers=kbd event3 
+B: PROP=0
+B: EV=40001
+B: SND=6
+
+I: Bus=0000 Vendor=0000 Product=0000 Version=0000
+N: Name="HD-Audio Generic HDMI/DP,pcm=3"
+P: Phys=ALSA
+S: Sysfs=/devices/pci0000:00/0000:00:08.1/0000:01:00.1/sound/card0/input5
+U: Uniq=
+H: Handlers=event4 
+B: PROP=0
+B: EV=21
+B: SW=140
+
+I: Bus=0000 Vendor=0000 Product=0000 Version=0000
+N: Name="HD-Audio Generic HDMI/DP,pcm=7"
+P: Phys=ALSA
+S: Sysfs=/devices/pci0000:00/0000:00:08.1/0000:01:00.1/sound/card0/input6
+U: Uniq=
+H: Handlers=event5 
+B: PROP=0
+B: EV=21
+B: SW=140
+
+I: Bus=0006 Vendor=28de Product=0000 Version=0000
+N: Name="steamos-manager"
+P: Phys=
+S: Sysfs=/devices/virtual/input/input7
+U: Uniq=
+H: Handlers=kbd event6 
+B: PROP=0
+B: EV=3
+B: KEY=568000000000 4040860000000
+
+I: Bus=0006 Vendor=045e Product=0b12 Version=050d
+N: Name="Microsoft Xbox Controller"
+P: Phys=gip0.0/input0
+S: Sysfs=/devices/pci0000:00/0000:00:10.0/usb6/6-1/6-1.3/6-1.3:1.0/gip0/gip0.0/input/input37
+U: Uniq=09710300495139
+H: Handlers=kbd event7 js0 
+B: PROP=0
+B: EV=20000b
+B: KEY=7cdb000000000000 0 8000000000 0 0
+B: ABS=3003f
+B: FF=107030000 0
+
+I: Bus=0003 Vendor=28de Product=11ff Version=0001
+N: Name="Microsoft X-Box 360 pad 0"
+P: Phys=
+S: Sysfs=/devices/virtual/input/input38
+U: Uniq=
+H: Handlers=event8 js1 
+B: PROP=0
+B: EV=20000b
+B: KEY=7cdb000000000000 0 0 0 0
+B: ABS=3003f
+B: FF=10000 0
+
+I: Bus=0003 Vendor=045e Product=028e Version=0114
+N: Name="Microsoft X-Box 360 pad"
+P: Phys=
+S: Sysfs=/devices/virtual/input/input40
+U: Uniq=
+H: Handlers=event9 js2 
+B: PROP=0
+B: EV=b
+B: KEY=7cdb000000000000 0 0 0 0
+B: ABS=3003f
+
+I: Bus=0003 Vendor=045e Product=028e Version=0114
+N: Name="Microsoft X-Box 360 pad"
+P: Phys=
+S: Sysfs=/devices/virtual/input/input41
+U: Uniq=
+H: Handlers=event10 js3 
+B: PROP=0
+B: EV=b
+B: KEY=7cdb000000000000 0 0 0 0
+B: ABS=3003f
+
+I: Bus=0003 Vendor=28de Product=11ff Version=0001
+N: Name="Microsoft X-Box 360 pad 1"
+P: Phys=
+S: Sysfs=/devices/virtual/input/input42
+U: Uniq=
+H: Handlers=event11 js4 
+B: PROP=0
+B: EV=20000b
+B: KEY=7cdb000000000000 0 0 0 0
+B: ABS=3003f
+B: FF=10000 0
+
+I: Bus=0003 Vendor=28de Product=11ff Version=0001
+N: Name="Microsoft X-Box 360 pad 2"
+P: Phys=
+S: Sysfs=/devices/virtual/input/input43
+U: Uniq=
+H: Handlers=event12 js5 
+B: PROP=0
+B: EV=20000b
+B: KEY=7cdb000000000000 0 0 0 0
+B: ABS=3003f
+B: FF=10000 0
+
