@@ -9,6 +9,7 @@ import collections
 import os
 import pwd
 import shutil
+import signal
 import time
 from typing import AsyncIterator, Callable
 
@@ -87,7 +88,12 @@ class ScreenCapturer:
         fps = max(1, min(60, int(getattr(s, "stream_fps", 30))))
         quality = max(10, min(100, int(getattr(s, "stream_quality", 70))))
         width = int(getattr(s, "stream_width", 0) or 0)
-        scale = ["!", "videoscale", "!", f"video/x-raw,width={width}"] if width > 0 else []
+        # gamescope advertises pixel-aspect-ratio=1/2147483647, which makes videoscale derive a height of 1
+        # (or keep 1080 if the output PAR is left open), so declare square pixels before scaling.
+        scale = [
+            "!", "capssetter", "caps=video/x-raw,pixel-aspect-ratio=1/1",
+            "!", "videoscale", "!", f"video/x-raw,width={width},pixel-aspect-ratio=1/1",
+        ] if width > 0 else []
         return [
             "gst-launch-1.0", "-q",
             "pipewiresrc", "target-object=gamescope", "do-timestamp=true", f"keepalive-time={KEEPALIVE_MS}",
@@ -136,15 +142,20 @@ class ScreenCapturer:
     async def stop(self) -> None:
         async with self._lock:
             proc, self._proc = self._proc, None
-            if self._reader_task:
-                self._reader_task.cancel()
-                self._reader_task = None
+            reader, self._reader_task = self._reader_task, None
             if proc and proc.returncode is None:
-                proc.terminate()
+                # SIGINT makes gst-launch take the pipeline down through PAUSED, which deactivates the
+                # PipeWire stream before disconnecting. Killing it while gamescope paints into its
+                # buffers crashes gamescope (SIGSEGV in paint_pipewire, 3.16.31, 2026-11-04). Keep
+                # reading stdout meanwhile so a full pipe cannot stall the shutdown.
+                proc.send_signal(signal.SIGINT)
                 try:
                     await asyncio.wait_for(proc.wait(), 2)
                 except asyncio.TimeoutError:
                     proc.kill()
+                    await proc.wait()
+            if reader:
+                reader.cancel()
             if proc:
                 self.log.info("screen capture stopped")
 
