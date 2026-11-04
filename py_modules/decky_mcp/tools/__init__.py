@@ -10,6 +10,7 @@ from ..capture import CaptureUnavailable, ScreenCapturer
 from ..input.service import InputDisabled, InputService, InputUnavailable
 
 if TYPE_CHECKING:
+    from ..console import ConsoleCollector
     from ..controllers import ControllerService
     from ..ui import UiNavigator
 
@@ -80,7 +81,8 @@ def error_result(text: str) -> dict[str, Any]:
 
 
 def build_registry(capturer: ScreenCapturer | None = None, input_service: InputService | None = None,
-                   controllers: "ControllerService | None" = None, navigator: "UiNavigator | None" = None) -> ToolRegistry:
+                   controllers: "ControllerService | None" = None, navigator: "UiNavigator | None" = None,
+                   console: "ConsoleCollector | None" = None) -> ToolRegistry:
     from . import cef, controllers as controller_tools, input, plugin_api, plugins, screen, system, ui
 
     if controllers is None and input_service is not None:
@@ -90,7 +92,7 @@ def build_registry(capturer: ScreenCapturer | None = None, input_service: InputS
     reg = ToolRegistry()
     system.register(reg)
     plugins.register(reg)
-    cef.register(reg)
+    cef.register(reg, console)
     plugin_api.register(reg)
     screen.register(reg, capturer)
     input.register(reg, input_service, capturer)

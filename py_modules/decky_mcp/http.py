@@ -12,6 +12,7 @@ from . import audit, cdp, logs
 from .audio import FORMAT as AUDIO_FORMAT, AudioCapturer, AudioDisabled, AudioUnavailable
 from .auth import TokenAuth
 from .capture import BOUNDARY, CaptureUnavailable, ScreenCapturer
+from .console import DEFAULT_LEVEL, ConsoleCollector
 from .controllers import ControllerService
 from .input.ei import EiError
 from .input.service import InputDisabled, InputService, InputUnavailable
@@ -38,7 +39,8 @@ class Api:
     def __init__(self, *, auth: TokenAuth, mcp: McpServer, capturer: ScreenCapturer | None, static_dir: str | None,
                  logger: logging.Logger, pairing: PairingRequests | None = None, base_url: BaseUrl | None = None, log_keepalive: float = LOG_KEEPALIVE_SECONDS,
                  input_service: InputService | None = None, audio: AudioCapturer | None = None,
-                 controllers: ControllerService | None = None, ui: UiNavigator | None = None):
+                 controllers: ControllerService | None = None, ui: UiNavigator | None = None,
+                 console: ConsoleCollector | None = None):
         self.auth = auth
         self.mcp = mcp
         self.capturer = capturer
@@ -51,6 +53,7 @@ class Api:
         self.audio = audio
         self.controllers = controllers
         self.ui = ui
+        self.console = console
 
     def build_app(self) -> web.Application:
         app = web.Application(client_max_size=64 * 1024 * 1024,
@@ -85,6 +88,8 @@ class Api:
             web.post("/loader/restart", self.handle_loader_restart),
             web.get("/logs/tail", self.handle_logs_tail),
             web.get("/logs/stream", self.handle_logs_stream),
+            web.get("/cef/console", self.handle_console),
+            web.get("/cef/console/stream", self.handle_console_stream),
             *self.mcp.routes(),
         ])
         return app
@@ -547,6 +552,41 @@ class Api:
         if source == "plugin" and not os.path.isdir(logs.plugin_log_dir(plugin or "")):
             return _error(404, f"no log dir {logs.plugin_log_dir(plugin or '')}")
         return await self._sse(request, logs.follow(source, plugin, n))
+
+    # ---- steam ui console ----
+
+    async def handle_console(self, request: web.Request) -> web.Response:
+        if self.console is None:
+            return _error(404, "console capture not available")
+        q = request.query
+        try:
+            lines = int(q.get("lines", 200))
+            return web.json_response(self.console.query(q.get("target") or None, lines, q.get("level", DEFAULT_LEVEL),
+                                                        q.get("since") or None, q.get("grep") or None))
+        except ValueError as e:
+            return _error(400, str(e))
+
+    async def handle_console_stream(self, request: web.Request) -> web.StreamResponse:
+        if self.console is None:
+            return _error(404, "console capture not available")
+        q = request.query
+        target, level = q.get("target") or None, q.get("level", DEFAULT_LEVEL)
+        try:
+            tail = max(0, min(int(q.get("tail", logs.DEFAULT_TAIL)), logs.MAX_TAIL))
+            self.console.query(target, 1, level)  # validates before the stream starts
+        except ValueError as e:
+            return _error(400, str(e))
+        console = self.console
+
+        async def events():
+            source = console.follow(target, tail, level)
+            try:
+                async for entry in source:
+                    yield json.dumps(entry, ensure_ascii=False)
+            finally:
+                await source.aclose()
+
+        return await self._sse(request, events())
 
     async def _sse(self, request: web.Request, lines) -> web.StreamResponse:
         """Stream an async iterator of strings as `data:` events with keepalive comments."""
