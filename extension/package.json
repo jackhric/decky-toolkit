@@ -1,0 +1,77 @@
+{
+  "name": "decky-mcp",
+  "displayName": "Decky-MCP",
+  "description": "Live screen, deploy, logs and Steam console for Decky plugin development against a Decky-MCP device",
+  "version": "0.1.0",
+  "publisher": "jackhric",
+  "license": "BSD-3-Clause",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jackh/decky-mcp.git"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "decky",
+    "steam deck",
+    "mcp"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "workspaceContains:plugin.json"
+  ],
+  "contributes": {
+    "commands": [
+      { "command": "decky-mcp.pair", "title": "Pair with device", "category": "Decky" },
+      { "command": "decky-mcp.enterToken", "title": "Enter token manually", "category": "Decky" },
+      { "command": "decky-mcp.disconnect", "title": "Disconnect", "category": "Decky" },
+      { "command": "decky-mcp.openScreen", "title": "Open screen", "category": "Decky" },
+      { "command": "decky-mcp.deploy", "title": "Deploy plugin", "category": "Decky" },
+      { "command": "decky-mcp.restartLoader", "title": "Restart loader", "category": "Decky" },
+      { "command": "decky-mcp.reloadPlugin", "title": "Reload plugin", "category": "Decky" },
+      { "command": "decky-mcp.loaderLogs", "title": "Show loader logs", "category": "Decky" },
+      { "command": "decky-mcp.pluginLogs", "title": "Show plugin logs", "category": "Decky" },
+      { "command": "decky-mcp.evaluate", "title": "Evaluate JS in Steam UI", "category": "Decky" },
+      { "command": "decky-mcp.toast", "title": "Toast on Deck", "category": "Decky" },
+      { "command": "decky-mcp.writeMcpConfig", "title": "Write MCP config for this workspace", "category": "Decky" }
+    ],
+    "configuration": {
+      "title": "Decky-MCP",
+      "properties": {
+        "decky-mcp.host": {
+          "type": "string",
+          "default": "10.0.70.18",
+          "description": "IP address or hostname of the Steam Deck running the Decky-MCP plugin."
+        },
+        "decky-mcp.port": {
+          "type": "number",
+          "default": 8765,
+          "description": "Port of the Decky-MCP HTTP server."
+        },
+        "decky-mcp.pluginDirName": {
+          "type": "string",
+          "default": "",
+          "description": "Directory name under ~/homebrew/plugins to deploy to. Empty means the workspace folder's name."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "package": "vsce package --no-dependencies",
+    "dev-check": "node scripts/dev-check.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "@types/vscode": "~1.90.0",
+    "@vscode/vsce": "^3.2.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.9.0"
+  }
+}
