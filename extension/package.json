@@ -2,7 +2,7 @@
   "name": "decky-toolkit",
   "displayName": "Decky Toolkit",
   "description": "Decky Loader plugin development for VS Code.",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "publisher": "jackhric",
   "icon": "media/icon.png",
   "license": "MIT",
