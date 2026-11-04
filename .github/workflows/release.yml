@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'plugin-v*'
+      - 'extension-v*'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Check tag
+    runs-on: ubuntu-latest
+    outputs:
+      component: ${{ steps.tag.outputs.component }}
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: tag
+        run: |
+          tag="$GITHUB_REF_NAME"
+          case "$tag" in
+            plugin-v*) component=plugin; version="${tag#plugin-v}"; files=(package.json plugin.json) ;;
+            extension-v*) component=extension; version="${tag#extension-v}"; files=(extension/package.json) ;;
+            *) echo "::error::unexpected tag $tag"; exit 1 ;;
+          esac
+          id='(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)'
+          semver="^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-$id(\.$id)*)?(\+[0-9a-zA-Z-]+(\.[0-9a-zA-Z-]+)*)?$"
+          if ! [[ "$version" =~ $semver ]]; then
+            echo "::error::$tag: '$version' is not a valid semver version"
+            exit 1
+          fi
+          for f in "${files[@]}"; do
+            declared=$(node -p "require('./$f').version ?? ''")
+            if [ "$f" = plugin.json ] && [ -z "$declared" ]; then continue; fi
+            if [ "$declared" != "$version" ]; then
+              echo "::error file=$f::$tag does not match version '$declared' in $f"
+              exit 1
+            fi
+          done
+          echo "component=$component" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  ci:
+    name: CI
+    needs: check
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    name: GitHub Release
+    needs: [check, ci]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.check.outputs.component }}
+          path: release
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          COMPONENT: ${{ needs.check.outputs.component }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          case "$COMPONENT" in
+            plugin) title="Decky Toolkit plugin $VERSION" ;;
+            extension) title="Decky Toolkit for VS Code $VERSION" ;;
+          esac
+          args=(--verify-tag --title "$title" --generate-notes)
+          prev=$(git tag --list "$COMPONENT-v*" --sort=-v:refname | grep -vxF "$tag" | head -1 || true)
+          if [ -n "$prev" ]; then args+=(--notes-start-tag "$prev"); fi
+          if [[ "$VERSION" == *-* ]]; then args+=(--prerelease); fi
+          gh release create "$tag" release/* "${args[@]}"
