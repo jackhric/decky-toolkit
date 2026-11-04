@@ -138,14 +138,25 @@ export class ControllerNode extends vscode.TreeItem {
   virtualId?: string;
 }
 
+// Steam Input numbers slots from 0; people count controllers from 1.
+export const slotLabel = (slot: number | null | undefined): string => (slot != null ? `Slot ${slot + 1}` : '');
+
 export function steamInputLabel(c: Pick<ControllerInfo, 'kind' | 'steam'>): string {
   if (!c.steam) return `${c.kind} · not seen by Steam Input`;
-  return `${c.kind} · Steam Input: ${c.steam.type}${c.steam.slot != null ? ` (slot ${c.steam.slot})` : ''}`;
+  const slot = slotLabel(c.steam.slot);
+  return `${c.kind} · Steam Input: ${c.steam.type}${slot ? ` · ${slot}` : ''}`;
 }
 
-function controllerRow(c: ControllerInfo, pad: VirtualPad | undefined): ControllerNode {
+/** Steam Input's order first (by slot), then anything it does not see. */
+export function sortControllers<T extends Pick<ControllerInfo, 'steam'>>(list: T[]): T[] {
+  const slotOf = (c: T) => (c.steam && c.steam.slot != null ? c.steam.slot : Number.POSITIVE_INFINITY);
+  return [...list].sort((a, b) => slotOf(a) - slotOf(b));
+}
+
+function controllerRow(c: ControllerInfo, pad: VirtualPad | undefined, order?: number): ControllerNode {
   const virtual = c.kind === 'virtual';
-  const n = new ControllerNode(virtual && !/virtual/i.test(c.name) ? `${c.name} (virtual)` : c.name);
+  const base = virtual && !/virtual/i.test(c.name) ? `${c.name} (virtual)` : c.name;
+  const n = new ControllerNode(order != null ? `${order}. ${base}` : base);
   n.id = `controller:${c.id}`;
   n.description = steamInputLabel(c);
   n.iconPath = new vscode.ThemeIcon('game', virtual ? new vscode.ThemeColor('charts.blue') : undefined);
@@ -154,7 +165,7 @@ function controllerRow(c: ControllerInfo, pad: VirtualPad | undefined): Controll
   n.contextValue = n.virtualId ? 'controller.virtual' : 'controller.physical';
   const md = new vscode.MarkdownString();
   md.appendMarkdown(`**${c.name}** · ${c.kind}\n\n`);
-  if (c.steam) md.appendMarkdown(`- Steam Input: ${c.steam.type}${c.steam.slot != null ? `, slot ${c.steam.slot}` : ''}${c.steam.name ? ` ("${c.steam.name}")` : ''}\n`);
+  if (c.steam) md.appendMarkdown(`- Steam Input: ${c.steam.type}${c.steam.slot != null ? `, ${slotLabel(c.steam.slot)}` : ''}${c.steam.name ? ` ("${c.steam.name}")` : ''}\n`);
   else md.appendMarkdown('- not seen by Steam Input\n');
   if (c.vendor || c.product) md.appendMarkdown(`- USB id: \`${c.vendor}:${c.product}\`\n`);
   if (c.device) md.appendMarkdown(`- device: \`${c.device}\`\n`);
@@ -184,7 +195,9 @@ export function controllerItems(state: ControllersState | undefined): vscode.Tre
     return [n];
   }
   const pads = new Map(state.virtual.map(v => [v.id, v]));
-  const rows = state.controllers.map(c => controllerRow(c, c.virtual_id ? pads.get(c.virtual_id) : undefined));
+  let order = 0;
+  const rows = sortControllers(state.controllers).map(c =>
+    controllerRow(c, c.virtual_id ? pads.get(c.virtual_id) : undefined, c.steam && c.steam.slot != null ? ++order : undefined));
   const shown = new Set(state.controllers.map(c => c.virtual_id).filter(Boolean));
   for (const v of state.virtual) {
     if (shown.has(v.id)) continue;

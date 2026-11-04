@@ -1068,8 +1068,8 @@ await check('Controllers view with fake clients: empty, physical + virtual, 404,
   };
   const rows = await treeFor(async () => list).getChildren();
   assert.deepEqual(rows.map(r => [r.label, r.description]), [
-    ['Steam Deck', 'physical · Steam Input: steamdeck (slot 0)'],
-    ['Virtual pad 1', 'virtual · Steam Input: xbox360 (slot 1)'],
+    ['1. Steam Deck', 'physical · Steam Input: steamdeck · Slot 1'],
+    ['2. Virtual pad 1', 'virtual · Steam Input: xbox360 · Slot 2'],
     ['8BitDo Pro 2', 'physical · not seen by Steam Input'],
     ['Couch (virtual)', 'virtual · not seen by Steam Input'],
   ]);
@@ -1078,7 +1078,7 @@ await check('Controllers view with fake clients: empty, physical + virtual, 404,
   const ctx = new Map([['decky-mcp.connected', true]]);
   const inline = r => pkg.contributes.menus['view/item/context'].filter(m => m.group.startsWith('inline') && evalWhen(m.when, new Map([...ctx, ['view', 'decky-mcp.controllers'], ['viewItem', r.contextValue]]))).map(m => m.command);
   assert.deepEqual(rows.map(inline), [[], ['decky-mcp.removeVirtualController'], [], ['decky-mcp.removeVirtualController']]);
-  assert.match(rows[1].tooltip.value, /Steam Input: xbox360, slot 1/);
+  assert.match(rows[1].tooltip.value, /Steam Input: xbox360, Slot 2/);
 
   const [old] = await treeFor(async () => { throw new ext.HttpError(404, '404: Not Found', '/controllers'); }).getChildren();
   assert.deepEqual([old.label, old.description, old.iconPath.color.id, old.contextValue], ['Controllers', 'update Decky-MCP on the device', 'disabledForeground', 'controller.unsupported']);
@@ -1093,7 +1093,7 @@ await check('Controllers view live: SSE through the proxy, add / remove, 409 and
   const provider = tree('decky-mcp.controllers').provider;
   const rowLabels = async () => labels(await provider.getChildren());
   await settle(100);
-  assert.deepEqual(await rowLabels(), ['Steam Deck', 'Decky-MCP pad (virtual)']);
+  assert.deepEqual(await rowLabels(), ['1. Steam Deck', '2. Decky-MCP pad (virtual)']);
   assert.equal(tree('decky-mcp.controllers').view.description, '10.1.2.3');
   assert.ok(fetched.includes('/controllers/events'), 'events requested through the proxy');
   assert.ok(ctl.streams.size >= 1, 'event stream open');
@@ -1154,7 +1154,7 @@ await check('Controllers view live: SSE through the proxy, add / remove, 409 and
   await settle(60);
   ctl.controllers = ctl.controllers.filter(c => c.id !== 'evdev:8bd');
   await settle(150);
-  assert.deepEqual(await rowLabels(), ['Steam Deck', 'Decky-MCP pad (virtual)'], 'poll picked up the change');
+  assert.deepEqual(await rowLabels(), ['1. Steam Deck', '2. Decky-MCP pad (virtual)'], 'poll picked up the change');
   ctl.eventsStatus = 200;
   await settle(150);
   assert.ok(ctl.streams.size >= 1, 'stream reopened');
@@ -1169,7 +1169,7 @@ await check('Controllers view live: SSE through the proxy, add / remove, 409 and
   assert.match(lastMessage('warning').m, /update Decky-MCP on the device \(10\.1\.2\.3\)/);
   ctl.missing = false;
   await settle(150);
-  assert.deepEqual(await rowLabels(), ['Steam Deck', 'Decky-MCP pad (virtual)'], 'recovers once the device answers');
+  assert.deepEqual(await rowLabels(), ['1. Steam Deck', '2. Decky-MCP pad (virtual)'], 'recovers once the device answers');
   return `SSE update, add "Virtual pad 1" (slot 3), remove inline + palette, refusal and 409 as-is, poll fallback, 404 → "${rows[0].description}"`;
 });
 
@@ -1586,7 +1586,7 @@ await check('browser viewer (static/viewer.html): Controllers popover, live upda
   assert.equal(el('ctl-pop').hidden, false);
   assert.deepEqual(sources.map(s => s.u), ['/controllers/events'], 'live while open');
   const rowText = () => el('ctl-list').children.filter(r => r.className.startsWith('ctl-row')).map(r => r.children[0].children.map(c => c.textContent).join(' | '));
-  assert.deepEqual(rowText(), ['🎮 Steam Deck | physical · Steam Input: steamdeck (slot 0)', '🎮 Decky-MCP pad (virtual) | virtual · not seen by Steam Input · auto']);
+  assert.deepEqual(rowText(), ['1. Steam Deck | physical · Steam Input: steamdeck · Slot 1', '🎮 Decky-MCP pad (virtual) | virtual · not seen by Steam Input · auto']);
   assert.equal(el('ctl-name').placeholder, 'Virtual pad 1');
   await el('ctl-add').onsubmit({ preventDefault() {} });
   assert.ok(requests.includes('POST /controllers/virtual'));

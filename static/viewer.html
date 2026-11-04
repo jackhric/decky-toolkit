@@ -406,7 +406,9 @@
   try { padTarget = localStorage.getItem('decky-mcp-pad') || ''; } catch (e) { /* Auto */ }
   const ADD_PAD = '__add__';
   const padMsg = st => padTarget ? { type: 'gamepad', ...st, pad: padTarget } : { type: 'gamepad', ...st };
-  const steamLabel = c => c.steam ? c.kind + ' · Steam Input: ' + c.steam.type + (c.steam.slot != null ? ' (slot ' + c.steam.slot + ')' : '') : c.kind + ' · not seen by Steam Input';
+  // Steam Input numbers slots from 0; people count controllers from 1.
+  const steamLabel = c => c.steam ? c.kind + ' · Steam Input: ' + c.steam.type + (c.steam.slot != null ? ' · Slot ' + (c.steam.slot + 1) : '') : c.kind + ' · not seen by Steam Input';
+  const slotOf = c => (c.steam && c.steam.slot != null) ? c.steam.slot : Infinity;
   const ctlNote = t => { el('ctl-note').textContent = t || ''; };
   function updatePadUi() { el('pad-fwd').hidden = !ctl || el('pad-ind').hidden; }
   function nextPadName() {
@@ -432,7 +434,9 @@
     box.replaceChildren();
     if (!ctl) return;
     const pads = new Map(ctl.virtual.map(v => [v.id, v]));
-    const rows = ctl.controllers.map(c => ({ c, id: c.kind === 'virtual' ? c.virtual_id : null }));
+    let order = 0;
+    const rows = [...ctl.controllers].sort((a, b) => slotOf(a) - slotOf(b))
+      .map(c => ({ c, id: c.kind === 'virtual' ? c.virtual_id : null, order: slotOf(c) !== Infinity ? ++order : null }));
     const shown = new Set(ctl.controllers.map(c => c.virtual_id).filter(Boolean));
     for (const v of ctl.virtual) if (!shown.has(v.id)) rows.push({ c: { name: v.name, kind: 'virtual', steam: null }, id: v.id });
     if (!rows.length) {
@@ -440,12 +444,12 @@
       empty.className = 'ctl-sub'; empty.textContent = 'No controllers seen by Steam Input.';
       box.append(empty);
     }
-    for (const { c, id } of rows) {
+    for (const { c, id, order } of rows) {
       const row = document.createElement('div');
       row.className = 'ctl-row' + (c.kind === 'virtual' ? ' virtual' : '');
       const meta = document.createElement('div'); meta.className = 'meta';
       const name = document.createElement('div'); name.className = 'name';
-      name.textContent = '🎮 ' + c.name + (c.kind === 'virtual' && !/virtual/i.test(c.name) ? ' (virtual)' : '');
+      name.textContent = (order ? order + '. ' : '🎮 ') + c.name + (c.kind === 'virtual' && !/virtual/i.test(c.name) ? ' (virtual)' : '');
       name.title = c.name + (c.device ? ' · ' + c.device : '') + (c.vendor ? ' · ' + c.vendor + ':' + c.product : '');
       const sub = document.createElement('div'); sub.className = 'ctl-sub';
       sub.textContent = steamLabel(c) + (pads.get(id) && pads.get(id).auto ? ' · auto' : '');
