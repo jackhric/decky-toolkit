@@ -17,6 +17,8 @@ protected by a bearer token shown in the plugin's Quick Access panel.
 | `read_plugin_log` | Tail a plugin's backend log from `~/homebrew/logs/<plugin>/` |
 | `loader_log` | Tail `journalctl -u plugin_loader`, optional substring filter |
 | `restart_loader` | Restart `plugin_loader.service` (scheduled 1 s out so the call returns) |
+| `install_plugin` | Install a plugin zip (device path or base64) atomically, then restart the loader, reload the plugin, or neither |
+| `reload_plugin` | Reload one plugin's backend through Decky without restarting the loader |
 | `cef_targets` | List Steam CEF DevTools tabs on `localhost:8080` |
 | `cef_evaluate` | Run JS in a Steam tab (default `SharedJSContext`, where `window.DeckyPluginLoader` lives) |
 | `cef_screenshot` | PNG screenshot of a Steam tab via `Page.captureScreenshot` |
@@ -45,6 +47,18 @@ gamescope only pushes a frame when it repaints, so the plugin nudges it with
 `gamescopectl debug_force_repaint` when a stream starts, and `pipewiresrc keepalive-time=100`
 re-emits the last frame so static screens still stream. Frame rate, JPEG quality and output width
 are settings (`stream_fps`, `stream_quality`, `stream_width`); lower the width or quality on Wi-Fi.
+
+## REST endpoints
+
+Besides `/mcp` the server has plain HTTP routes for scripts and editor integrations; see
+[docs/api.md](docs/api.md) for the full list. The most useful ones:
+
+```sh
+curl -H "Authorization: Bearer $TOKEN" -F file=@my-plugin.zip "http://<deck-ip>:8765/plugins/install?restart=loader"
+curl -N -H "Authorization: Bearer $TOKEN" "http://<deck-ip>:8765/logs/stream?plugin=my-plugin"   # SSE
+curl -H "Authorization: Bearer $TOKEN" "http://<deck-ip>:8765/logs/tail?source=loader&tail=50"
+curl "http://<deck-ip>:8765/pair"   # token JSON, only during the panel's 120 s pairing window
+```
 
 ## How it works
 

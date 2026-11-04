@@ -68,10 +68,11 @@ def error_result(text: str) -> dict[str, Any]:
 
 
 def build_registry(capturer: ScreenCapturer | None = None) -> ToolRegistry:
-    from . import cef, screen, system
+    from . import cef, plugins, screen, system
 
     reg = ToolRegistry()
     system.register(reg)
+    plugins.register(reg)
     cef.register(reg)
     screen.register(reg, capturer)
     return reg

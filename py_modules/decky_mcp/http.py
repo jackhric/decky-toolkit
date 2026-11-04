@@ -2,23 +2,34 @@
 import asyncio
 import logging
 import os
+import tempfile
 from typing import Awaitable, Callable
 
 from aiohttp import web
 
+from . import cdp, logs
 from .auth import TokenAuth
 from .capture import BOUNDARY, CaptureUnavailable, ScreenCapturer
 from .protocol import SERVER_INFO, McpServer
+from .tools import plugins
+from .tools.system import list_plugins, schedule_loader_restart
 
 API_VERSION = 1
+LOG_KEEPALIVE_SECONDS = 15.0
 
 PairingOpen = Callable[[], bool]
 OnPaired = Callable[[str], Awaitable[None]]
+BaseUrl = Callable[[], str]
+
+
+def _error(status: int, message: str) -> web.Response:
+    return web.json_response({"error": message}, status=status)
 
 
 class Api:
     def __init__(self, *, auth: TokenAuth, mcp: McpServer, capturer: ScreenCapturer | None, static_dir: str | None,
-                 logger: logging.Logger, pairing_open: PairingOpen | None = None, on_paired: OnPaired | None = None):
+                 logger: logging.Logger, pairing_open: PairingOpen | None = None, on_paired: OnPaired | None = None,
+                 base_url: BaseUrl | None = None, log_keepalive: float = LOG_KEEPALIVE_SECONDS):
         self.auth = auth
         self.mcp = mcp
         self.capturer = capturer
@@ -26,16 +37,25 @@ class Api:
         self.log = logger
         self.pairing_open = pairing_open or (lambda: False)
         self.on_paired = on_paired
+        self.base_url = base_url
+        self.log_keepalive = log_keepalive
 
     def build_app(self) -> web.Application:
         app = web.Application(client_max_size=64 * 1024 * 1024, middlewares=[self.auth.middleware()])
         app.add_routes([
             web.get("/", self.handle_root),
             web.get("/health", self.handle_health),
+            web.get("/pair", self.handle_pair),
             web.get("/viewer", self.handle_viewer),
             web.get("/stream.mjpeg", self.handle_stream),
             web.get("/frame.jpg", self.handle_frame),
             web.get("/stream/stats", self.handle_stream_stats),
+            web.get("/plugins", self.handle_plugins),
+            web.post("/plugins/install", self.handle_plugin_install),
+            web.post("/plugins/{dir}/reload", self.handle_plugin_reload),
+            web.post("/loader/restart", self.handle_loader_restart),
+            web.get("/logs/tail", self.handle_logs_tail),
+            web.get("/logs/stream", self.handle_logs_stream),
             *self.mcp.routes(),
         ])
         return app
@@ -47,6 +67,21 @@ class Api:
 
     async def handle_health(self, _request: web.Request) -> web.Response:
         return web.json_response({"ok": True, **SERVER_INFO, "api_version": API_VERSION, "tools": len(self.mcp.tools)})
+
+    async def handle_pair(self, request: web.Request) -> web.Response:
+        # Exempt from the auth middleware, so apply its Origin guard here: otherwise any web page a
+        # LAN browser has open during the window could fetch the token.
+        origin = request.headers.get("Origin")
+        if origin and not self.auth.origin_allowed(origin, request.host):
+            return _error(403, "origin not allowed")
+        if not self.pairing_open():
+            return _error(403, "pairing closed")
+        self.log.info("pairing: granted token to %s", request.remote)
+        if self.on_paired:
+            await self.on_paired(request.remote or "?")
+        url = self.base_url() if self.base_url else f"{request.scheme}://{request.host}"
+        return web.json_response({"token": self.auth.token, "url": url, "api_version": API_VERSION},
+                                 headers={"Cache-Control": "no-store"})
 
     # ---- viewer ----
 
@@ -110,3 +145,139 @@ class Api:
         if self.capturer is None:
             return web.json_response({"available": False, "error": "capture not available"})
         return web.json_response(self.capturer.stats())
+
+    # ---- plugins ----
+
+    def _require_bearer(self, request: web.Request) -> web.Response | None:
+        # State-changing routes refuse the viewer cookie so a browser can never be steered into them.
+        if self.auth.has_bearer(request):
+            return None
+        return web.Response(status=401, text="Bearer token required", headers={"WWW-Authenticate": 'Bearer realm="decky-mcp"'})
+
+    async def handle_plugins(self, _request: web.Request) -> web.Response:
+        return web.json_response(await list_plugins())
+
+    async def handle_plugin_install(self, request: web.Request) -> web.Response:
+        if denied := self._require_bearer(request):
+            return denied
+        restart = request.query.get("restart", "loader")
+        if restart not in plugins.RESTART_MODES:
+            return _error(400, f"restart must be one of {', '.join(plugins.RESTART_MODES)}")
+        if not request.content_type.startswith("multipart/"):
+            return _error(400, "expected multipart/form-data with a 'file' field")
+        reader = await request.multipart()
+        with tempfile.NamedTemporaryFile(prefix="decky-mcp-upload-", suffix=".zip") as tmp:
+            found = False
+            while (part := await reader.next()) is not None:
+                if getattr(part, "name", None) != "file":
+                    continue
+                while chunk := await part.read_chunk(256 * 1024):
+                    tmp.write(chunk)
+                found = True
+                break
+            if not found:
+                return _error(400, "missing multipart field 'file'")
+            tmp.flush()
+            try:
+                result = await plugins.install(tmp.name, restart, self.log)
+            except (ValueError, FileNotFoundError) as e:
+                return _error(400, str(e))
+            except cdp.CdpError as e:
+                return _error(502, f"installed, but plugin reload failed: {e}")
+        return web.json_response(result)
+
+    async def handle_plugin_reload(self, request: web.Request) -> web.Response:
+        if denied := self._require_bearer(request):
+            return denied
+        try:
+            return web.json_response(await plugins.reload_plugin(request.match_info["dir"]))
+        except ValueError as e:
+            return _error(400, str(e))
+        except FileNotFoundError as e:
+            return _error(404, str(e))
+        except cdp.CdpError as e:
+            return _error(502, str(e))
+
+    async def handle_loader_restart(self, request: web.Request) -> web.Response:
+        if denied := self._require_bearer(request):
+            return denied
+        await schedule_loader_restart()
+        return web.json_response({"restarting": True, "delay_s": 1})
+
+    # ---- logs ----
+
+    @staticmethod
+    def _log_query(request: web.Request) -> tuple[str, str | None, int]:
+        plugin = request.query.get("plugin") or None
+        source = request.query.get("source") or ("plugin" if plugin else "loader")
+        if source not in logs.SOURCES:
+            raise ValueError(f"source must be one of {', '.join(logs.SOURCES)}")
+        if source == "plugin":
+            logs.plugin_log_dir(plugin or "")
+        try:
+            n = int(request.query.get("tail", logs.DEFAULT_TAIL))
+        except ValueError:
+            raise ValueError("tail must be an integer") from None
+        return source, plugin, max(0, min(n, logs.MAX_TAIL))
+
+    async def handle_logs_tail(self, request: web.Request) -> web.Response:
+        try:
+            source, plugin, n = self._log_query(request)
+            lines = await logs.tail_lines(source, plugin, n)
+        except ValueError as e:
+            return _error(400, str(e))
+        except FileNotFoundError as e:
+            return _error(404, str(e))
+        except RuntimeError as e:
+            return _error(500, str(e))
+        return web.json_response({"lines": lines})
+
+    async def handle_logs_stream(self, request: web.Request) -> web.StreamResponse:
+        try:
+            source, plugin, n = self._log_query(request)
+        except ValueError as e:
+            return _error(400, str(e))
+        if source == "plugin" and not os.path.isdir(logs.plugin_log_dir(plugin or "")):
+            return _error(404, f"no log dir {logs.plugin_log_dir(plugin or '')}")
+        res = web.StreamResponse(headers={
+            "Content-Type": "text/event-stream; charset=utf-8",
+            "Cache-Control": "no-store",
+            "X-Accel-Buffering": "no",
+        })
+        await res.prepare(request)
+        lines = logs.follow(source, plugin, n)
+        pending: asyncio.Future[str] | None = None
+        loop = asyncio.get_running_loop()
+        last_write = loop.time()
+        try:
+            while True:
+                # Keep one __anext__ in flight across keepalive ticks: cancelling it on a timeout
+                # would throw into the generator and kill the journalctl follower.
+                if pending is None:
+                    pending = asyncio.ensure_future(anext(lines))
+                done, _ = await asyncio.wait({pending}, timeout=min(1.0, self.log_keepalive))
+                if not done:
+                    # aiohttp does not cancel handlers on disconnect, so poll the transport to stop
+                    # the follower promptly instead of on the next failed keepalive write.
+                    if request.transport is None or request.transport.is_closing():
+                        break
+                    if loop.time() - last_write >= self.log_keepalive:
+                        await res.write(b": keepalive\n\n")
+                        last_write = loop.time()
+                    continue
+                try:
+                    line = pending.result()
+                except StopAsyncIteration:
+                    break
+                finally:
+                    pending = None
+                await res.write(f"data: {line}\n\n".encode())
+                last_write = loop.time()
+        except (ConnectionResetError, asyncio.CancelledError):
+            pass
+        finally:
+            if pending is not None:
+                pending.cancel()
+                await asyncio.gather(pending, return_exceptions=True)
+            await lines.aclose()
+        return res

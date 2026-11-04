@@ -7,8 +7,10 @@ See README.md for the tool list and architecture.
 
 ## Layout
 - `main.py` — Decky `Plugin` class: settings, aiohttp server lifecycle, frontend-callable methods.
-- `py_modules/decky_mcp/` — `protocol.py` (JSON-RPC + HTTP transport), `tools.py` (tool registry
-  and tools), `cdp.py` (Chrome DevTools client for Steam CEF on 127.0.0.1:8080), `settings.py`.
+- `py_modules/decky_mcp/` — `protocol.py` (JSON-RPC + HTTP transport), `http.py` (REST routes, see
+  `docs/api.md`), `auth.py`, `tools/` (tool registry and tools), `install.py` (plugin zip
+  validation + atomic install), `logs.py` (journal / plugin log tail and follow), `cdp.py` (Chrome
+  DevTools client for Steam CEF on 127.0.0.1:8080), `settings.py`.
 - `src/index.tsx` — Quick Access panel (React, `@decky/ui`, `@decky/api`). Built by `pnpm run build`
   into `dist/index.js`.
 - `scripts/deploy.sh`, `scripts/smoke.sh`, `scripts/logs.sh` — read `deploy.env` (gitignored).
@@ -40,8 +42,13 @@ See README.md for the tool list and architecture.
   `_loader_watchdog` thread tracks the grandparent loader PID (plus start time) and `os._exit`s.
 - The loader's file watcher loads a plugin whose files change even while shutting down, so
   `scripts/deploy.sh` stops the loader before syncing.
-- Subprocesses inherit the PyInstaller `LD_LIBRARY_PATH`; `tools._run` strips it.
-- `"debug"` in `plugin.json` flags enables hot reload on `dist/index.js`/`main.py` changes.
+- Subprocesses inherit the PyInstaller `LD_LIBRARY_PATH`; `tools.system.clean_env` strips it.
+- `"debug"` in `plugin.json` flags enables hot reload on `dist/index.js`/`main.py` changes. An
+  install through `/plugins/install` swaps the whole dir, so for a debug-flagged plugin the watcher
+  reloads its backend ~5 s later (twice, observed 2026-11-03) even with `restart=none`.
+- `window.DeckyBackend.call('loader/reload_plugin', '<plugin.json name>')` in SharedJSContext
+  reloads one backend in ~0.1 s (verified 2026-11-03); this is how `reload_plugin` avoids the
+  single-client loader websocket.
 
 ## Screen streaming facts (verified 2026-11-03)
 - gamescope publishes a PipeWire `Video/Source` node named `gamescope` (BGRx/NV12 1920x1080) that

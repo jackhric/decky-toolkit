@@ -14,15 +14,18 @@ def _env(name: str, default: str = "") -> str:
     return os.environ.get(name, default)
 
 
-def _plugins_dir() -> str:
+def plugins_dir() -> str:
     return os.path.join(_env("DECKY_HOME"), "plugins")
 
 
-async def run(*argv: str, timeout: float = 20) -> tuple[int, str]:
+def clean_env() -> dict[str, str]:
     # The PyInstaller-launched loader exports LD_LIBRARY_PATH pointing at its own libs, which breaks
     # system binaries (notably /usr/bin/python3) on Bazzite. Strip it like the loader's own run() does.
-    env = {k: v for k, v in os.environ.items() if k != "LD_LIBRARY_PATH"}
-    proc = await asyncio.create_subprocess_exec(*argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, env=env)
+    return {k: v for k, v in os.environ.items() if k != "LD_LIBRARY_PATH"}
+
+
+async def run(*argv: str, timeout: float = 20) -> tuple[int, str]:
+    proc = await asyncio.create_subprocess_exec(*argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, env=clean_env())
     try:
         out, _ = await asyncio.wait_for(proc.communicate(), timeout)
     except asyncio.TimeoutError:
@@ -45,9 +48,18 @@ def tail(path: str, lines: int) -> str:
     return b"\n".join(data.splitlines()[-lines:]).decode(errors="replace")
 
 
+async def schedule_loader_restart() -> None:
+    # A transient systemd timer restarts the loader from outside our process tree 1s later, so the
+    # caller's reply gets out before the loader kills this backend.
+    code, out = await run("systemd-run", "--on-active=1", "--timer-property=AccuracySec=100ms",
+                          "systemctl", "restart", "plugin_loader")
+    if code != 0:
+        raise RuntimeError(out)
+
+
 async def list_plugins() -> list[dict[str, Any]]:
     out = []
-    root = _plugins_dir()
+    root = plugins_dir()
     for entry in sorted(os.listdir(root)) if os.path.isdir(root) else []:
         path = os.path.join(root, entry)
         if not os.path.isdir(path):
@@ -140,10 +152,7 @@ def register(reg: ToolRegistry) -> None:
         "The restart is scheduled 1s out so this call can return first; reconnect afterwards.",
     )
     async def restart_loader() -> str:
-        code, out = await run("systemd-run", "--on-active=1", "--timer-property=AccuracySec=100ms",
-                              "systemctl", "restart", "plugin_loader")
-        if code != 0:
-            raise RuntimeError(out)
+        await schedule_loader_restart()
         return "plugin_loader restart scheduled in ~1s. The MCP server will drop and come back on the same port."
 
     @reg.add(
