@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.4](https://github.com/jackhric/decky-toolkit/compare/extension-v0.6.3...extension-v0.6.4) (2026-11-04)
+
+
+### Bug Fixes
+
+* **extension:** shorten the listing summary ([#21](https://github.com/jackhric/decky-toolkit/issues/21)) ([fbd88e3](https://github.com/jackhric/decky-toolkit/commit/fbd88e3712b48a72856d31ad7ed855db957cc1f3))
+
 ## [0.6.3](https://github.com/jackhric/decky-toolkit/compare/extension-v0.6.2...extension-v0.6.3) (2026-11-04)
 
 
