@@ -18,6 +18,8 @@ See README.md for setup and docs/reference.md for the tool list and architecture
 - `src/index.tsx` — Quick Access panel (React, `@decky/ui`, `@decky/api`). Built by `pnpm run build`
   into `dist/index.js`.
 - `scripts/deploy.sh`, `scripts/smoke.sh`, `scripts/logs.sh` — read `deploy.env` (gitignored).
+- `scripts/install-gif/record.sh` — re-records `docs/images/install/vscode-install.gif` (official VS Code under
+  Xvfb driven by Playwright, installing the published extension); needs node, xvfb-run, ffmpeg.
 
 ## Runtime facts (verified on the target device, 2026-11-03)
 - Device: Bazzite `bazzite-deck-44.20261012`, host `bazzite`, IP 10.0.70.18, user `jackh`
