@@ -79,6 +79,17 @@ within a fraction of a second without dropping the connection. Sound is on by de
 (multipart MJPEG), `/frame.jpg` (one current frame), `/stream/stats` (JSON), `/stream/settings`
 (`GET`/`PUT` JSON) and `/audio` (PCM over WebSocket).
 
+The **🎮 Controllers** button lists every controller on the device as Steam Input sees it
+(`physical · Steam Input: steamdeck (slot 0)`, `virtual · not seen by Steam Input`, …). Type a
+name (or leave the field empty for `Virtual pad N`) and click **Add virtual** to create a virtual
+Xbox 360 pad; virtual pads have a **Remove** button. The list updates live while the popover is
+open (`/controllers/events`). If the device refuses a pad (all 4 slots used, or Steam Input did not
+pick it up) its message is shown as it is. Next to *🎮 connected* a **Forward to** select picks
+which pad your local gamepad drives: **Auto** (the pad the device creates on its own) or one of the
+virtual pads. The button and the select are hidden on a device whose plugin predates controller
+management. Steam UI navigation is not in the viewer; it is a development action, available in the
+VS Code extension and over `POST /ui/navigate`.
+
 Stream settings are device-wide; the last change wins. There is one capture pipeline, and every
 viewer, MCP tool call and editor panel shares it, so changing the frame rate in one browser changes
 it for everybody.
