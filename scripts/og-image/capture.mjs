@@ -4,7 +4,7 @@ import path from 'node:path';
 const require = createRequire(path.join(process.env.OG_CACHE, 'pw', 'package.json'));
 const { chromium } = require('playwright-core');
 
-const browser = await chromium.launch();
+const browser = await chromium.launch(process.env.OG_CHROME ? { executablePath: process.env.OG_CHROME } : {});
 const page = await browser.newPage({ viewport: { width: 1200, height: 630 }, deviceScaleFactor: 1, colorScheme: 'dark' });
 await page.goto(process.env.OG_URL, { waitUntil: 'networkidle' });
 await page.addStyleTag({ content: '.top { visibility: hidden !important; }' });
