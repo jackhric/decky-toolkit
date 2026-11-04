@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.3](https://github.com/jackhric/decky-toolkit/compare/extension-v0.6.2...extension-v0.6.3) (2026-11-04)
+
+
+### Bug Fixes
+
+* **extension:** don't preconfigure a device for new users ([#13](https://github.com/jackhric/decky-toolkit/issues/13)) ([1a66d91](https://github.com/jackhric/decky-toolkit/commit/1a66d9157a7266f69eea9addef9022e1fb689bfe))
+
 ## [0.6.2](https://github.com/jackhric/decky-toolkit/compare/extension-v0.6.1...extension-v0.6.2) (2026-11-04)
 
 
