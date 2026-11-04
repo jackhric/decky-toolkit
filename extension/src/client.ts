@@ -1,5 +1,6 @@
 import type {
   Health,
+  InputSettings,
   InstallResult,
   JsonRpcResponse,
   LogQuery,
@@ -136,6 +137,20 @@ export class DeckyClient {
 
   streamStats(): Promise<StreamStats> {
     return this.json<StreamStats>('/stream/stats', { timeoutMs: 5000 });
+  }
+
+  /** Throws HttpError(404) on devices without remote input support. */
+  getInputSettings(): Promise<InputSettings> {
+    return this.json<InputSettings>('/input/settings', { timeoutMs: 5000 });
+  }
+
+  setInputEnabled(enabled: boolean): Promise<InputSettings> {
+    return this.json<InputSettings>('/input/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+      timeoutMs: 10000,
+    });
   }
 
   async frame(): Promise<Uint8Array> {

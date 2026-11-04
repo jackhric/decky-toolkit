@@ -156,7 +156,7 @@ await check('screen panel fps readout matches the device', async () => {
     if (!els.has(id)) {
       const classes = new Set();
       const e = {
-        textContent: '', hidden: false, onclick: null, onload: null,
+        textContent: '', hidden: false, onclick: null, onload: null, addEventListener() {},
         classList: { add: c => classes.add(c), remove: c => classes.delete(c), toggle: (c, on) => ((on ?? !classes.has(c)) ? classes.add(c) : classes.delete(c), classes.has(c)) },
       };
       Object.defineProperty(e, 'src', { set(v) { this._src = v; queueMicrotask(() => this.onload?.()); }, get() { return this._src; } });
@@ -180,6 +180,28 @@ await check('screen panel fps readout matches the device', async () => {
   const diff = Math.abs(shown - ref) / ref;
   if (!(diff <= 0.1)) throw new Error(`page shows ${shown} fps, device reports ${s.fps} (cap ${s.settings?.fps}); ${frames} frames in 6 s`);
   return `page shows ${shown} fps after 3 extra "visible" messages, device reports ${s.fps} fps (cap ${s.settings?.fps}), ${frames} frames in 6 s (${(frames / 6).toFixed(1)}/s)`;
+});
+
+// Reads the device's input flag but never changes it: input must stay off on the shared device.
+await check('/input WebSocket through the proxy upgrades and is closed with 4003 while input is off', async () => {
+  const st = await new DeckyClient({ host, port }, token).getInputSettings();
+  if (st.enabled) throw new Error('input is enabled on the device; this check needs it off and does not change it');
+  const wsUrl = base.replace(/^http/, 'ws') + '/input';
+  const outcome = url => new Promise(resolve => {
+    const ws = new WebSocket(url);
+    let opened = false;
+    const t = setTimeout(() => { ws.close(); resolve({ timeout: true, opened }); }, 10000);
+    ws.onopen = () => { opened = true; };
+    // Node's WebSocket fires only `error`, no `close`, when the handshake is refused.
+    ws.onerror = () => { if (!opened) { clearTimeout(t); resolve({ refused: true, opened }); } };
+    ws.onclose = e => { clearTimeout(t); resolve({ code: e.code, reason: e.reason, opened }); };
+  });
+  const r = await outcome(wsUrl);
+  if (r.code !== 4003) throw new Error(`expected close 4003, got ${JSON.stringify(r)}`);
+  const bad = await outcome(wsUrl.replace(new URL(base).pathname, ''));
+  if (!bad.refused) throw new Error(`socket without the secret prefix was not refused: ${JSON.stringify(bad)}`);
+  return `GET /input/settings enabled=false backend=${st.backend} available=${st.available}; ws ${r.opened ? 'opened (101)' : 'not opened'}, ` +
+    `closed ${r.code} "${r.reason}"; without the prefix the handshake is refused`;
 });
 
 await check('MCP tools/list via client', async () => {

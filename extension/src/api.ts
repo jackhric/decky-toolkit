@@ -28,6 +28,13 @@ export interface StreamStats {
   error: string | null;
 }
 
+export interface InputSettings {
+  enabled: boolean;
+  backend: 'ei' | 'uinput' | null;
+  available: boolean;
+  reason: string | null;
+}
+
 export type RestartMode = 'loader' | 'plugin' | 'none';
 
 export interface InstallResult {

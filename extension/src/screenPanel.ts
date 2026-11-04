@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
-import { Connection, ConnectionState, externalProxyBase } from './connection';
+import { describeError } from './client';
+import { Connection, ConnectionState, InputState, externalProxyBase } from './connection';
+import { INPUT_UNSUPPORTED, inputBackendLabel, inputOn, toggleInput } from './input';
 
 export class StatusBar implements vscode.Disposable {
   private readonly item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
@@ -21,8 +23,10 @@ export class StatusBar implements vscode.Disposable {
       return;
     }
     const down = this.conn.health.kind === 'unreachable';
-    this.item.text = `$(${down ? 'warning' : 'vm-connect'}) ${d.name}${down ? ' (unreachable)' : ''}`;
-    this.item.tooltip = `Decky: connected to ${d.name} (${d.host}:${d.port})${down ? `, not answering: ${(this.conn.health as { error: string }).error}` : ''}. Click for devices`;
+    const input = inputOn(this.conn.input);
+    this.item.text = `$(${down ? 'warning' : 'vm-connect'}) ${d.name}${down ? ' (unreachable)' : ''}${input ? ' $(keyboard)' : ''}`;
+    this.item.tooltip = `Decky: connected to ${d.name} (${d.host}:${d.port})${down ? `, not answering: ${(this.conn.health as { error: string }).error}` : ''}` +
+      `${input ? ', remote input on' : ''}. Click for devices`;
   }
 
   dispose(): void {
@@ -59,9 +63,29 @@ export class ScreenPanel {
     panel.webview.html = this.html(ctx, external);
     panel.onDidDispose(() => this.dispose(), null, this.disposables);
     panel.onDidChangeViewState(e => void panel.webview.postMessage({ type: 'visible', visible: e.webviewPanel.visible }), null, this.disposables);
-    panel.webview.onDidReceiveMessage(m => {
+    let sentInput: string | undefined;
+    const sendInput = (force = false) => {
+      const state = webviewInputState(conn.input);
+      const json = JSON.stringify(state);
+      if (!force && json === sentInput) return;
+      sentInput = json;
+      void panel.webview.postMessage({ type: 'input', state });
+    };
+    panel.webview.onDidReceiveMessage(async m => {
       if (m?.type === 'snapshot') void vscode.env.openExternal(vscode.Uri.parse(`${this.base}/frame.jpg?t=${Date.now()}`));
+      if (m?.type === 'ready') sendInput(true);
+      if (m?.type === 'ready' || m?.type === 'refreshInput') void conn.refreshInput();
+      // The webview never talks to /input/settings itself; the extension owns the device-wide flag.
+      if (m?.type === 'setInput') {
+        try {
+          await toggleInput(conn, !!m.enabled);
+        } catch (e) {
+          void vscode.window.showErrorMessage(`Decky-MCP: ${describeError(e)}`);
+        }
+        sendInput(true);
+      }
     }, null, this.disposables);
+    conn.onDidChange(() => sendInput(), null, this.disposables);
     conn.onDidChangeTarget(() => {
       panel.title = `Screen: ${conn.label}`;
       void panel.webview.postMessage({ type: 'reconnect' });
@@ -77,7 +101,7 @@ export class ScreenPanel {
     const csp = [
       "default-src 'none'",
       `img-src ${origin} blob:`,
-      `connect-src ${origin}`,
+      `connect-src ${origin} ${origin.replace(/^http/, 'ws')}`,
       `style-src ${webview.cspSource}`,
       `script-src 'nonce-${nonce}'`,
     ].join('; ');
@@ -99,11 +123,20 @@ export class ScreenPanel {
   <span class="stat">res <span id="res">–</span></span>
   <span class="stat">frames <span id="frames">0</span></span>
   <span class="spacer"></span>
+  <span class="input-ctl" id="input-ctl" hidden>
+    <span id="pad-ind" hidden>Gamepad connected</span>
+    <span id="inp-note"></span>
+    <span class="seg" id="mode" hidden>
+      <button id="mode-ui" class="on" title="Clicks and moves map onto the screen; click the picture to capture the keyboard">UI</button>
+      <button id="mode-game" title="Pointer lock: relative mouse for games (Esc releases)">Game</button>
+    </span>
+    <button id="inp" title="Remote keyboard, mouse and gamepad input (device-wide)">Input</button>
+  </span>
   <button id="pause">Pause</button>
   <button id="fit" class="on">Fit</button>
   <button id="snap">Snapshot</button>
 </header>
-<main id="main">
+<main id="main" tabindex="-1">
   <img id="img" alt="Device display">
   <div id="msg">Connecting…</div>
 </main>
@@ -116,4 +149,11 @@ export class ScreenPanel {
     ScreenPanel.current = undefined;
     this.disposables.forEach(d => d.dispose());
   }
+}
+
+/** What media/screen.js needs to draw the Input button; null until the first answer. */
+function webviewInputState(input: InputState | undefined) {
+  if (!input) return null;
+  if (input === 'unsupported') return { supported: false, enabled: false, available: false, backend: null, reason: INPUT_UNSUPPORTED };
+  return { supported: true, enabled: input.enabled, available: input.available, backend: inputBackendLabel(input.backend), reason: input.reason };
 }

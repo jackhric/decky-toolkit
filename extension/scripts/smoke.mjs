@@ -106,10 +106,13 @@ const vscode = {
     },
     createWebviewPanel: (viewType, title) => {
       const dispose = new EventEmitter();
+      const received = new EventEmitter();
+      const posted = [];
       const panel = {
         viewType, title, reveal() {}, dispose: () => dispose.fire(),
         onDidDispose: dispose.event, onDidChangeViewState: new EventEmitter().event,
-        webview: { html: '', cspSource: 'vscode-resource:', asWebviewUri: u => u, postMessage: async () => true, onDidReceiveMessage: new EventEmitter().event },
+        webview: { html: '', cspSource: 'vscode-resource:', asWebviewUri: u => u, postMessage: async m => { posted.push(m); return true; }, onDidReceiveMessage: received.event },
+        _received: received, _posted: posted,
       };
       calls.panels.push(panel);
       return panel;
@@ -200,7 +203,7 @@ let plugins = [
   { dir: 'decky-mcp', name: 'Decky-MCP', author: 'jackh', flags: ['root', 'debug'], api_version: 1, version: '0.1.0', has_backend: true },
   { dir: 'romm-tender', name: 'Tender', author: 'x', flags: [], api_version: 1, version: '0.33.0', has_backend: true },
 ];
-const device = { up: true, pairQueue: [], installs: [], journal: ['boot'], pluginLog: {}, installMeta: { name: 'My Plugin', version: '1.2.3' }, downFor: 0 };
+const device = { up: true, pairQueue: [], installs: [], journal: ['boot'], pluginLog: {}, installMeta: { name: 'My Plugin', version: '1.2.3' }, downFor: 0, inputSupported: true, input: { enabled: false, backend: 'ei', available: true, reason: null } };
 const frameJpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 0xff, 0xd9]);
 const fetched = [];
 globalThis.fetch = async (url, init = {}) => {
@@ -241,6 +244,10 @@ globalThis.fetch = async (url, init = {}) => {
     const dir = u.searchParams.get('plugin');
     if (!dir) return json({ lines: device.journal.slice(-Number(u.searchParams.get('tail') ?? 100)) });
     return device.pluginLog[dir] ? json({ lines: device.pluginLog[dir].slice(-5) }) : json({ error: 'no log dir' }, 404);
+  if (u.pathname === '/input/settings') {
+    if (!device.inputSupported) return new Response('404: Not Found', { status: 404 });
+    if (init.method === 'PUT') device.input = { ...device.input, enabled: JSON.parse(init.body).enabled };
+    return json(device.input);
   }
   if (u.pathname === '/frame.jpg') return new Response(frameJpeg, { headers: { 'content-type': 'image/jpeg' } });
   const reload = /^\/plugins\/([^/]+)\/reload$/.exec(u.pathname);
@@ -786,6 +793,59 @@ await check('Screen and MCP leaves: viewer, snapshot, MCP URL, token', async () 
   assert.equal(calls.clipboard.at(-1), 'fake-token');
   assert.match(lastMessage('warning').m, /secret/);
   return `opened ${calls.opened.at(-1)}; snapshot → ${dlg.defaultUri.path.split('/').pop()} (${w.data.length} B); token warning "${lastMessage('warning').m}"`;
+});
+
+await check('remote input: screen panel toggle, toggle command, status bar, unavailable / unsupported', async () => {
+  const panel = calls.panels[0];
+  const lastState = () => panel._posted.filter(m => m.type === 'input').at(-1)?.state;
+  assert.match(panel.webview.html, /connect-src http:\/\/127\.0\.0\.1:(\d+) ws:\/\/127\.0\.0\.1:\1;/);
+  assert.match(panel.webview.html, /<button id="inp"[^>]*>Input<\/button>/);
+  assert.match(panel.webview.html, /<span class="seg" id="mode" hidden>/);
+  assert.equal(pkg.contributes.commands.find(c => c.command === 'decky-mcp.toggleInput').title, 'Toggle remote input');
+  assert.ok(!(await actionsTree()).kids.Screen.some(c => /input/i.test(c.label)), 'no input leaf in the Actions view');
+
+  panel._posted.length = 0;
+  panel._received.fire({ type: 'ready' });
+  await settle();
+  assert.deepEqual(lastState(), { supported: true, enabled: false, available: true, backend: 'libei', reason: null });
+  assert.equal(status(), '$(vm-connect) 10.1.2.3');
+
+  // The panel's Input button goes through the extension, which answers with the new state.
+  fetched.length = 0;
+  panel._received.fire({ type: 'setInput', enabled: true });
+  await settle();
+  assert.deepEqual(fetched.filter(f => f === '/input/settings').length, 2, 'GET then PUT');
+  assert.equal(device.input.enabled, true);
+  assert.equal(lastState().enabled, true);
+  assert.equal(status(), '$(vm-connect) 10.1.2.3 $(keyboard)');
+  assert.match(calls.statusItems[0].tooltip, /remote input on/);
+  assert.match(calls.statusMessages.at(-1), /remote input on \(libei\)/);
+
+  await run('decky-mcp.toggleInput');
+  await settle();
+  assert.equal(device.input.enabled, false);
+  assert.equal(lastState().enabled, false, 'the panel follows a toggle from the palette');
+  assert.equal(status(), '$(vm-connect) 10.1.2.3');
+
+  device.input = { enabled: false, backend: null, available: false, reason: 'no libei socket and /dev/uinput is not writable' };
+  panel._received.fire({ type: 'setInput', enabled: true });
+  await settle();
+  assert.match(lastMessage('warning').m, /remote input is unavailable on 10\.1\.2\.3: no libei socket/);
+  assert.equal(device.input.enabled, false, 'nothing PUT while unavailable');
+  assert.deepEqual(lastState(), { supported: true, enabled: false, available: false, backend: '', reason: device.input.reason });
+
+  device.inputSupported = false;
+  await run('decky-mcp.toggleInput');
+  assert.match(lastMessage('warning').m, /not supported by this device version/);
+  await settle();
+  assert.deepEqual(lastState(), { supported: false, enabled: false, available: false, backend: null, reason: 'not supported by this device version' });
+
+  device.inputSupported = true;
+  device.input = { enabled: false, backend: 'ei', available: true, reason: null };
+  await run('decky-mcp.refresh');
+  await settle(100);
+  assert.equal(lastState().available, true);
+  return 'panel Input on → $(keyboard) in status bar → palette toggle off → unavailable warning → 404 → "not supported by this device version"';
 });
 
 await check('stats polling stops when the Actions view is hidden', async () => {

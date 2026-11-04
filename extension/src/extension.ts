@@ -9,6 +9,7 @@ import {
   addDevice, changeHost, copyViewerUrl, deviceActions, deviceFrom, editDevice, removeDevice, switchDevice, viewerUrl,
 } from './devices';
 import { DevicesTreeProvider } from './devicesTree';
+import { toggleInput } from './input';
 import { LogManager } from './logs';
 import { connect, enterToken, pair } from './pairing';
 import { PluginsTreeProvider } from './pluginsTree';
@@ -127,6 +128,7 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     if (d) await vscode.env.openExternal(vscode.Uri.parse(viewerUrl(d)));
   });
   command('decky-mcp.snapshot', () => snapshot(c));
+  command('decky-mcp.toggleInput', () => toggleInput(c));
   command('decky-mcp.deploy', () => deployer.deploy());
   command('decky-mcp.deployFull', () => deployer.deploy({ full: true }));
   command('decky-mcp.toggleAutoDeploy', async () => {
