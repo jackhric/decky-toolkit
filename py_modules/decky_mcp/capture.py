@@ -6,6 +6,7 @@ MCP tool calls). The pipeline only runs while someone is consuming frames.
 """
 import asyncio
 import collections
+import json
 import os
 import pwd
 import shutil
@@ -22,6 +23,15 @@ BOUNDARY = b"frame"
 KEEPALIVE_MS = 100
 # Bound how far videorate will backfill after a stall, so a long gap never becomes a frame burst.
 MAX_DUPLICATION_NS = 1_000_000_000
+# With keepalive a healthy pipeline never goes quiet, so silence means it is wedged: gamescope has one
+# stream shared by every consumer, and when Steam Game Recording joins or leaves it renegotiates and
+# may leave a focus appid behind that matches no window. A fresh connection recovers (see CLAUDE.md).
+STALL_SECONDS = 1.5
+FIRST_FRAME_SECONDS = 4.0
+RESTART_BACKOFF = (0.25, 1.0, 2.0, 5.0, 10.0)
+HEALTHY_SECONDS = 10.0
+FOCUS_CACHE_SECONDS = 5.0
+TICK_SECONDS = 5.0
 
 
 class CaptureUnavailable(RuntimeError):
@@ -52,6 +62,37 @@ def jpeg_size(data: bytes) -> tuple[int, int] | None:
     return None
 
 
+def parse_node_info(dump: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The gamescope node's negotiated format and its consumers, from `pw-dump` output.
+
+    gamescope's stream carries two custom format keys (src/pipewire.cpp): 0x70000 requested_size and
+    0x70001 focus_appid. A nonzero focus appid, which Steam Game Recording sets, makes gamescope paint
+    only that app's windows and never the Steam overlay into the stream.
+    """
+    objs = {o.get("id"): o for o in dump if isinstance(o, dict)}
+    node = next((o for o in objs.values()
+                 if (o.get("info") or {}).get("props", {}).get("node.name") == "gamescope"
+                 and o["info"]["props"].get("media.class") == "Video/Source"), None)
+    if node is None:
+        return None
+    fmt = ((node["info"].get("params") or {}).get("Format") or [{}])[0]
+    consumers = []
+    for o in objs.values():
+        i = o.get("info") or {}
+        if str(o.get("type", "")).endswith(":Link") and i.get("output-node-id") == node["id"]:
+            props = (objs.get(i.get("input-node-id")) or {}).get("info", {}).get("props", {})
+            consumers.append(props.get("node.name") or props.get("application.name") or str(i.get("input-node-id")))
+    size = fmt.get("size") or {}
+    return {
+        "node_id": node["id"],
+        "format": fmt.get("format"),
+        "width": size.get("width"),
+        "height": size.get("height"),
+        "focus_appid": fmt.get("id-00070001") or 0,
+        "consumers": sorted(consumers),
+    }
+
+
 class ScreenCapturer:
     def __init__(self, get_settings: Callable[[], Settings], logger, save_settings: Callable[[], None] | None = None) -> None:
         self._get_settings = get_settings
@@ -73,6 +114,11 @@ class ScreenCapturer:
         self.frames_total = 0
         self.started_at = 0.0
         self.last_error: str | None = None
+        self.auto_restarts = 0
+        self.last_restart_reason: str | None = None
+        self._backoff = 0
+        self._restart_task: asyncio.Task[None] | None = None
+        self._node_info: tuple[float, dict[str, Any] | None] = (0.0, None)
 
     # ---- availability ----
 
@@ -122,6 +168,12 @@ class ScreenCapturer:
         env.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin")
         return env
 
+    async def _spawn(self) -> asyncio.subprocess.Process:
+        return await asyncio.create_subprocess_exec(
+            *self._pipeline(), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=self._env(),
+            limit=1 << 20,
+        )
+
     async def start(self) -> None:
         async with self._lock:
             if self.running:
@@ -131,10 +183,7 @@ class ScreenCapturer:
                 self.last_error = reason
                 raise CaptureUnavailable(reason)
             self._stderr.clear()
-            self._proc = await asyncio.create_subprocess_exec(
-                *self._pipeline(), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=self._env(),
-                limit=1 << 20,
-            )
+            self._proc = await self._spawn()
             self.started_at = time.monotonic()
             self.frames_total = 0
             self.frame_times.clear()
@@ -143,6 +192,7 @@ class ScreenCapturer:
             self._reader_task = asyncio.create_task(self._read_loop(self._proc))
             asyncio.create_task(self._drain_stderr(self._proc))
             asyncio.create_task(self._seed(self._proc))
+            asyncio.create_task(self._watchdog(self._proc))
             self.log.info("screen capture started: %s", " ".join(self._pipeline()))
 
     async def stop(self) -> None:
@@ -235,6 +285,30 @@ class ScreenCapturer:
         except OSError:
             pass
 
+    async def _refresh_node_info(self) -> None:
+        info, proc = None, None
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "pw-dump", env=self._env(), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+            )
+            out, _ = await asyncio.wait_for(proc.communicate(), 3)
+            info = parse_node_info(json.loads(out))
+        except (OSError, ValueError, asyncio.TimeoutError):
+            if proc and proc.returncode is None:
+                proc.kill()
+                await proc.wait()
+        self._node_info = (time.monotonic(), info)
+
+    def node_info(self) -> dict[str, Any] | None:
+        at, info = self._node_info
+        if time.monotonic() - at > FOCUS_CACHE_SECONDS:
+            self._node_info = (time.monotonic(), info)  # one refresh in flight at a time
+            try:
+                asyncio.get_running_loop().create_task(self._refresh_node_info())
+            except RuntimeError:
+                pass
+        return info
+
     async def _drain_stderr(self, proc: asyncio.subprocess.Process) -> None:
         assert proc.stderr is not None
         async for raw in proc.stderr:
@@ -268,12 +342,59 @@ class ScreenCapturer:
         finally:
             if proc is self._proc:  # ended on its own rather than via stop()
                 self._proc = None
+                if self._subs:
+                    # Set before anything awaits so subscribers wait for the new pipeline instead of ending.
+                    self._restarting = True
                 if proc.returncode is None:
-                    proc.terminate()
+                    proc.send_signal(signal.SIGINT)
                 code = await proc.wait()
                 tail = "\n".join(list(self._stderr)[-5:])
                 self.last_error = f"capture pipeline exited (code {code}). {tail}".strip()
                 self.log.warning(self.last_error)
+                if self._subs:
+                    self._schedule_restart(f"pipeline exited (code {code})")
+
+    async def _watchdog(self, proc: asyncio.subprocess.Process) -> None:
+        while proc is self._proc and proc.returncode is None:
+            await asyncio.sleep(0.25)
+            if proc is not self._proc or not self._subs or self._restarting or self._restart_task:
+                continue
+            now = time.monotonic()
+            fps = max(1, int(getattr(self._get_settings(), "stream_fps", 30)))
+            if self.frames_total == 0:
+                silent, limit = now - self.started_at, FIRST_FRAME_SECONDS
+            else:
+                silent, limit = now - self.latest_at, max(STALL_SECONDS, 2.5 / fps)
+                if self._backoff and now - self.started_at > HEALTHY_SECONDS:
+                    self._backoff = 0
+            if silent > limit:
+                self._schedule_restart(f"no frames for {silent:.1f}s")
+                return
+
+    def _schedule_restart(self, reason: str) -> None:
+        if self._restart_task is None:
+            self._restarting = True
+            self._restart_task = asyncio.create_task(self._auto_restart(reason))
+
+    async def _auto_restart(self, reason: str) -> None:
+        delay = RESTART_BACKOFF[min(self._backoff, len(RESTART_BACKOFF) - 1)]
+        self._backoff += 1
+        self.auto_restarts += 1
+        self.last_restart_reason = reason
+        self._node_info = (0.0, None)
+        self.log.warning("capture %s; restarting in %.2fs (restart %d)", reason, delay, self.auto_restarts)
+        self._restarting = True
+        try:
+            # SIGINT stop as always; a wedged pipeline is not being painted into, so this is the safe moment.
+            await self.stop()
+            await asyncio.sleep(delay)
+            if self._subs:
+                await self.start()
+        except CaptureUnavailable as e:
+            self.log.warning("capture restart failed: %s", e)
+        finally:
+            self._restarting = False
+            self._restart_task = None
 
     def _publish(self, frame: bytes) -> None:
         now = time.monotonic()
@@ -292,7 +413,9 @@ class ScreenCapturer:
 
     # ---- consumers ----
 
-    async def subscribe(self) -> AsyncIterator[bytes]:
+    async def subscribe(self, tick: bool = False) -> AsyncIterator[bytes]:
+        """Yield frames. With tick, also yield b"" every 5 s without one, so an HTTP handler can notice
+        that its client went away while the stream is stalled (aiohttp only reports that on write)."""
         q: asyncio.Queue[bytes] = asyncio.Queue(maxsize=2)
         self._subs.add(q)
         if self._idle_task:
@@ -303,12 +426,16 @@ class ScreenCapturer:
             if self.latest is not None and time.monotonic() - self.latest_at < 1.0:
                 yield self.latest  # instant first frame for late joiners
             while True:
-                if not self.running and not self._restarting:
+                # _proc, not running: the exit status can land before the reader sees EOF and schedules the restart.
+                if self._proc is None and not self._restarting:
                     raise CaptureUnavailable(self.last_error or "capture pipeline is not running")
                 try:
-                    yield await asyncio.wait_for(q.get(), 5)
+                    frame = await asyncio.wait_for(q.get(), TICK_SECONDS)
                 except asyncio.TimeoutError:
+                    if tick:
+                        yield b""
                     continue
+                yield frame
         finally:
             self._subs.discard(q)
             if not self._subs:
@@ -349,6 +476,9 @@ class ScreenCapturer:
             "height": size[1] if size else None,
             "settings": self._get_settings().stream_settings(),
             "limits": STREAM_LIMITS,
+            "restarts": self.auto_restarts,
+            "last_restart_reason": self.last_restart_reason,
+            "node": self.node_info() if self.running else None,
             "audio": self.audio.stats() if self.audio is not None else None,
             "error": self.last_error,
         }

@@ -194,7 +194,11 @@ class Api:
         })
         await res.prepare(request)
         try:
-            async for frame in self.capturer.subscribe():
+            async for frame in self.capturer.subscribe(tick=True):
+                if not frame:
+                    if request.transport is None or request.transport.is_closing():
+                        break
+                    continue
                 await res.write(b"--" + BOUNDARY + b"\r\nContent-Type: image/jpeg\r\nContent-Length: "
                                 + str(len(frame)).encode() + b"\r\n\r\n" + frame + b"\r\n")
         except CaptureUnavailable as e:
