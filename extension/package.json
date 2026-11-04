@@ -49,34 +49,39 @@
         {
           "id": "decky-mcp.devices",
           "name": "Devices",
-          "icon": "media/decky.svg"
+          "icon": "media/decky.svg",
+          "initialSize": 2
         },
         {
           "id": "decky-mcp.actions",
           "name": "Actions",
           "icon": "media/decky.svg",
-          "when": "decky-mcp.connected"
+          "when": "decky-mcp.connected",
+          "initialSize": 6
         },
         {
           "id": "decky-mcp.plugins",
           "name": "Plugins",
           "icon": "media/decky.svg",
           "when": "decky-mcp.connected",
-          "visibility": "collapsed"
+          "visibility": "collapsed",
+          "initialSize": 2
         },
         {
           "id": "decky-mcp.controllers",
           "name": "Controllers",
           "icon": "media/decky.svg",
           "when": "decky-mcp.connected",
-          "visibility": "collapsed"
+          "visibility": "collapsed",
+          "initialSize": 2
         },
         {
           "type": "webview",
           "id": "decky-mcp.preview",
           "name": "Preview",
           "icon": "media/decky.svg",
-          "when": "decky-mcp.connected"
+          "when": "decky-mcp.connected",
+          "initialSize": 1
         }
       ]
     },
