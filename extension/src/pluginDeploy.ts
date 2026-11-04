@@ -314,7 +314,7 @@ export async function deployPlugin(client: DeckyClient, p: WorkspacePlugin, o: D
   } catch (e) {
     if (isMissingRoute(e)) {
       throw new Error('the Decky Toolkit plugin on the device has no POST /plugins/install yet. ' +
-        'Update it to a version with install support (deploy it once with scripts/deploy.sh).');
+        'Install the current plugin release on the device (Decky → Developer → Install Plugin from URL) and deploy again.');
     }
     throw e;
   }

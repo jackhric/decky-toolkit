@@ -38,7 +38,7 @@ jobs:
           version=$(node -p "require('./package.json').version")
           stage=$(mktemp -d)
           mkdir "$stage/decky-toolkit"
-          cp -r dist plugin.json package.json main.py LICENSE README.md defaults py_modules static "$stage/decky-toolkit/"
+          cp -r dist plugin.json package.json main.py LICENSE README.md py_modules static "$stage/decky-toolkit/"
           (cd "$stage" && zip -qrX "$GITHUB_WORKSPACE/decky-toolkit-$version.zip" decky-toolkit -x '*/__pycache__/*')
           echo "file=decky-toolkit-$version.zip" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

@@ -208,23 +208,24 @@ curl "http://<deck-ip>:8765/pair/request/<id>?wait=25"   # {status: "approved", 
 - `py_modules/decky_toolkit/cdp.py` is a tiny Chrome DevTools Protocol client used to talk to Steam's
   CEF debugger. The plugin deliberately does **not** connect to the loader's own websocket on port
   1337: the loader keeps a single client and would kick the Steam UI off.
-- `src/index.tsx` is the Quick Access panel: enable/disable, endpoint, token, restart, regenerate token.
+- `src/index.tsx` is the Quick Access panel. It only mirrors state: the endpoint, pairing requests to
+  approve or deny, the stream and input status, a server restart and token regeneration.
 
 The plugin runs with the `root` flag so it can restart the loader, read every plugin's logs and write
-anywhere. The `debug` flag makes the loader hot-reload the plugin when `dist/index.js` or `main.py`
-change (changes under `py_modules/` still need a loader restart).
+anywhere. The `debug` flag makes the loader hot-reload the plugin when its files change, which is how
+a fast deploy of a debug-flagged plugin takes effect without an explicit reload.
 
 ## Development
 
-Requirements on the dev machine: Node 18+, pnpm 9+, rsync, ssh key access to the device with
-passwordless sudo.
+Requirements on the dev machine: Node 18+, pnpm 9+, and for the Python tests
+[uv](https://docs.astral.sh/uv/). This repo is itself a plugin, so the extension deploys it like any
+other: open the repo in VS Code, pair with a device that has a released Decky Toolkit installed, and
+press Deploy. A fresh device gets the release from the install URL in the README first.
 
 ```sh
 pnpm install
-cp deploy.env.example deploy.env   # set DECK_HOST / DECK_USER
-pnpm run deploy                    # build, rsync, install, restart plugin_loader
-./scripts/smoke.sh                 # health, initialize, tools/list, two tool calls
-./scripts/logs.sh                  # follow the loader journal (add -a for everything)
+pnpm run build       # or pnpm run watch, with deploy-on-change in the extension
+./scripts/test.sh    # Python unit tests
 ```
 
 Connect Claude Code:
