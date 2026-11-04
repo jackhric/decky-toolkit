@@ -31,9 +31,6 @@ const tiles = [...tileSet(0), ...tileSet(5), ...tileSet(9), ...tileSet(3), ...ti
   <div class="shade"></div>
 
   <header class="top">
-    <a class="brand" href={`${base}/`}>
-      <span>Decky Toolkit</span>
-    </a>
     <nav>
       <a href="#features">Features</a>
       <a href="#get-started">Get started</a>
@@ -135,9 +132,8 @@ const tiles = [...tileSet(0), ...tileSet(5), ...tileSet(9), ...tileSet(3), ...ti
 
   .top {
     position: relative; z-index: 3; width: 100%; max-width: 1160px; margin: 0 auto; padding: 18px 28px;
-    display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+    display: flex; align-items: center; justify-content: flex-end; gap: 16px; flex-wrap: wrap;
   }
-  .brand { display: flex; align-items: center; gap: 10px; color: var(--hero-text); text-decoration: none; font-weight: 700; }
   .top nav { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
   .top nav a { color: var(--hero-muted); text-decoration: none; font-weight: 500; }
   .top nav a:hover { color: var(--hero-text); }
