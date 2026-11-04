@@ -385,7 +385,7 @@ code --extensionDevelopmentPath="$PWD" /path/to/your/decky-plugin
 (`codium` works the same way.) Use `pnpm run watch` to rebuild on save, then run
 "Developer: Reload Window" in the development host.
 
-Install the packaged build with `code --install-extension decky-toolkit-0.5.0.vsix`.
+Install the packaged build with `code --install-extension decky-toolkit-<version>.vsix`.
 
 ### Smoke test (no device)
 
