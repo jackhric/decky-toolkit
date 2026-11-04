@@ -1,10 +1,11 @@
 """Tool registry and the result envelope shared by every MCP tool."""
 import json
+import logging
 import traceback
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
-from .. import cdp
+from .. import audit, cdp
 from ..capture import CaptureUnavailable, ScreenCapturer
 from ..input.service import InputDisabled, InputService, InputUnavailable
 
@@ -14,8 +15,8 @@ if TYPE_CHECKING:
 
 ToolFn = Callable[..., Awaitable[Any]]
 # Exceptions that are expected, user-facing failures: reported without a traceback.
-EXPECTED_ERRORS: tuple[type[BaseException], ...] = (ValueError, FileNotFoundError, cdp.CdpError, CaptureUnavailable,
-                                                     InputDisabled, InputUnavailable)
+EXPECTED_ERRORS: tuple[type[BaseException], ...] = (ValueError, FileNotFoundError, PermissionError, cdp.CdpError,
+                                                     CaptureUnavailable, InputDisabled, InputUnavailable)
 _CONTENT_TYPES = {"text", "image", "audio", "resource", "resource_link"}
 
 
@@ -30,6 +31,9 @@ class Tool:
 class ToolRegistry:
     def __init__(self) -> None:
         self._tools: dict[str, Tool] = {}
+        # McpServer points this at the plugin logger; audit lines go there.
+        self.log = logging.getLogger("decky_mcp.tools")
+        self.audited: set[str] = set(audit.AUDITED_TOOLS)
 
     def __len__(self) -> int:
         return len(self._tools)
@@ -50,6 +54,8 @@ class ToolRegistry:
         tool = self._tools.get(name)
         if tool is None:
             raise ValueError(f"Unknown tool: {name}")
+        if audit.is_audited(name, self.audited):
+            self.log.info(audit.tool_line(name, arguments, tool.input_schema.get("properties", {})))
         try:
             result = await tool.fn(**arguments)
         except TypeError as e:

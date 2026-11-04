@@ -8,7 +8,7 @@ from typing import Callable
 
 from aiohttp import web
 
-from . import cdp, logs
+from . import audit, cdp, logs
 from .audio import FORMAT as AUDIO_FORMAT, AudioCapturer, AudioDisabled, AudioUnavailable
 from .auth import TokenAuth
 from .capture import BOUNDARY, CaptureUnavailable, ScreenCapturer
@@ -53,7 +53,8 @@ class Api:
         self.ui = ui
 
     def build_app(self) -> web.Application:
-        app = web.Application(client_max_size=64 * 1024 * 1024, middlewares=[self.auth.middleware()])
+        app = web.Application(client_max_size=64 * 1024 * 1024,
+                              middlewares=[self.auth.middleware(), audit.middleware(self.log)])
         app.add_routes([
             web.get("/", self.handle_root),
             web.get("/health", self.handle_health),

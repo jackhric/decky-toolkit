@@ -1,0 +1,47 @@
+"""Who called what: the request origin of the current HTTP request and the audit log line format."""
+import contextvars
+import logging
+from typing import Any, Iterable
+
+from aiohttp import web
+
+# (remote ip, client kind: "mcp" for /mcp, "http" for the REST routes, "local" outside a request)
+request_origin: contextvars.ContextVar[tuple[str, str]] = contextvars.ContextVar("request_origin", default=("-", "local"))
+
+AUDITED_TOOLS = frozenset({
+    "cef_evaluate", "write_file", "install_plugin", "reload_plugin", "restart_loader", "call_plugin_method",
+    "set_input_enabled", "remove_virtual_controller", "ui_navigate",
+})
+AUDITED_PREFIXES = ("input_",)
+_UNAUDITED_ROUTES = ("/mcp", "/pair/request")
+
+
+def is_audited(tool: str, audited: Iterable[str] = AUDITED_TOOLS) -> bool:
+    return tool in audited or tool.startswith(AUDITED_PREFIXES)
+
+
+def tool_line(tool: str, arguments: dict[str, Any], known: Iterable[str]) -> str:
+    # Argument values can hold code, file contents or secrets: log names only, and only names the tool's
+    # schema declares, since a client chooses the keys too.
+    known = set(known)
+    keys = sorted(k for k in arguments if k in known)
+    unknown = len(arguments) - len(keys)
+    ip, kind = request_origin.get()
+    arg_text = ",".join(keys) or "-"
+    if unknown:
+        arg_text += f"+{unknown} unknown"
+    return f"audit tool={tool} origin={ip} via={kind} args={arg_text}"
+
+
+def middleware(logger: logging.Logger):
+    @web.middleware
+    async def audit_middleware(request: web.Request, handler):
+        kind = "mcp" if request.path == "/mcp" else "http"
+        token = request_origin.set((request.remote or "?", kind))
+        try:
+            if request.method in ("POST", "PUT", "DELETE") and not request.path.startswith(_UNAUDITED_ROUTES):
+                logger.info("audit route=%s %s origin=%s via=http", request.method, request.path, request.remote)
+            return await handler(request)
+        finally:
+            request_origin.reset(token)
+    return audit_middleware
