@@ -1,7 +1,7 @@
 # Decky-MCP HTTP API
 
-Base URL: `http://<deck-ip>:8765`. Everything except `/`, `/health`, `/pair` and the viewer's own
-token / pairing handling requires either `Authorization: Bearer <token>` or the `decky_mcp_token`
+Base URL: `http://<deck-ip>:8765`. Everything except `/`, `/health`, the pairing request routes
+(`/pair/request...`) and the viewer's own token handling requires either `Authorization: Bearer <token>` or the `decky_mcp_token`
 cookie; routes marked "bearer" refuse the cookie.
 Unauthorised requests get `401`; a request with an `Origin` header that does not point at this host
 or loopback gets `403`. `GET /health` reports `api_version`; clients compare it before using
@@ -28,7 +28,7 @@ Status key: **live** = implemented and deployed, **planned** = agreed design, no
 
 | Route | Auth | Status | Notes |
 | --- | --- | --- | --- |
-| `GET /viewer` | self | live | HTML viewer. `?token=<t>` sets the cookie and redirects. During a pairing window an unauthenticated request also gets the cookie. |
+| `GET /viewer` | self | live | HTML viewer. `?token=<t>` sets the cookie and redirects. Without a valid cookie: `401` with the "Request access" page (`static/pair.html`), which files a pairing request (`client_kind: "browser"`) and, once it is allowed on the device, gets the cookie through `?cookie=1`. |
 | `GET /stream.mjpeg` | bearer/cookie | live | `multipart/x-mixed-replace; boundary=frame`, JPEG parts with `Content-Length`. 30 fps default; see `/stream/settings`. A settings change keeps the connection open (about 0.1 s without frames, then the new rate/size). |
 | `GET /frame.jpg` | bearer/cookie | live | One current JPEG frame. `503` with a reason if capture is unavailable. |
 | `GET /stream/stats` | bearer/cookie | live | `{available, running, subscribers, fps, kbps, frames_total, uptime_s, width, height, settings{fps,quality,width}, limits, error}` |
@@ -47,7 +47,7 @@ on first use and removed 60 s after the last gamepad message.
 | --- | --- | --- | --- |
 | `GET /input/settings` | bearer/cookie | live | `{enabled, backend: "ei"\|"uinput"\|null, available, reason}`. `reason` explains `available: false`. `404` on servers without input support. |
 | `PUT /input/settings` | bearer/cookie | live | `{"enabled": true\|false}` (strict boolean; anything else or extra fields: `400`). Persists. Disabling releases every held key/button, removes the virtual devices and closes open `/input` sockets with `4003`. Same shape as `GET`. Cookie auth is accepted so the viewer can toggle it. |
-| `GET /input` | bearer/cookie | live | WebSocket. Closes with code `4003` (reason text) while input is disabled or the pairing window is open. On connect and whenever it changes the server sends `{"type":"state","enabled","backend","focus_size":[w,h]}`. Invalid messages get `{"type":"error","message"}`; the socket stays open. Any message with an `id` field is answered with `{"type":"ack","id"}` once injected. Everything the socket still holds (keys, mouse buttons, pad state) is released when it closes. The first input of a session from a new address logs it and emits `decky_mcp_input_session` (at most once per address per 60 s). Rate cap about 1000 events/s; releases are never dropped. |
+| `GET /input` | bearer/cookie | live | WebSocket. Closes with code `4003` (reason text) while input is disabled. On connect and whenever it changes the server sends `{"type":"state","enabled","backend","focus_size":[w,h]}`. Invalid messages get `{"type":"error","message"}`; the socket stays open. Any message with an `id` field is answered with `{"type":"ack","id"}` once injected. Everything the socket still holds (keys, mouse buttons, pad state) is released when it closes. The first input of a session from a new address logs it and emits `decky_mcp_input_session` (at most once per address per 60 s). Rate cap about 1000 events/s; releases are never dropped. |
 
 Client messages on `/input`:
 
@@ -69,9 +69,26 @@ the whole screen.
 
 ## Pairing
 
+A client asks for access, the device owner approves or denies it in the Decky panel (Quick Access →
+Decky-MCP: while a request is pending the panel shows only an "Approve pairing request?" prompt). There is no time limit: a request stays pending as long as its client
+keeps polling. Requests live in memory, so a plugin restart forgets them (polls then get `404` and
+the client files a new one).
+
 | Route | Auth | Status | Notes |
 | --- | --- | --- | --- |
-| `GET /pair` | none, only while pairing is open | live | Returns `{token, url, api_version}` (`url` is `http://<ip>:<port>`, no path) so a client (VS Code extension, CLI) can obtain the token during the 120 s window opened from the Decky panel. Outside the window: `403 {"error":"pairing closed"}`; a foreign `Origin` also gets `403`. Each grant increments the panel's pairing counter and emits the `decky_mcp_paired` event. |
+| `POST /pair/request` | none (Origin checked) | live | JSON `{client_name, client_kind}`. `client_name`: 1-64 characters (whitespace collapsed); `client_kind`: `vscode` \| `browser` \| `mcp` \| `other` (default `other`). `201 {id, code, poll_after_ms}`: `id` is a 128-bit secret only the requester knows, `code` 4 digits, unique among pending requests, shown on the device so the user can match it. A new request from the same address and `client_name` replaces that client's pending one. `429 {"error"}` with 10 pending requests in total or 2 from the address; `400` for bad input. Emits `decky_mcp_pair_request` (the device shows a toast). |
+| `GET /pair/request/{id}` | none (Origin checked) | live | `?wait=<s>` (0-25, default 0) long-polls until the request is decided, dropped or the wait ends. Pending/denied: `{status}`. Approved: `{status: "approved", token, url, api_version}` on the first poll that sees the approval (`url` is `http://<ip>:<port>`), `{status: "approved"}` afterwards. `?cookie=1` on an approved request sets the viewer cookie and redirects to `/viewer` (once; again: `410`). Unknown, cancelled, replaced or expired id: `404`. Every poll keeps the request alive. |
+| `DELETE /pair/request/{id}` | none (Origin checked) | live | Cancels a pending request: `{cancelled: true}`, else `404`. |
+| `GET /pair/requests` | bearer/cookie | live | Every request still held: `[{id, code, client_name, client_kind, remote, status, age_s}]`. |
+| `GET /pair` | — | removed | The timed pairing window is gone; answers `404` for everyone. |
+
+Expiry: a pending request that nobody polled for 60 s (and that has no poll waiting) is dropped; an
+approved or denied one is kept for 5 minutes after the decision so its client can collect the
+result. A prune runs every 10 s.
+
+The Decky panel uses the frontend methods `list_pair_requests`, `approve_pair_request(id)` and
+`deny_pair_request(id)` (each returns the list above). There is no HTTP or MCP route to approve a
+request: approval needs someone at the device.
 
 ## Plugins
 
@@ -106,7 +123,9 @@ an error while input is disabled.
 
 | Event | Payload | Meaning |
 | --- | --- | --- |
-| `decky_mcp_paired` | `remote_ip: string` | a client was granted access during pairing |
+| `decky_mcp_pair_request` | `{id, code, client_name, client_kind, remote}` | a client asked to pair; toast "<client_name> wants to pair · code <code>" |
+| `decky_mcp_pair_requests` | the `list_pair_requests` list | requests were filed, decided, cancelled or expired; the panel refreshes |
+| `decky_mcp_paired` | `remote_ip: string, client_name: string` | a pairing request was allowed on the device |
 | `decky_mcp_input_session` | `remote_ip: string` | a client started sending input (`"MCP client"` for tool calls); the panel shows a toast |
 
 ## Errors

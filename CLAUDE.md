@@ -109,14 +109,22 @@ See README.md for the tool list and architecture.
 - Hidden cursor rests at 1919,1079 in the Steam UI.
 
 ## Pairing
-`start_pairing` (frontend method) opens a 120 s window during which an unauthenticated `GET /viewer`
-sets the token cookie and redirects. `/mcp` always requires the bearer token; pairing never affects it.
-Backend-to-frontend event `decky_mcp_paired` carries the remote IP for the toast. To drive frontend
-methods from a test, evaluate `window.DeckyBackend.call('loader/call_plugin_method', 'Decky-MCP', '<method>')`
-in SharedJSContext via the `cef_evaluate` tool.
+A client files `POST /pair/request` and long-polls `GET /pair/request/{id}?wait=25`; the device owner
+approves or denies it in the panel, which shows only an "Approve pairing request?" prompt while one is
+pending (frontend methods `list_pair_requests`,
+`approve_pair_request`, `deny_pair_request`). No time limit. Requests live in memory
+(`py_modules/decky_mcp/pairing.py`): a pending one expires 60 s after its last poll, a decided one 5 min
+after the decision, and a plugin restart forgets them all, so clients re-request (new code) on a 404.
+The token goes out once per approval; the browser flow gets the cookie via `?cookie=1` instead.
+Approval is deliberately device-only (no HTTP/MCP route), the one exception to the remote-configurable
+rule below. `/mcp` always requires the bearer token. Events: `decky_mcp_pair_request` (toast with name
+and code), `decky_mcp_pair_requests` (list changed), `decky_mcp_paired` (remote IP, client name). To
+drive frontend methods from a test, evaluate
+`window.DeckyBackend.call('loader/call_plugin_method', 'Decky-MCP', '<method>', ...args)` in
+SharedJSContext via the `cef_evaluate` tool.
 
 ## Conventions
-- Every setting is configurable remotely: through an MCP tool, the HTTP API (for the extension) and
+- Every setting is configurable remotely (approving a pairing request is not a setting): through an MCP tool, the HTTP API (for the extension) and
   the web viewer where it applies. The Decky panel only mirrors state (it polls `get_status` and
   listens for change events); it never holds a setting that cannot be changed remotely.
 - Keep the MCP server dependency-free beyond the loader bundle (aiohttp + stdlib).

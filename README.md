@@ -32,13 +32,46 @@ protected by a bearer token shown in the plugin's Quick Access panel.
 | `input_gamepad` | Press buttons, move sticks and triggers on a virtual Xbox 360 pad, or run a sequence |
 | `read_file` / `write_file` | Read or write files on the device (runs as root) |
 
+## Pairing
+
+A client never needs the token typed in. It asks the device for access, and you allow it on the
+device itself. There is no time limit: a request waits as long as the client is waiting.
+
+From the VS Code extension (see [extension/README.md](extension/README.md#pairing)):
+
+1. Add the device and click it in the Decky **Devices** view.
+2. The editor shows *Waiting for approval on <device> · code 4821* (and the device row says
+   *waiting for approval · code 4821*).
+3. On the device a toast says *VS Code on <your-pc> wants to pair · code 4821*. Open Quick Access
+   (…) → Decky-MCP. While a request is pending the panel shows only *Approve pairing request?* with
+   *VS Code on <your-pc> (<your-ip>) · code 4821* and **Approve** / **Deny** side by side (several
+   requests come one at a time, "1 of 3"). Check the code and press **Approve**.
+4. The extension stores the token and connects. Deny shows *Pairing denied on <device>* with
+   **Try again**; Cancel in the editor withdraws the request.
+
+From a browser:
+
+1. Open `http://<deck-ip>:8765/viewer`. Without the cookie you get a **Request access** page with a
+   name field (prefilled with your browser and OS, e.g. *Firefox on Linux*).
+2. Press **Request access**. The page shows *Waiting for approval on the device · code 4821*.
+3. Approve it on the device as above. The page sets an HttpOnly cookie and opens the viewer. A denied
+   request says so and offers **Retry**.
+
+Alternatively open `/viewer?token=<token>` once (the token is in the Decky-MCP panel); the token
+moves into the same cookie. Other clients (scripts, CLI agents) use the same routes:
+`POST /pair/request`, then long-poll `GET /pair/request/{id}?wait=25` until it returns the token;
+see [docs/api.md](docs/api.md#pairing). Pending requests expire 60 s after their client stops
+polling, at most 10 can be pending (2 per address), and the toast and code let you spot a request
+you did not make.
+
+The normal panel is deliberately minimal: the device's IP address in large type ("port 8765"
+below it), which is all the extension's Add device needs, and one server status line. Everything
+else (server and remote input toggles, restart, regenerate token, viewer URL and token) is under
+**Advanced**.
+
 ## Live screen viewer
 
-Easiest way in: press **Pair a browser (120 s)** in the Decky-MCP panel, then open
-`http://<deck-ip>:8765/viewer` on any device on your network within two minutes. The server hands
-that browser an HttpOnly cookie, the panel counts paired devices and shows a toast with each one's
-IP, and the window closes after 120 s or when you press **Stop pairing**. Alternatively open
-`/viewer?token=<token>` once; the token moves into the same cookie. Either way the page shows the full display at 30 fps (1080p, roughly 50 Mbit/s at the default JPEG
+Open `http://<deck-ip>:8765/viewer` in a paired browser (see [Pairing](#pairing)). The page shows the full display at 30 fps (1080p, roughly 50 Mbit/s at the default JPEG
 quality 70) with fps, bitrate and resolution readouts, pause, fit/actual size, snapshot and
 fullscreen. The **⚙ Stream** button opens frame rate (15/24/30/60 fps), JPEG quality and size
 (native, 1600, 1280, 960, 640 px wide) controls; a change applies within a fraction of a second
@@ -93,7 +126,7 @@ Security notes for input:
 
 - Input is full control of the device: store purchases, Desktop Mode, a terminal. It needs the
   token (bearer or the viewer cookie) and passes the same `Origin` check as the other routes.
-- Input is off until you turn it on, and it is refused while the pairing window is open.
+- Input is off until you turn it on.
 - The Deck shows a toast "Remote input from <ip>" when a client starts sending input, and every
   input session is written to the plugin log.
 - Keys, mouse buttons and the gamepad are released when a client disconnects, when input is turned
@@ -108,7 +141,9 @@ Besides `/mcp` the server has plain HTTP routes for scripts and editor integrati
 curl -H "Authorization: Bearer $TOKEN" -F file=@my-plugin.zip "http://<deck-ip>:8765/plugins/install?restart=loader"
 curl -N -H "Authorization: Bearer $TOKEN" "http://<deck-ip>:8765/logs/stream?plugin=my-plugin"   # SSE
 curl -H "Authorization: Bearer $TOKEN" "http://<deck-ip>:8765/logs/tail?source=loader&tail=50"
-curl "http://<deck-ip>:8765/pair"   # token JSON, only during the panel's 120 s pairing window
+curl -X POST -H "Content-Type: application/json" -d '{"client_name":"my script","client_kind":"other"}' \
+  "http://<deck-ip>:8765/pair/request"                   # {id, code}; allow it on the device, then:
+curl "http://<deck-ip>:8765/pair/request/<id>?wait=25"   # {status: "approved", token, ...} once
 ```
 
 ## How it works
