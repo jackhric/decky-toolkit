@@ -1,7 +1,7 @@
 {
   "name": "decky-toolkit",
   "displayName": "Decky Toolkit",
-  "description": "Decky Loader plugin development for VS Code.",
+  "description": "Build, deploy and hot reload Decky Loader plugins on Steam Deck, SteamOS and Bazzite from VS Code.",
   "version": "0.6.4",
   "publisher": "jackhric",
   "icon": "media/icon.png",
@@ -18,10 +18,23 @@
   ],
   "keywords": [
     "decky",
+    "decky loader",
+    "decky plugin",
     "steam deck",
+    "steamdeck",
     "steamos",
     "bazzite",
-    "mcp"
+    "homebrew",
+    "plugin development",
+    "hot reload",
+    "deploy",
+    "cef",
+    "devtools",
+    "remote debugging",
+    "gamescope",
+    "quick access",
+    "mcp",
+    "claude code"
   ],
   "main": "./dist/extension.js",
   "activationEvents": [
