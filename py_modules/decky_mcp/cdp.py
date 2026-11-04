@@ -34,11 +34,18 @@ async def find_target(title: str | None = None) -> dict[str, Any]:
         for t in targets:
             if t.get("title") == name:
                 return t
+    # Popup tabs carry a per-user suffix (QuickAccess_uid2), so a bare prefix is enough.
+    if title:
+        for t in targets:
+            if str(t.get("title", "")).startswith(title):
+                return t
     raise CdpError(f"No CEF target titled {names!r}; available: {[t.get('title') for t in targets]}")
 
 
 class Tab:
-    """One short-lived DevTools websocket session. Use as an async context manager."""
+    """One short-lived DevTools websocket session. Use as an async context manager.
+
+    The only long-lived sessions are console.ConsoleCollector's (one per watched target)."""
 
     def __init__(self, target: dict[str, Any]):
         self.target = target
