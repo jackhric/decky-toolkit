@@ -1,4 +1,4 @@
-"""REST routes: /pair, /logs, /plugins. Run with: ./scripts/test.sh"""
+"""REST routes: /pair, /logs, /plugins, /stream/settings. Run with: ./scripts/test.sh"""
 import asyncio
 import io
 import json
@@ -16,9 +16,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 from aiohttp import ClientSession, ClientTimeout, FormData, web  # noqa: E402
 
 from decky_mcp.auth import TOKEN_COOKIE, TokenAuth  # noqa: E402
+from decky_mcp.capture import ScreenCapturer  # noqa: E402
 from decky_mcp.http import Api  # noqa: E402
 from decky_mcp.protocol import McpServer  # noqa: E402
-from decky_mcp.tools import ToolRegistry  # noqa: E402
+from decky_mcp.settings import Settings  # noqa: E402
+from decky_mcp.tools import ToolRegistry, build_registry  # noqa: E402
 
 TOKEN = "test-token"
 H = {"Authorization": f"Bearer {TOKEN}"}
@@ -37,13 +39,13 @@ class State:
     paired: list[str] = []
 
 
-async def with_server(fn, **api_kwargs):
+async def with_server(fn, capturer=None, **api_kwargs):
     State.paired = []
 
     async def on_paired(remote: str) -> None:
         State.paired.append(remote)
 
-    api = Api(auth=TokenAuth(TOKEN), mcp=McpServer(ToolRegistry(), LOG), capturer=None, static_dir=None, logger=LOG,
+    api = Api(auth=TokenAuth(TOKEN), mcp=McpServer(ToolRegistry(), LOG), capturer=capturer, static_dir=None, logger=LOG,
               pairing_open=lambda: State.pairing, on_paired=on_paired, base_url=lambda: "http://10.1.2.3:8765",
               **api_kwargs)
     runner = web.AppRunner(api.build_app())
@@ -186,3 +188,144 @@ def test_plugins_install_list_and_bearer_only(decky_home):
         async with s.post(f"{base}/plugins/missing/reload", headers=H) as r:
             assert r.status == 404
     asyncio.run(with_server(run))
+
+
+class FakeCapturer(ScreenCapturer):
+    def __init__(self, running: bool):
+        self.settings = Settings(token=TOKEN)
+        self.saved = 0
+        self.restarts = 0
+        self.fake_running = running
+        super().__init__(lambda: self.settings, LOG, save_settings=self._save)
+
+    def _save(self) -> None:
+        self.saved += 1
+
+    @property
+    def running(self) -> bool:
+        return self.fake_running
+
+    async def restart(self) -> None:
+        self.restarts += 1
+
+
+LIMITS = {"fps": [1, 60], "quality": [10, 100], "widths": [0, 1600, 1280, 960, 640]}
+
+
+def test_stream_settings_get_put_and_clamp():
+    cap = FakeCapturer(running=True)
+
+    async def run(s, base):
+        async with s.get(f"{base}/stream/settings") as r:
+            assert r.status == 401
+        async with s.get(f"{base}/stream/settings", headers=H) as r:
+            assert await r.json() == {"fps": 30, "quality": 70, "width": 0, "limits": LIMITS}
+        async with s.put(f"{base}/stream/settings", json={"fps": 60}, headers=H) as r:
+            assert r.status == 200 and (await r.json())["fps"] == 60
+        assert (cap.saved, cap.restarts) == (1, 1)
+        async with s.put(f"{base}/stream/settings", json={"fps": 500, "quality": 3, "width": -5}, headers=H) as r:
+            assert await r.json() == {"fps": 60, "quality": 10, "width": 0, "limits": LIMITS}
+        async with s.put(f"{base}/stream/settings", json={"fps": 0, "quality": "95", "width": 1280}, headers=H) as r:
+            assert await r.json() == {"fps": 1, "quality": 95, "width": 1280, "limits": LIMITS}
+        assert cap.settings.stream_settings() == {"fps": 1, "quality": 95, "width": 1280}
+        restarts = cap.restarts
+        async with s.put(f"{base}/stream/settings", json={"fps": 1}, headers=H) as r:
+            assert r.status == 200
+        assert cap.restarts == restarts, "unchanged settings must not restart the pipeline"
+        for bad in ({"fps": "fast"}, {"fps": True}, {"quality": None, "width": [1]}, {"bitrate": 5}, [1], "x"):
+            async with s.put(f"{base}/stream/settings", json=bad, headers=H) as r:
+                assert r.status == 400, bad
+        async with s.put(f"{base}/stream/settings", data=b"{nope", headers=H) as r:
+            assert r.status == 400
+        # A rejected field must not half-apply the valid ones next to it.
+        async with s.put(f"{base}/stream/settings", json={"fps": 24, "quality": "high"}, headers=H) as r:
+            assert r.status == 400
+        assert cap.settings.stream_fps == 1
+    asyncio.run(with_server(run, capturer=cap))
+
+
+def test_stream_settings_cookie_auth_and_origin():
+    cap = FakeCapturer(running=False)
+
+    async def run(s, base):
+        cookies = {TOKEN_COOKIE: TOKEN}
+        async with s.get(f"{base}/stream/settings", cookies=cookies) as r:
+            assert r.status == 200
+        async with s.put(f"{base}/stream/settings", json={"fps": 15}, cookies=cookies) as r:
+            assert r.status == 200 and (await r.json())["fps"] == 15
+        async with s.put(f"{base}/stream/settings", json={"fps": 20}, cookies=cookies,
+                         headers={"Origin": "http://evil.example"}) as r:
+            assert r.status == 403
+        assert cap.settings.stream_fps == 15
+    asyncio.run(with_server(run, capturer=cap))
+
+
+def test_stream_settings_restart_only_when_running():
+    idle = FakeCapturer(running=False)
+    assert asyncio.run(idle.update_settings(fps=60))["fps"] == 60
+    assert (idle.saved, idle.restarts) == (1, 0)
+    live = FakeCapturer(running=True)
+    asyncio.run(live.update_settings(width=640))
+    assert (live.saved, live.restarts) == (1, 1)
+
+
+def test_stream_settings_404_without_capturer():
+    async def run(s, base):
+        async with s.get(f"{base}/stream/settings", headers=H) as r:
+            assert r.status == 404
+        async with s.put(f"{base}/stream/settings", json={"fps": 60}, headers=H) as r:
+            assert r.status == 404
+    asyncio.run(with_server(run))
+
+
+def test_set_stream_settings_tool_and_status():
+    cap = FakeCapturer(running=True)
+    reg = build_registry(cap)
+    res = asyncio.run(reg.call("set_stream_settings", {"fps": 45, "quality": 80}))
+    assert not res["isError"]
+    assert json.loads(res["content"][0]["text"]) == {"fps": 45, "quality": 80, "width": 0, "limits": LIMITS}
+    assert cap.restarts == 1
+    bad = asyncio.run(reg.call("set_stream_settings", {"fps": "x"}))
+    assert bad["isError"] and "fps must be an integer" in bad["content"][0]["text"]
+    status = json.loads(asyncio.run(reg.call("stream_status", {}))["content"][0]["text"])
+    assert status["settings"] == {"fps": 45, "quality": 80, "width": 0} and status["limits"] == LIMITS
+
+
+def test_restart_keeps_subscribers_attached():
+    class Proc:
+        returncode = None
+
+    class Cap(ScreenCapturer):
+        def unavailable_reason(self):
+            return None
+
+        async def start(self):
+            if self._proc is None:
+                self._proc = Proc()
+
+        async def stop(self):
+            self._proc = None
+            self._publish(b"late frame from the old pipeline")
+            await asyncio.sleep(0.05)
+
+    async def run():
+        cap = Cap(lambda: Settings(token=TOKEN), LOG)
+        agen = cap.subscribe()
+        first = asyncio.ensure_future(agen.__anext__())
+        await asyncio.sleep(0.01)
+        cap._publish(b"one")
+        assert await first == b"one"
+        nxt = asyncio.ensure_future(agen.__anext__())
+        restarting = asyncio.ensure_future(cap.restart())
+        assert await nxt == b"late frame from the old pipeline"
+        # Asked for the next frame while no pipeline is running: must wait, not end the stream.
+        third = asyncio.ensure_future(agen.__anext__())
+        await asyncio.sleep(0.01)
+        assert not third.done()
+        await restarting
+        cap._publish(b"two")
+        assert await third == b"two"
+        await agen.aclose()
+        if cap._idle_task:
+            cap._idle_task.cancel()
+    asyncio.run(run())

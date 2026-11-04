@@ -4,6 +4,8 @@ import secrets
 from dataclasses import asdict, dataclass, field
 
 DEFAULT_PORT = 8765
+STREAM_LIMITS = {"fps": [1, 60], "quality": [10, 100], "widths": [0, 1600, 1280, 960, 640]}
+MAX_STREAM_WIDTH = 3840
 
 
 @dataclass
@@ -37,3 +39,28 @@ class Settings:
         # The token is a credential: keep the file owner-only readable.
         os.chmod(tmp, 0o600)
         os.replace(tmp, path)
+
+    def stream_settings(self) -> dict:
+        return {"fps": self.stream_fps, "quality": self.stream_quality, "width": self.stream_width}
+
+    def update_stream(self, fps=None, quality=None, width=None) -> bool:
+        """Validate and clamp the given stream settings into place; returns whether anything changed."""
+        before = self.stream_settings()
+        # Parse everything first so a bad field leaves the settings untouched.
+        fps, quality, width = (None if v is None else _as_int(n, v) for n, v in (("fps", fps), ("quality", quality), ("width", width)))
+        if fps is not None:
+            self.stream_fps = max(STREAM_LIMITS["fps"][0], min(STREAM_LIMITS["fps"][1], fps))
+        if quality is not None:
+            self.stream_quality = max(STREAM_LIMITS["quality"][0], min(STREAM_LIMITS["quality"][1], quality))
+        if width is not None:
+            self.stream_width = max(0, min(MAX_STREAM_WIDTH, width))
+        return self.stream_settings() != before
+
+
+def _as_int(name: str, value) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise ValueError(f"{name} must be an integer")
+    try:
+        return int(value)
+    except (ValueError, OverflowError):
+        raise ValueError(f"{name} must be an integer") from None

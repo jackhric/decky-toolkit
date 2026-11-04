@@ -29,9 +29,11 @@ Status key: **live** = implemented and deployed, **planned** = agreed design, no
 | Route | Auth | Status | Notes |
 | --- | --- | --- | --- |
 | `GET /viewer` | self | live | HTML viewer. `?token=<t>` sets the cookie and redirects. During a pairing window an unauthenticated request also gets the cookie. |
-| `GET /stream.mjpeg` | bearer/cookie | live | `multipart/x-mixed-replace; boundary=frame`, JPEG parts with `Content-Length`. 30 fps default. |
+| `GET /stream.mjpeg` | bearer/cookie | live | `multipart/x-mixed-replace; boundary=frame`, JPEG parts with `Content-Length`. 30 fps default; see `/stream/settings`. A settings change keeps the connection open (about 0.1 s without frames, then the new rate/size). |
 | `GET /frame.jpg` | bearer/cookie | live | One current JPEG frame. `503` with a reason if capture is unavailable. |
-| `GET /stream/stats` | bearer/cookie | live | `{available, running, subscribers, fps, kbps, frames_total, uptime_s, width, height, settings{fps,quality,width}, error}` |
+| `GET /stream/stats` | bearer/cookie | live | `{available, running, subscribers, fps, kbps, frames_total, uptime_s, width, height, settings{fps,quality,width}, limits, error}` |
+| `GET /stream/settings` | bearer/cookie | live | `{fps, quality, width, limits: {fps: [1, 60], quality: [10, 100], widths: [0, 1600, 1280, 960, 640]}}`. `width` 0 = native; height follows the aspect ratio. `widths` lists suggested values; any width up to 3840 is accepted. `404` if capture is not configured. |
+| `PUT /stream/settings` | bearer/cookie | live | JSON object with any subset of `fps`, `quality`, `width` (integers or integer strings). Out-of-range values are clamped (fps 1-60, quality 10-100, width 0-3840); non-integers or unknown fields get `400 {"error"}` and change nothing. Persists to `settings.json` and, if the pipeline is running and something changed, restarts it. Response: same shape as `GET`. Settings are device-wide: one pipeline serves every viewer, the last change wins. Cookie auth is accepted so the browser viewer can change them. |
 
 ## Pairing
 
@@ -58,7 +60,8 @@ Status key: **live** = implemented and deployed, **planned** = agreed design, no
 ## MCP tools (live)
 
 `decky_status`, `list_plugins`, `read_plugin_log`, `loader_log`, `restart_loader`, `cef_targets`,
-`cef_evaluate`, `cef_screenshot`, `toast`, `screen_capture`, `stream_status`, `read_file`,
+`cef_evaluate`, `cef_screenshot`, `toast`, `screen_capture`, `stream_status` (includes `settings`
+and `limits`), `set_stream_settings` (`fps`, `quality`, `width`, as `PUT /stream/settings`), `read_file`,
 `write_file`, `install_plugin` (`path` on the device or `zip_base64`, plus `restart` as for
 `POST /plugins/install`), `reload_plugin` (`dir`).
 

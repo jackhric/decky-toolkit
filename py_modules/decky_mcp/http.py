@@ -50,6 +50,8 @@ class Api:
             web.get("/stream.mjpeg", self.handle_stream),
             web.get("/frame.jpg", self.handle_frame),
             web.get("/stream/stats", self.handle_stream_stats),
+            web.get("/stream/settings", self.handle_stream_settings_get),
+            web.put("/stream/settings", self.handle_stream_settings_put),
             web.get("/plugins", self.handle_plugins),
             web.post("/plugins/install", self.handle_plugin_install),
             web.post("/plugins/{dir}/reload", self.handle_plugin_reload),
@@ -145,6 +147,29 @@ class Api:
         if self.capturer is None:
             return web.json_response({"available": False, "error": "capture not available"})
         return web.json_response(self.capturer.stats())
+
+    # Cookie auth is enough here (the viewer changes these), and the setting is non-destructive.
+    async def handle_stream_settings_get(self, _request: web.Request) -> web.Response:
+        if self.capturer is None:
+            return _error(404, "capture not available")
+        return web.json_response(self.capturer.stream_settings())
+
+    async def handle_stream_settings_put(self, request: web.Request) -> web.Response:
+        if self.capturer is None:
+            return _error(404, "capture not available")
+        try:
+            body = await request.json()
+        except ValueError:
+            return _error(400, "expected a JSON object")
+        if not isinstance(body, dict):
+            return _error(400, "expected a JSON object")
+        unknown = set(body) - {"fps", "quality", "width"}
+        if unknown:
+            return _error(400, f"unknown field(s): {', '.join(sorted(unknown))}")
+        try:
+            return web.json_response(await self.capturer.update_settings(**body))
+        except ValueError as e:
+            return _error(400, str(e))
 
     # ---- plugins ----
 

@@ -61,7 +61,23 @@ See README.md for the tool list and architecture.
 - `videorate` backfills gaps with duplicates; without `max-duplication-time` a long stall turns
   into a burst of hundreds of frames.
 - 1080p JPEG q70 at 30 fps is ~50 Mbit/s; `gst-launch-1.0` as root with `env -i` plus
-  XDG_RUNTIME_DIR works. Port 8080 (CEF) drops for a few seconds after every loader restart because
+  XDG_RUNTIME_DIR works.
+- 60 fps keeps up (verified 2026-11-04, BC-250, 12 cores): 1080p q70 delivers 300 parts per 5 s with
+  every frame unique, `/stream/stats` 60.0 fps, gst-launch 33-40 % of one core. Bitrate is content
+  bound: ~97 Mbit/s on the detailed library page (~200 KB/frame), 30-50 Mbit/s on simpler screens.
+  30 fps: 23 % CPU, ~48 Mbit/s on the same page; 15 fps: 13-16 %, ~24 Mbit/s. 1280 wide at 60 fps:
+  ~28 Mbit/s, 30 % CPU. videoconvert runs before videorate, so CPU does not fall linearly with fps.
+- **Stopping a consumer with SIGTERM/SIGKILL while gamescope is painting into its PipeWire buffers
+  crashes gamescope** (terra-gamescope 3.16.31: SIGSEGV in `paint_pipewire` -> `vulkan_screenshot`,
+  coredumps 2026-11-04; it takes the whole Steam session down and back up). 6 of ~30 hot restarts
+  crashed it with `terminate()`; 0 of ~22 since `ScreenCapturer.stop` sends SIGINT, which makes
+  gst-launch go through PAUSED (stream deactivated) before disconnecting. A loader restart still
+  SIGTERMs the whole cgroup, so restarting the loader while a stream is live can still crash it.
+- gamescope's caps say `pixel-aspect-ratio=1/2147483647`; `videoscale` to a width then picks height 1
+  (or keeps 1080 with a non-square PAR), so the scaled branch sets PAR 1/1 with `capssetter` first.
+- Stream settings are device-wide (one pipeline). `ScreenCapturer.update_settings` is the single
+  path for the panel method, `PUT /stream/settings` and the `set_stream_settings` tool; a hot restart
+  keeps subscribers attached (`_restarting`), so viewers see ~0.1 s without frames, no reconnect. Port 8080 (CEF) drops for a few seconds after every loader restart because
   Decky reloads the Steam UI.
 - Stock SteamOS 3.8.14 (Valve recovery image, inspected by a research agent) ships gstreamer 1.26.4,
   gst-plugin-pipewire 1.6.4, gst-plugins-good/base, ffmpeg 7.1.1 (h264_vaapi), gamescope 3.16.23

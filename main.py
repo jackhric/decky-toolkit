@@ -80,8 +80,6 @@ class Plugin:
         await self._stop_server()
         if not self.settings.enabled:
             return
-        if self.capturer is None:
-            self.capturer = ScreenCapturer(lambda: self.settings, decky.logger)
         api = Api(
             auth=TokenAuth(self.settings.token),
             mcp=McpServer(build_registry(self.capturer), decky.logger),
@@ -169,15 +167,8 @@ class Plugin:
         }
 
     async def set_stream_settings(self, fps: int | None = None, quality: int | None = None, width: int | None = None) -> dict[str, Any]:
-        if fps is not None:
-            self.settings.stream_fps = max(1, min(60, int(fps)))
-        if quality is not None:
-            self.settings.stream_quality = max(10, min(100, int(quality)))
-        if width is not None:
-            self.settings.stream_width = max(0, int(width))
-        self.settings.save(decky.DECKY_PLUGIN_SETTINGS_DIR)
-        if self.capturer is not None:
-            await self.capturer.restart()
+        assert self.capturer is not None  # created in _main
+        await self.capturer.update_settings(fps, quality, width)
         return await self.get_status()
 
     async def set_enabled(self, enabled: bool) -> dict[str, Any]:
@@ -211,6 +202,9 @@ class Plugin:
         self.settings = Settings.load(decky.DECKY_PLUGIN_SETTINGS_DIR)
         decky.logger.info("Decky-MCP starting (python %s)", sys.version.split()[0])
         threading.Thread(target=_loader_watchdog, name="loader-watchdog", daemon=True).start()
+        self.capturer = ScreenCapturer(
+            lambda: self.settings, decky.logger, save_settings=lambda: self.settings.save(decky.DECKY_PLUGIN_SETTINGS_DIR),
+        )
         await self._start_server()
 
     async def _unload(self) -> None:

@@ -24,6 +24,11 @@
   #msg[hidden] { display: none; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: #666; display: inline-block; margin-right: 4px; }
   .dot.live { background: #3ddc84; }
+  .settings { position: relative; }
+  #pop { position: absolute; right: 0; top: calc(100% + 6px); z-index: 10; display: grid; grid-template-columns: auto auto; gap: 6px 10px; align-items: center; padding: 10px 12px; background: #15181d; border: 1px solid #353a43; border-radius: 6px; box-shadow: 0 6px 20px rgba(0,0,0,.5); white-space: nowrap; }
+  #pop label { color: #9aa3ad; }
+  #pop select { background: #262a31; color: #e8ecf0; border: 1px solid #353a43; border-radius: 4px; padding: 3px 6px; }
+  #pop .note { grid-column: 1 / -1; color: #9aa3ad; font-size: 12px; min-height: 1.4em; }
 </style>
 </head>
 <body>
@@ -34,6 +39,18 @@
   <span class="stat">res <span id="res">–</span></span>
   <span class="stat">frames <span id="frames">0</span></span>
   <span style="flex:1"></span>
+  <span class="settings" id="settings" hidden>
+    <button id="gear" title="Stream settings (device-wide)" aria-expanded="false">⚙ Stream</button>
+    <div id="pop" hidden>
+      <label for="s-fps">Frame rate</label>
+      <select id="s-fps" data-key="fps"><option value="15">15 fps</option><option value="24">24 fps</option><option value="30">30 fps</option><option value="60">60 fps</option></select>
+      <label for="s-quality">JPEG quality</label>
+      <select id="s-quality" data-key="quality"><option value="50">50</option><option value="60">60</option><option value="70">70</option><option value="80">80</option><option value="90">90</option></select>
+      <label for="s-width">Size</label>
+      <select id="s-width" data-key="width"><option value="0">Native</option><option value="1600">1600 px</option><option value="1280">1280 px</option><option value="960">960 px</option><option value="640">640 px</option></select>
+      <span class="note" id="s-note">Applies to every viewer.</span>
+    </div>
+  </span>
   <button id="pause">Pause</button>
   <button id="fit" class="on">Fit</button>
   <button id="snap">Snapshot</button>
@@ -49,6 +66,7 @@
   const el = id => document.getElementById(id);
   let paused = false, abort = null, frames = 0, lastUrl = null;
   let win = []; // [time, bytes] for the last 2 s
+  let applying = false, applyTimer = null;
 
   const show = t => { msg.textContent = t; msg.hidden = !t; };
 
@@ -96,22 +114,67 @@
           const frame = buf.slice(start, start + len);
           buf = buf.subarray(start + len);
           stats(len);
+          if (applying === 'sent') doneApplying('');
           if (!paused) present(frame);
         }
       }
-      show('Stream ended. Reconnecting…');
+      show(applying ? 'Applying stream settings…' : 'Stream ended. Reconnecting…');
     } catch (e) {
-      if (e.name !== 'AbortError') show('Disconnected: ' + e.message + '\nReconnecting…');
+      if (e.name !== 'AbortError') show(applying ? 'Applying stream settings…' : 'Disconnected: ' + e.message + '\nReconnecting…');
     }
     dot.classList.remove('live');
     if (!abort.signal.aborted) setTimeout(run, 1500);
   }
 
+  // Stream settings live on the server (one capture pipeline for everyone), so nothing is stored here.
+  const selects = [...document.querySelectorAll('#pop select')];
+  function fill(st) {
+    for (const sel of selects) {
+      const v = String(st[sel.dataset.key]);
+      if (![...sel.options].some(o => o.value === v)) sel.add(new Option(v + (sel.dataset.key === 'fps' ? ' fps' : ''), v));
+      sel.value = v;
+    }
+  }
+  function doneApplying(note) {
+    applying = false; clearTimeout(applyTimer);
+    selects.forEach(s => s.disabled = false);
+    el('s-note').textContent = note || 'Applies to every viewer.';
+  }
+  async function apply(sel) {
+    applying = 'pending'; selects.forEach(s => s.disabled = true);
+    el('s-note').textContent = 'Applying…';
+    try {
+      const res = await fetch('/stream/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [sel.dataset.key]: +sel.value }) });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'HTTP ' + res.status);
+      fill(await res.json());
+      // The pipeline has restarted by the time PUT returns, so the next frame comes from the new one.
+      applying = 'sent';
+      applyTimer = setTimeout(() => doneApplying(''), 6000);
+    } catch (e) {
+      doneApplying('Failed: ' + e.message);
+      loadSettings();
+    }
+  }
+  async function loadSettings() {
+    try {
+      const res = await fetch('/stream/settings', { cache: 'no-store' });
+      if (!res.ok) return; // older server without the endpoint: keep the controls hidden
+      fill(await res.json());
+      el('settings').hidden = false;
+    } catch (e) { /* hidden */ }
+  }
+  selects.forEach(sel => sel.onchange = () => apply(sel));
+  const togglePop = open => { el('pop').hidden = !open; el('gear').classList.toggle('on', open); el('gear').setAttribute('aria-expanded', open); };
+  el('gear').onclick = e => { e.stopPropagation(); togglePop(el('pop').hidden); };
+  el('pop').onclick = e => e.stopPropagation();
+  document.addEventListener('click', () => togglePop(false));
+
   el('pause').onclick = () => { paused = !paused; el('pause').textContent = paused ? 'Resume' : 'Pause'; el('pause').classList.toggle('on', paused); };
   el('fit').onclick = () => { const fit = el('main').classList.toggle('actual'); el('fit').classList.toggle('on', !fit); el('fit').textContent = fit ? 'Actual' : 'Fit'; };
   el('snap').onclick = () => window.open('/frame.jpg?t=' + Date.now(), '_blank');
   el('full').onclick = () => document.fullscreenElement ? document.exitFullscreen() : el('main').requestFullscreen();
-  document.addEventListener('keydown', e => { if (e.key === ' ') { e.preventDefault(); el('pause').click(); } if (e.key === 'f') el('full').click(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') togglePop(false); if (e.target.tagName === 'SELECT') return; if (e.key === ' ') { e.preventDefault(); el('pause').click(); } if (e.key === 'f') el('full').click(); });
+  loadSettings();
   run();
 })();
 </script>
