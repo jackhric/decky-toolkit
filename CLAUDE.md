@@ -10,7 +10,8 @@ See README.md for the tool list and architecture.
 - `py_modules/decky_mcp/` — `protocol.py` (JSON-RPC + HTTP transport), `http.py` (REST routes, see
   `docs/api.md`), `auth.py`, `tools/` (tool registry and tools), `install.py` (plugin zip
   validation + atomic install), `logs.py` (journal / plugin log tail and follow), `cdp.py` (Chrome
-  DevTools client for Steam CEF on 127.0.0.1:8080), `settings.py`.
+  DevTools client for Steam CEF on 127.0.0.1:8080), `settings.py`, `input/` (remote input: `ei.py`
+  libei over ctypes, `uinput.py`, `keymap.py`, `service.py` owning state; tools in `tools/input.py`).
 - `src/index.tsx` — Quick Access panel (React, `@decky/ui`, `@decky/api`). Built by `pnpm run build`
   into `dist/index.js`.
 - `scripts/deploy.sh`, `scripts/smoke.sh`, `scripts/logs.sh` — read `deploy.env` (gitignored).
@@ -84,6 +85,20 @@ See README.md for the tool list and architecture.
   with PipeWire always on, libturbojpeg.so.0, libjpeg.so.8 (not .62), libva.so.2, libx264.so.164.
   No GStreamer VA/x264 encoders. `holo-base` Docker image lacks all of these and is not a proxy.
 
+## Remote input facts (verified 2026-11-04)
+- gamescope's EIS socket is `/run/user/1000/gamescope-0-ei`; `ctypes.CDLL("libei.so.1")` (1.6.0) works
+  from the loader's bundled Python as root, and the bundle ships `_ctypes`/`libffi`. gamescope offers
+  one device ("Gamescope Virtual Input") with every capability and a region of INT32_MAX, so the
+  region says nothing about the focused window size.
+- Absolute libei moves land exactly: (0.6, 0.5) -> 1152,540 and back to 960,540 in the Steam UI
+  (`xdotool getmouselocation` on `:0` as uid 1000). WS round trip for a move with ack: median
+  ~0.5 ms on the LAN.
+- `runuser -u jackh -- env DISPLAY=:0 xdotool getwindowfocus getwindowgeometry` gives the focused
+  window (Steam UI: 1920x1080); on `:1` it fails (focus is the root window).
+- The uinput X360 pad (045e:028e) appears in `/proc/bus/input/devices` and Steam wraps it as
+  "Microsoft X-Box 360 pad 1" (28de:11ff) within ~2 s; removing our device removes Steam's wrapper.
+- Hidden cursor rests at 1919,1079 in the Steam UI.
+
 ## Pairing
 `start_pairing` (frontend method) opens a 120 s window during which an unauthenticated `GET /viewer`
 sets the token cookie and redirects. `/mcp` always requires the bearer token; pairing never affects it.
@@ -92,6 +107,9 @@ methods from a test, evaluate `window.DeckyBackend.call('loader/call_plugin_meth
 in SharedJSContext via the `cef_evaluate` tool.
 
 ## Conventions
+- Every setting is configurable remotely: through an MCP tool, the HTTP API (for the extension) and
+  the web viewer where it applies. The Decky panel only mirrors state (it polls `get_status` and
+  listens for change events); it never holds a setting that cannot be changed remotely.
 - Keep the MCP server dependency-free beyond the loader bundle (aiohttp + stdlib).
 - Tools return str/dict (serialised to text) or a list of MCP content blocks. Raise `ValueError`
   for bad input; other exceptions become `isError` results with a traceback.
