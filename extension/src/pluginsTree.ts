@@ -61,7 +61,7 @@ export async function loadPluginItems(client: DeckyClient): Promise<vscode.TreeI
   } catch (e) {
     const p = placeholder(`Could not load plugins: ${describeError(e)}`, 'warning');
     p.tooltip = 'Click to retry';
-    p.command = { command: 'decky-mcp.refreshPlugins', title: 'Retry' };
+    p.command = { command: 'decky-toolkit.refreshPlugins', title: 'Retry' };
     return [p];
   }
 }

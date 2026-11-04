@@ -11,15 +11,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
 from aiohttp import ClientSession, ClientTimeout, web  # noqa: E402
 
-from decky_mcp import cdp, ui  # noqa: E402
-from decky_mcp.auth import TOKEN_COOKIE, TokenAuth  # noqa: E402
-from decky_mcp.controllers import ControllerService, evdev_gamepads, merge, parse_bitmap  # noqa: E402
-from decky_mcp.http import Api  # noqa: E402
-from decky_mcp.input import uinput  # noqa: E402
-from decky_mcp.input.service import InputDisabled, InputService, InputUnavailable, VirtualPad, pad_values  # noqa: E402
-from decky_mcp.protocol import McpServer  # noqa: E402
-from decky_mcp.settings import Settings  # noqa: E402
-from decky_mcp.tools import ToolRegistry, build_registry  # noqa: E402
+from decky_toolkit import cdp, ui  # noqa: E402
+from decky_toolkit.auth import TOKEN_COOKIE, TokenAuth  # noqa: E402
+from decky_toolkit.controllers import ControllerService, evdev_gamepads, merge, parse_bitmap  # noqa: E402
+from decky_toolkit.http import Api  # noqa: E402
+from decky_toolkit.input import uinput  # noqa: E402
+from decky_toolkit.input.service import InputDisabled, InputService, InputUnavailable, VirtualPad, pad_values  # noqa: E402
+from decky_toolkit.protocol import McpServer  # noqa: E402
+from decky_toolkit.settings import Settings  # noqa: E402
+from decky_toolkit.tools import ToolRegistry, build_registry  # noqa: E402
 
 TOKEN = "test-token"
 H = {"Authorization": f"Bearer {TOKEN}"}
@@ -316,7 +316,7 @@ def test_parse_request_validation():
     assert ui.parse_request(path="/library/home/") == {"path": "/library/home"}
     assert ui.parse_request(action="quick_access", tab="Decky") == {"action": "quick_access", "tab": "decky"}
     assert ui.parse_request(action="app", appid="730") == {"action": "app", "appid": 730}
-    assert ui.parse_request(action="plugin", plugin=" Decky-MCP ") == {"action": "plugin", "plugin": "Decky-MCP"}
+    assert ui.parse_request(action="plugin", plugin=" Decky Toolkit ") == {"action": "plugin", "plugin": "Decky Toolkit"}
     for bad in ({}, {"path": "/a", "action": "back"}, {"path": "library"}, {"path": 3}, {"action": "fly"},
                 {"action": "quick_access", "tab": "nope"}, {"action": "back", "tab": "decky"}, {"action": "plugin"},
                 {"action": "app", "appid": -1}, {"action": "app", "appid": True}, {"path": "/x", "appid": 1},
@@ -334,8 +334,8 @@ def test_known_path():
     assert k("/settings/controller/controller_xboxone/0") and k("/notes/app/1") and k("/notes/app/1/2") and k("/media")
     assert not k("/settings/bogus") and not k("/bogus") and not k("/library/app") and not k("/")
     assert ui.owner_of("/decky/store", ["Tender"]) == "Decky Loader"
-    assert ui.owner_of("/tender/main", ["Tender", "Decky-MCP"]) == "Tender"
-    assert ui.owner_of("/decky-mcp/panel", ["Decky-MCP"]) == "Decky-MCP"
+    assert ui.owner_of("/tender/main", ["Tender", "Decky Toolkit"]) == "Tender"
+    assert ui.owner_of("/decky-toolkit/panel", ["Decky Toolkit"]) == "Decky Toolkit"
     assert ui.owner_of("/other", ["Tender"]) == "unknown"
 
 
@@ -347,7 +347,7 @@ class FakeSteamUi:
         self.scripts.append(js)
         if "routerHook" in js and "_routes" in js:
             return {"steam": STEAM_ROUTES, "decky": ["/decky/settings", "/tender"], "patches": ["/library/app/:appid"],
-                    "plugins": ["Tender", "Decky-MCP"], "tabs": ["Notifications", "Decky"],
+                    "plugins": ["Tender", "Decky Toolkit"], "tabs": ["Notifications", "Decky"],
                     "state": {"current": "/library/home", "side_menu": 0, "quick_access_tab": 999, "active_plugin": None}}
         if "unknown Decky plugin" in js and "nosuch" in js:
             raise cdp.CdpError("JS exception: Error: DMCP: unknown Decky plugin \"nosuch\"; loaded: Tender\n    at x")

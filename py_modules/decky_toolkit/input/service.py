@@ -103,8 +103,8 @@ class UinputBackend:
         if self.kbd and self.mouse:
             return
         try:
-            self.kbd = uinput.Device("Decky-MCP Keyboard", keys=range(1, 249))
-            self.mouse = uinput.Device("Decky-MCP Mouse", keys=list(MOUSE_BUTTONS.values()),
+            self.kbd = uinput.Device("Decky Toolkit Keyboard", keys=range(1, 249))
+            self.mouse = uinput.Device("Decky Toolkit Mouse", keys=list(MOUSE_BUTTONS.values()),
                                        rels=(uinput.REL_X, uinput.REL_Y, uinput.REL_WHEEL, uinput.REL_HWHEEL))
         except OSError as e:
             self.close()
@@ -574,7 +574,7 @@ class InputService:
         if not self.enabled:
             if releasing:
                 return
-            raise InputDisabled("remote input is disabled; enable it in the Decky-MCP panel, the viewer, "
+            raise InputDisabled("remote input is disabled; enable it in the Decky Toolkit panel, the viewer, "
                                 "PUT /input/settings or the set_input_enabled tool")
         if not releasing:
             now = time.monotonic()

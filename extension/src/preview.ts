@@ -3,7 +3,7 @@ import { randomBytes } from 'crypto';
 import { Connection, externalProxyBase } from './connection';
 
 export class PreviewViewProvider implements vscode.WebviewViewProvider {
-  static readonly viewId = 'decky-mcp.preview';
+  static readonly viewId = 'decky-toolkit.preview';
 
   private view?: vscode.WebviewView;
   private description?: string;
@@ -26,7 +26,7 @@ export class PreviewViewProvider implements vscode.WebviewViewProvider {
       view.onDidChangeVisibility(() => void view.webview.postMessage({ type: 'visible', visible: view.visible })),
       this.conn.onDidChangeTarget(() => void view.webview.postMessage({ type: 'state', paired: this.conn.paired })),
       view.webview.onDidReceiveMessage(m => {
-        if (m?.type === 'open') void vscode.commands.executeCommand('decky-mcp.openScreen');
+        if (m?.type === 'open') void vscode.commands.executeCommand('decky-toolkit.openScreen');
       }),
     ];
     view.onDidDispose(() => {

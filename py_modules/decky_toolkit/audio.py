@@ -75,7 +75,7 @@ class AudioCapturer:
     def _pipeline(self) -> list[str]:
         target = TARGETS[self._target]
         # WirePlumber 0.5 spells it stream.capture.sink; a capture stream without it never finds a sink.
-        src = ["pipewiresrc", "stream-properties=props,stream.capture.sink=true,node.name=decky-mcp-audio"]
+        src = ["pipewiresrc", "stream-properties=props,stream.capture.sink=true,node.name=decky-toolkit-audio"]
         if target:
             src.insert(1, f"target-object={target}")
         return [

@@ -148,7 +148,7 @@ export class DeviceProxy {
     });
     upstream.on('error', err => {
       this.upstreams.delete(upstream);
-      if (socket.writable) socket.end(`HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Type: text/plain\r\n\r\nDecky-MCP proxy: ${err.message}`);
+      if (socket.writable) socket.end(`HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Type: text/plain\r\n\r\nDecky Toolkit proxy: ${err.message}`);
       else drop();
     });
     upstream.end();
@@ -166,7 +166,7 @@ export class DeviceProxy {
     }
     const target = this.target();
     if (!target) {
-      res.writeHead(503, { 'Content-Type': 'text/plain', ...this.corsHeaders(req) }).end('Decky-MCP: not paired');
+      res.writeHead(503, { 'Content-Type': 'text/plain', ...this.corsHeaders(req) }).end('Decky Toolkit: not paired');
       return;
     }
 
@@ -193,7 +193,7 @@ export class DeviceProxy {
     upstream.on('error', err => {
       this.upstreams.delete(upstream);
       if (!res.headersSent) {
-        res.writeHead(502, { 'Content-Type': 'text/plain', ...this.corsHeaders(req) }).end(`Decky-MCP proxy: ${err.message}`);
+        res.writeHead(502, { 'Content-Type': 'text/plain', ...this.corsHeaders(req) }).end(`Decky Toolkit proxy: ${err.message}`);
       } else {
         res.destroy();
       }

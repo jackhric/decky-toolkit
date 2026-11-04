@@ -12,17 +12,17 @@ from aiohttp import web
 
 sys.path.append(decky.DECKY_PLUGIN_DIR + "/py_modules")  # the loader does this too; kept for IDE/type tooling parity
 
-from decky_mcp.audio import AudioCapturer  # noqa: E402
-from decky_mcp.auth import TokenAuth  # noqa: E402
-from decky_mcp.capture import ScreenCapturer  # noqa: E402
-from decky_mcp.http import Api  # noqa: E402
-from decky_mcp.controllers import ControllerService  # noqa: E402
-from decky_mcp.input.service import InputService  # noqa: E402
-from decky_mcp.pairing import PairingRequest, PairingRequests  # noqa: E402
-from decky_mcp.protocol import McpServer  # noqa: E402
-from decky_mcp.settings import Settings  # noqa: E402
-from decky_mcp.tools import build_registry  # noqa: E402
-from decky_mcp.ui import UiNavigator  # noqa: E402
+from decky_toolkit.audio import AudioCapturer  # noqa: E402
+from decky_toolkit.auth import TokenAuth  # noqa: E402
+from decky_toolkit.capture import ScreenCapturer  # noqa: E402
+from decky_toolkit.http import Api  # noqa: E402
+from decky_toolkit.controllers import ControllerService  # noqa: E402
+from decky_toolkit.input.service import InputService  # noqa: E402
+from decky_toolkit.pairing import PairingRequest, PairingRequests  # noqa: E402
+from decky_toolkit.protocol import McpServer  # noqa: E402
+from decky_toolkit.settings import Settings  # noqa: E402
+from decky_toolkit.tools import build_registry  # noqa: E402
+from decky_toolkit.ui import UiNavigator  # noqa: E402
 
 
 def _primary_ip() -> str:
@@ -141,8 +141,8 @@ class Plugin:
         if event == "create" and req is not None:
             info = {"id": req.id, "code": req.code, "client_name": req.client_name, "client_kind": req.client_kind,
                     "remote": req.remote}
-            asyncio.ensure_future(decky.emit("decky_mcp_pair_request", info))
-        asyncio.ensure_future(decky.emit("decky_mcp_pair_requests", self.pairing.list()))
+            asyncio.ensure_future(decky.emit("decky_toolkit_pair_request", info))
+        asyncio.ensure_future(decky.emit("decky_toolkit_pair_requests", self.pairing.list()))
 
     async def list_pair_requests(self) -> list[dict[str, Any]]:
         return self.pairing.list()
@@ -150,7 +150,7 @@ class Plugin:
     async def approve_pair_request(self, request_id: str) -> list[dict[str, Any]]:
         req = self.pairing.approve(request_id)
         decky.logger.info("pairing: approved %s (%s) from %s", req.client_name, req.client_kind, req.remote)
-        await decky.emit("decky_mcp_paired", req.remote, req.client_name)
+        await decky.emit("decky_toolkit_paired", req.remote, req.client_name)
         return self.pairing.list()
 
     async def deny_pair_request(self, request_id: str) -> list[dict[str, Any]]:
@@ -160,7 +160,7 @@ class Plugin:
 
     async def _on_input_session(self, remote: str) -> None:
         decky.logger.info("input session toast: remote input from %s", remote)
-        await decky.emit("decky_mcp_input_session", remote)
+        await decky.emit("decky_toolkit_input_session", remote)
 
     # ---- methods callable from the frontend ----
 
@@ -225,7 +225,7 @@ class Plugin:
 
     async def _main(self) -> None:
         self.settings = Settings.load(decky.DECKY_PLUGIN_SETTINGS_DIR)
-        decky.logger.info("Decky-MCP starting (python %s)", sys.version.split()[0])
+        decky.logger.info("Decky Toolkit starting (python %s)", sys.version.split()[0])
         threading.Thread(target=_loader_watchdog, name="loader-watchdog", daemon=True).start()
         save = lambda: self.settings.save(decky.DECKY_PLUGIN_SETTINGS_DIR)  # noqa: E731
         self.pairing = PairingRequests(on_change=self._on_pairing_change)
@@ -235,7 +235,7 @@ class Plugin:
         self.capturer.audio = self.audio
         self.input = InputService(lambda: self.settings, save, decky.logger, on_session=self._on_input_session)
         # The panel mirrors a setting that remote clients usually change, so push changes to it.
-        self.input.add_listener(lambda st: asyncio.ensure_future(decky.emit("decky_mcp_input_state", st["enabled"])))
+        self.input.add_listener(lambda st: asyncio.ensure_future(decky.emit("decky_toolkit_input_state", st["enabled"])))
         self.controllers = ControllerService(self.input, decky.logger)
         self.ui = UiNavigator()
         await self._start_server()
@@ -244,7 +244,7 @@ class Plugin:
         if self.pruner is not None:
             self.pruner.cancel()
         await self._stop_server()
-        decky.logger.info("Decky-MCP stopped")
+        decky.logger.info("Decky Toolkit stopped")
 
     async def _uninstall(self) -> None:
         pass

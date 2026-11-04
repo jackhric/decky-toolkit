@@ -1,9 +1,9 @@
 // Deploys a throwaway skeleton plugin through the extension's own deploy code (no VS Code) and
 // checks that a fast deploy (restart=plugin) replaces both the backend and the frontend bundle.
 // Usage: DECKY_TOKEN_FILE=/path/to/token node scripts/deploy-check.mjs <plugin-root> [host] [port]
-//   <plugin-root> is a decky-plugin-template checkout named "Decky-MCP Test" whose src/version.ts
+//   <plugin-root> is a decky-plugin-template checkout named "Decky Toolkit Test" whose src/version.ts
 //   exports VERSION, whose py_modules/testver/__init__.py defines VERSION and whose frontend sets
-//   window.__deckyMcpTestVersion = VERSION. The script rewrites those files for each round.
+//   window.__deckyToolkitTestVersion = VERSION. The script rewrites those files for each round.
 // Set KEEP=1 to leave the plugin installed; otherwise Decky uninstalls it (no loader restart) and
 // ssh removes its logs and settings. Only the full-restart round restarts the loader.
 import * as esbuild from 'esbuild';
@@ -82,8 +82,8 @@ function setVersion(v, { debug = true } = {}) {
 }
 
 const evaluate = async expression => client.callToolText('cef_evaluate', { expression });
-const FRONTEND = "JSON.stringify({ bundle: window.__deckyMcpTestVersion ?? null, " +
-  "listed: window.DeckyPluginLoader?.plugins?.find(p => p.name === 'Decky-MCP Test')?.version ?? null })";
+const FRONTEND = "JSON.stringify({ bundle: window.__deckyToolkitTestVersion ?? null, " +
+  "listed: window.DeckyPluginLoader?.plugins?.find(p => p.name === 'Decky Toolkit Test')?.version ?? null })";
 
 async function frontendState(want, timeoutMs = 10000) {
   const start = Date.now();
@@ -102,18 +102,18 @@ async function frontendState(want, timeoutMs = 10000) {
 }
 
 async function backendVersion() {
-  const raw = await evaluate("window.DeckyBackend.call('loader/call_plugin_method', 'Decky-MCP Test', 'version')");
+  const raw = await evaluate("window.DeckyBackend.call('loader/call_plugin_method', 'Decky Toolkit Test', 'version')");
   try { return JSON.parse(raw); } catch { return raw; }
 }
 
-const LOADED = /\[loader\]\[INFO\]: Loaded Decky-MCP Test /;
+const LOADED = /\[loader\]\[INFO\]: Loaded Decky Toolkit Test /;
 const journal = async () => (await client.logTail({ source: 'loader', tail: 300 })).lines;
 const backendProcesses = () =>
-  Number(execFileSync('ssh', [sshTarget, "pgrep -fc '^Decky-MCP Test ' || true"]).toString().trim() || 0);
+  Number(execFileSync('ssh', [sshTarget, "pgrep -fc '^Decky Toolkit Test ' || true"]).toString().trim() || 0);
 
 async function round(label, v, restart, opts = {}) {
   setVersion(v, opts);
-  const p = await readWorkspacePlugin(pluginRoot, 'decky-mcp-test');
+  const p = await readWorkspacePlugin(pluginRoot, 'decky-toolkit-test');
   const before = await journal();
   const t0 = Date.now();
   const r = await deployPlugin(client, p, { restart, build: 'auto', log, confirmTimeoutMs: 10000 });
@@ -127,7 +127,7 @@ async function round(label, v, restart, opts = {}) {
   const loads = newLines(before, await journal()).filter(l => LOADED.test(l)).length;
   const beLater = await backendVersion().catch(e => `error: ${e.message}`);
   const procs = backendProcesses();
-  const listed = (await client.listPlugins()).find(x => x.dir === 'decky-mcp-test');
+  const listed = (await client.listPlugins()).find(x => x.dir === 'decky-toolkit-test');
   timings.push({ label, via: r.via, deployMs, wallMs: wall, build: r.build, confirm: r.confirm, loads });
   const detail = `via=${r.via} restart=${r.restarted} build=${r.build.ran ? `${r.build.ms} ms (${r.build.reason})` : `skipped (${r.build.reason})`}, ` +
     `stage ${r.stageMs} ms (${(r.zipBytes / 1024).toFixed(0)} KiB), upload ${r.uploadMs} ms, ` +
@@ -155,7 +155,7 @@ async function noViewers(timeoutMs = 300000) {
 console.log(`device ${host}:${port}, plugin ${pluginRoot}`);
 await check('test plugin is not installed yet', async () => {
   const listed = (await client.listPlugins()).map(p => p.dir);
-  if (listed.includes('decky-mcp-test')) throw new Error('decky-mcp-test already installed; remove it first');
+  if (listed.includes('decky-toolkit-test')) throw new Error('decky-toolkit-test already installed; remove it first');
   return listed.join(', ');
 });
 if (!(await noViewers())) {
@@ -180,15 +180,15 @@ if (process.env.SKIP_FULL) {
 
 if (!process.env.KEEP) {
   // Decky's own uninstall stops the backend, unloads the frontend and removes the dir, no restart.
-  await check('cleanup: uninstall decky-mcp-test through Decky', async () => {
-    await evaluate("window.DeckyBackend.call('utilities/uninstall_plugin', 'Decky-MCP Test')");
-    execFileSync('ssh', [sshTarget, 'sudo rm -rf ~/homebrew/plugins/decky-mcp-test ~/homebrew/logs/decky-mcp-test ~/homebrew/settings/decky-mcp-test ~/homebrew/data/decky-mcp-test']);
-    const fe = await evaluate("String(window.DeckyPluginLoader.plugins.some(p => p.name === 'Decky-MCP Test'))");
+  await check('cleanup: uninstall decky-toolkit-test through Decky', async () => {
+    await evaluate("window.DeckyBackend.call('utilities/uninstall_plugin', 'Decky Toolkit Test')");
+    execFileSync('ssh', [sshTarget, 'sudo rm -rf ~/homebrew/plugins/decky-toolkit-test ~/homebrew/logs/decky-toolkit-test ~/homebrew/settings/decky-toolkit-test ~/homebrew/data/decky-toolkit-test']);
+    const fe = await evaluate("String(window.DeckyPluginLoader.plugins.some(p => p.name === 'Decky Toolkit Test'))");
     if (!/false/.test(fe)) throw new Error(`frontend still lists the plugin (${fe})`);
     if (backendProcesses()) throw new Error('a backend process is still running');
     const listed = (await client.listPlugins()).map(p => p.dir);
-    if (listed.includes('decky-mcp-test')) throw new Error(`still listed: ${listed}`);
-    const left = execFileSync('ssh', [sshTarget, 'ls -d ~/homebrew/*/decky-mcp-test 2>/dev/null || true']).toString().trim();
+    if (listed.includes('decky-toolkit-test')) throw new Error(`still listed: ${listed}`);
+    const left = execFileSync('ssh', [sshTarget, 'ls -d ~/homebrew/*/decky-toolkit-test 2>/dev/null || true']).toString().trim();
     if (left) throw new Error(`left behind: ${left}`);
     return `plugins now: ${listed.join(', ')}`;
   });

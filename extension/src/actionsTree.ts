@@ -52,7 +52,7 @@ export class ActionsTreeProvider implements vscode.TreeDataProvider<ActionNode>,
   constructor(private readonly conn: ConnectionState, private readonly ws?: PluginSource) {
     this.subs = [
       conn.onDidChange(() => this.changed.fire(undefined)),
-      vscode.workspace.onDidChangeConfiguration(e => { if (e.affectsConfiguration('decky-mcp.deploy')) this.refresh(); }),
+      vscode.workspace.onDidChangeConfiguration(e => { if (e.affectsConfiguration('decky-toolkit.deploy')) this.refresh(); }),
     ];
     if (ws) this.subs.push(ws.onDidChange(() => this.refresh()));
   }
@@ -72,37 +72,37 @@ export class ActionsTreeProvider implements vscode.TreeDataProvider<ActionNode>,
     const plugins = this.ws ? await this.ws.ready() : [];
 
     const screen = group('screen', 'Screen', 'device-desktop', true, [
-      leaf('openScreen', 'Open screen panel', 'window', 'decky-mcp.openScreen'),
-      leaf('openViewer', 'Open viewer in browser', 'link-external', 'decky-mcp.openViewer'),
-      leaf('snapshot', 'Snapshot to file', 'device-camera', 'decky-mcp.snapshot'),
+      leaf('openScreen', 'Open screen panel', 'window', 'decky-toolkit.openScreen'),
+      leaf('openViewer', 'Open viewer in browser', 'link-external', 'decky-toolkit.openViewer'),
+      leaf('snapshot', 'Snapshot to file', 'device-camera', 'decky-toolkit.snapshot'),
     ]);
     screen.description = screenDescription(this.conn);
     screen.tooltip = 'Live device display';
     screen.children![1].tooltip = `Opens ${viewerUrl(d)} in your browser. The browser is paired separately: it asks for access and you ` +
-      'allow it in the device\'s Decky-MCP panel, unless it still has the cookie from an earlier pairing.';
+      'allow it in the device\'s Decky Toolkit panel, unless it still has the cookie from an earlier pairing.';
     screen.children![2].tooltip = 'Save the current frame (/frame.jpg) as a JPEG';
 
     return [
       screen,
       this.pluginGroup(plugins),
       group('loader', 'Loader', 'server', true, [
-        leaf('restartLoader', 'Restart loader', 'debug-restart', 'decky-mcp.restartLoader'),
-        leaf('loaderLogs', 'Show loader logs', 'output', 'decky-mcp.loaderLogs'),
-        leaf('installZip', 'Install plugin zip…', 'file-zip', 'decky-mcp.installZip'),
+        leaf('restartLoader', 'Restart loader', 'debug-restart', 'decky-toolkit.restartLoader'),
+        leaf('loaderLogs', 'Show loader logs', 'output', 'decky-toolkit.loaderLogs'),
+        leaf('installZip', 'Install plugin zip…', 'file-zip', 'decky-toolkit.installZip'),
       ]),
       group('steam', 'Steam', 'game', false, [
-        leaf('navigate', 'Navigate to…', 'compass', 'decky-mcp.navigate'),
-        leaf('openPluginPanel', 'Open plugin panel…', 'extensions', 'decky-mcp.openPluginPanel'),
-        leaf('uiBack', 'Back', 'arrow-left', 'decky-mcp.uiBack'),
-        leaf('uiQuickAccess', 'Quick Access', 'layout-sidebar-right', 'decky-mcp.uiQuickAccess'),
-        leaf('uiCloseMenus', 'Close menus', 'close-all', 'decky-mcp.uiCloseMenus'),
-        leaf('evaluate', 'Evaluate JS in Steam UI', 'terminal', 'decky-mcp.evaluate'),
-        leaf('toast', 'Toast on device', 'bell', 'decky-mcp.toast'),
+        leaf('navigate', 'Navigate to…', 'compass', 'decky-toolkit.navigate'),
+        leaf('openPluginPanel', 'Open plugin panel…', 'extensions', 'decky-toolkit.openPluginPanel'),
+        leaf('uiBack', 'Back', 'arrow-left', 'decky-toolkit.uiBack'),
+        leaf('uiQuickAccess', 'Quick Access', 'layout-sidebar-right', 'decky-toolkit.uiQuickAccess'),
+        leaf('uiCloseMenus', 'Close menus', 'close-all', 'decky-toolkit.uiCloseMenus'),
+        leaf('evaluate', 'Evaluate JS in Steam UI', 'terminal', 'decky-toolkit.evaluate'),
+        leaf('toast', 'Toast on device', 'bell', 'decky-toolkit.toast'),
       ]),
       group('mcp', 'MCP', 'server-process', false, [
-        leaf('mcpConfig', 'Write MCP config for this workspace', 'json', 'decky-mcp.writeMcpConfig'),
-        leaf('copyMcpUrl', 'Copy MCP URL', 'link', 'decky-mcp.copyMcpUrl'),
-        leaf('copyToken', 'Copy token', 'key', 'decky-mcp.copyToken'),
+        leaf('mcpConfig', 'Write MCP config for this workspace', 'json', 'decky-toolkit.writeMcpConfig'),
+        leaf('copyMcpUrl', 'Copy MCP URL', 'link', 'decky-toolkit.copyMcpUrl'),
+        leaf('copyToken', 'Copy token', 'key', 'decky-toolkit.copyToken'),
       ]),
     ];
   }
@@ -111,11 +111,11 @@ export class ActionsTreeProvider implements vscode.TreeDataProvider<ActionNode>,
     const args = [WORKSPACE_PLUGIN];
     const auto = DeployController.autoDeployEnabled;
     const children = [
-      leaf('deploy', 'Deploy', 'rocket', 'decky-mcp.deploy'),
-      leaf('deployFull', 'Deploy (full restart)', 'debug-restart', 'decky-mcp.deployFull'),
-      leaf('reloadPlugin', 'Reload backend', 'refresh', 'decky-mcp.reloadPlugin', args),
-      leaf('pluginLogs', 'Show plugin logs', 'output', 'decky-mcp.pluginLogs', args),
-      leaf('autoDeploy', `Auto-deploy on change: ${auto ? 'On' : 'Off'}`, auto ? 'sync' : 'sync-ignored', 'decky-mcp.toggleAutoDeploy'),
+      leaf('deploy', 'Deploy', 'rocket', 'decky-toolkit.deploy'),
+      leaf('deployFull', 'Deploy (full restart)', 'debug-restart', 'decky-toolkit.deployFull'),
+      leaf('reloadPlugin', 'Reload backend', 'refresh', 'decky-toolkit.reloadPlugin', args),
+      leaf('pluginLogs', 'Show plugin logs', 'output', 'decky-toolkit.pluginLogs', args),
+      leaf('autoDeploy', `Auto-deploy on change: ${auto ? 'On' : 'Off'}`, auto ? 'sync' : 'sync-ignored', 'decky-toolkit.toggleAutoDeploy'),
     ];
     children[0].tooltip = 'Build if sources changed, install and reload only this plugin (no loader restart)';
     children[1].tooltip = 'Build if sources changed, install and restart Decky Loader (reloads the Steam UI)';

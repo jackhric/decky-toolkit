@@ -1,6 +1,36 @@
-# Decky-MCP
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/decky-toolkit-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="assets/decky-toolkit-light.svg">
+    <img alt="Decky Toolkit" src="assets/decky-toolkit-light.svg" width="480">
+  </picture>
+</p>
 
-A [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) plugin that runs a
+<p align="center">
+  <b>Let AI coding agents see and drive your Steam Deck while you build Decky plugins.</b>
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img alt="License: BSD-3-Clause" src="https://img.shields.io/badge/license-BSD--3--Clause-blue"></a>
+  <img alt="Plugin version 0.2.0" src="https://img.shields.io/badge/plugin-v0.2.0-9C6AEC">
+  <a href="extension/README.md"><img alt="VS Code extension version 0.6.0" src="https://img.shields.io/badge/VS%20Code%20extension-v0.6.0-0AA5FF"></a>
+  <a href="https://github.com/SteamDeckHomebrew/decky-loader"><img alt="Decky Loader 3.3+" src="https://img.shields.io/badge/Decky%20Loader-3.3%2B-1B1B1B?logo=steam&logoColor=white"></a>
+  <a href="https://modelcontextprotocol.io"><img alt="MCP Streamable HTTP" src="https://img.shields.io/badge/MCP-Streamable%20HTTP-1B1B1B"></a>
+  <img alt="Python 3.14" src="https://img.shields.io/badge/python-3.14-3776AB?logo=python&logoColor=white">
+  <img alt="Platform: SteamOS and Bazzite" src="https://img.shields.io/badge/platform-SteamOS%20%7C%20Bazzite-555">
+</p>
+
+<p align="center">
+  <a href="#tools">Tools</a> ·
+  <a href="#pairing">Pairing</a> ·
+  <a href="#live-screen-viewer">Screen viewer</a> ·
+  <a href="docs/api.md">HTTP API</a> ·
+  <a href="extension/README.md">VS Code extension</a> ·
+  <a href="#development">Development</a>
+</p>
+
+A [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) plugin (with a companion VS Code
+extension, a browser screen viewer and an HTTP API) that runs a
 [Model Context Protocol](https://modelcontextprotocol.io) server on the Steam Deck itself, so AI
 coding agents on your dev machine (Claude Code, Cursor, MCP Inspector, …) can inspect and drive the
 device while you develop other Decky plugins.
@@ -47,7 +77,7 @@ From the VS Code extension (see [extension/README.md](extension/README.md#pairin
 2. The editor shows *Waiting for approval on <device> · code 4821* (and the device row says
    *waiting for approval · code 4821*).
 3. On the device a toast says *VS Code on <your-pc> wants to pair · code 4821*. Open Quick Access
-   (…) → Decky-MCP. While a request is pending the panel shows only *Approve pairing request?* with
+   (…) → Decky Toolkit. While a request is pending the panel shows only *Approve pairing request?* with
    *VS Code on <your-pc> (<your-ip>) · code 4821* and **Approve** / **Deny** side by side (several
    requests come one at a time, "1 of 3"). Check the code and press **Approve**.
 4. The extension stores the token and connects. Deny shows *Pairing denied on <device>* with
@@ -61,7 +91,7 @@ From a browser:
 3. Approve it on the device as above. The page sets an HttpOnly cookie and opens the viewer. A denied
    request says so and offers **Retry**.
 
-Alternatively open `/viewer?token=<token>` once (the token is in the Decky-MCP panel); the token
+Alternatively open `/viewer?token=<token>` once (the token is in the Decky Toolkit panel); the token
 moves into the same cookie. Other clients (scripts, CLI agents) use the same routes:
 `POST /pair/request`, then long-poll `GET /pair/request/{id}?wait=25` until it returns the token;
 see [docs/api.md](docs/api.md#pairing). Pending requests expire 60 s after their client stops
@@ -136,7 +166,7 @@ runs while someone listens.
 ## Remote input
 
 The viewer and MCP clients can drive the Deck with keyboard, mouse and gamepad input. It is **off
-by default**. Turn it on with the **Allow remote input** toggle in the Decky-MCP panel, the
+by default**. Turn it on with the **Allow remote input** toggle in the Decky Toolkit panel, the
 **⌨ Input** button in the viewer, `PUT /input/settings` or the `set_input_enabled` tool. The setting
 is stored in `settings.json` and applies to every client.
 
@@ -202,10 +232,10 @@ curl "http://<deck-ip>:8765/pair/request/<id>?wait=25"   # {status: "approved", 
 - `main.py` is the Decky backend. It loads settings, then starts an `aiohttp` server from inside the
   plugin's asyncio loop. `aiohttp` comes from the loader's own PyInstaller bundle, so there are no
   dependencies to vendor.
-- `py_modules/decky_mcp/protocol.py` implements the JSON-RPC methods `initialize`, `ping`,
+- `py_modules/decky_toolkit/protocol.py` implements the JSON-RPC methods `initialize`, `ping`,
   `tools/list`, `tools/call` and the HTTP transport rules (bearer auth, `Origin` check, 202 for
   notifications, 405 for GET).
-- `py_modules/decky_mcp/cdp.py` is a tiny Chrome DevTools Protocol client used to talk to Steam's
+- `py_modules/decky_toolkit/cdp.py` is a tiny Chrome DevTools Protocol client used to talk to Steam's
   CEF debugger. The plugin deliberately does **not** connect to the loader's own websocket on port
   1337: the loader keeps a single client and would kick the Steam UI off.
 - `src/index.tsx` is the Quick Access panel: enable/disable, endpoint, token, restart, regenerate token.
@@ -233,7 +263,7 @@ Connect Claude Code:
 claude mcp add --transport http decky http://<deck-ip>:8765/mcp -H "Authorization: Bearer <token>"
 ```
 
-The token lives in `~/homebrew/settings/decky-mcp/settings.json` on the device (mode 0600, owned by
+The token lives in `~/homebrew/settings/decky-toolkit/settings.json` on the device (mode 0600, owned by
 root) and is shown in the plugin panel.
 
 ## Security notes

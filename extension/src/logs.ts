@@ -43,7 +43,7 @@ class LogSession {
     while (!signal.aborted) {
       const token = await this.conn.token();
       if (!token) {
-        this.channel.appendLine('[decky-mcp] not paired; waiting for a token…');
+        this.channel.appendLine('[decky-toolkit] not paired; waiting for a token…');
         await this.untilChanged(signal);
         continue;
       }
@@ -54,11 +54,11 @@ class LogSession {
       } catch (e) {
         if (signal.aborted) return;
         if (mode === 'stream' && isMissingRoute(e)) {
-          this.channel.appendLine('[decky-mcp] /logs/stream not available on this device; polling via MCP every 3 s');
+          this.channel.appendLine('[decky-toolkit] /logs/stream not available on this device; polling via MCP every 3 s');
           mode = 'poll';
           continue;
         }
-        if (!isConnectionError(e) || mode === 'stream') this.channel.appendLine(`[decky-mcp] ${describeError(e)}; retrying…`);
+        if (!isConnectionError(e) || mode === 'stream') this.channel.appendLine(`[decky-toolkit] ${describeError(e)}; retrying…`);
       }
       await sleep(POLL_MS, signal).catch(() => undefined);
     }

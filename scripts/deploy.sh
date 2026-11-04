@@ -8,7 +8,7 @@ cd "$(dirname "$0")/.."
 DECK_HOST=${DECK_HOST:-10.0.70.18}
 DECK_USER=${DECK_USER:-jackh}
 DECK_SSH_OPTS=${DECK_SSH_OPTS:-}
-PLUGIN_DIR_NAME=${PLUGIN_DIR_NAME:-decky-mcp}
+PLUGIN_DIR_NAME=${PLUGIN_DIR_NAME:-decky-toolkit}
 BUILD=${BUILD:-1}
 RESTART=${RESTART:-1}
 
@@ -21,7 +21,7 @@ rm -rf out && mkdir -p "$STAGE"
 cp -r dist plugin.json package.json main.py LICENSE README.md defaults py_modules static "$STAGE"/
 find "$STAGE" -name __pycache__ -prune -exec rm -rf {} +
 
-REMOTE_STAGE=".cache/decky-mcp-stage"
+REMOTE_STAGE=".cache/decky-toolkit-stage"
 echo ">> syncing to $DECK_USER@$DECK_HOST:~/$REMOTE_STAGE"
 rsync -az --delete -e "ssh $DECK_SSH_OPTS" "$STAGE"/ "$DECK_USER@$DECK_HOST:$REMOTE_STAGE/"
 
