@@ -1,5 +1,6 @@
 """The aiohttp application: REST/viewer routes plus the mounted MCP endpoint."""
 import asyncio
+import json
 import logging
 import os
 import tempfile
@@ -10,12 +11,16 @@ from aiohttp import web
 from . import cdp, logs
 from .auth import TokenAuth
 from .capture import BOUNDARY, CaptureUnavailable, ScreenCapturer
+from .input.ei import EiError
+from .input.service import InputDisabled, InputService, InputUnavailable
 from .protocol import SERVER_INFO, McpServer
 from .tools import plugins
 from .tools.system import list_plugins, schedule_loader_restart
 
 API_VERSION = 1
 LOG_KEEPALIVE_SECONDS = 15.0
+INPUT_REFUSED = 4003
+FOCUS_REFRESH_SECONDS = 3.0
 
 PairingOpen = Callable[[], bool]
 OnPaired = Callable[[str], Awaitable[None]]
@@ -29,7 +34,8 @@ def _error(status: int, message: str) -> web.Response:
 class Api:
     def __init__(self, *, auth: TokenAuth, mcp: McpServer, capturer: ScreenCapturer | None, static_dir: str | None,
                  logger: logging.Logger, pairing_open: PairingOpen | None = None, on_paired: OnPaired | None = None,
-                 base_url: BaseUrl | None = None, log_keepalive: float = LOG_KEEPALIVE_SECONDS):
+                 base_url: BaseUrl | None = None, log_keepalive: float = LOG_KEEPALIVE_SECONDS,
+                 input_service: InputService | None = None):
         self.auth = auth
         self.mcp = mcp
         self.capturer = capturer
@@ -39,6 +45,7 @@ class Api:
         self.on_paired = on_paired
         self.base_url = base_url
         self.log_keepalive = log_keepalive
+        self.input = input_service
 
     def build_app(self) -> web.Application:
         app = web.Application(client_max_size=64 * 1024 * 1024, middlewares=[self.auth.middleware()])
@@ -52,6 +59,9 @@ class Api:
             web.get("/stream/stats", self.handle_stream_stats),
             web.get("/stream/settings", self.handle_stream_settings_get),
             web.put("/stream/settings", self.handle_stream_settings_put),
+            web.get("/input", self.handle_input_ws),
+            web.get("/input/settings", self.handle_input_settings_get),
+            web.put("/input/settings", self.handle_input_settings_put),
             web.get("/plugins", self.handle_plugins),
             web.post("/plugins/install", self.handle_plugin_install),
             web.post("/plugins/{dir}/reload", self.handle_plugin_reload),
@@ -170,6 +180,89 @@ class Api:
             return web.json_response(await self.capturer.update_settings(**body))
         except ValueError as e:
             return _error(400, str(e))
+
+    # ---- input ----
+
+    # Cookie auth is accepted on purpose: toggling input from the viewer should be one click.
+    async def handle_input_settings_get(self, _request: web.Request) -> web.Response:
+        if self.input is None:
+            return _error(404, "input not available")
+        return web.json_response(self.input.status())
+
+    async def handle_input_settings_put(self, request: web.Request) -> web.Response:
+        if self.input is None:
+            return _error(404, "input not available")
+        try:
+            body = await request.json()
+        except ValueError:
+            return _error(400, "expected a JSON object")
+        if not isinstance(body, dict) or "enabled" not in body:
+            return _error(400, 'expected {"enabled": true|false}')
+        unknown = set(body) - {"enabled"}
+        if unknown:
+            return _error(400, f"unknown field(s): {', '.join(sorted(unknown))}")
+        try:
+            return web.json_response(await self.input.set_enabled(body["enabled"]))
+        except ValueError as e:
+            return _error(400, str(e))
+
+    async def handle_input_ws(self, request: web.Request) -> web.StreamResponse:
+        if self.input is None:
+            return _error(404, "input not available")
+        svc = self.input
+        ws = web.WebSocketResponse(heartbeat=20, max_msg_size=64 * 1024)
+        await ws.prepare(request)
+        # Refuse after the upgrade so browsers see the close code instead of a generic failure.
+        if not svc.enabled or self.pairing_open():
+            reason = "remote input is disabled" if not svc.enabled else "pairing window is open"
+            await ws.close(code=INPUT_REFUSED, message=reason.encode())
+            return ws
+        session = svc.open_session(request.remote or "?")
+
+        def on_state(state: dict) -> None:
+            if ws.closed:
+                return
+            if not state["enabled"]:
+                asyncio.ensure_future(ws.close(code=INPUT_REFUSED, message=b"remote input was disabled"))
+            else:
+                asyncio.ensure_future(ws.send_json(state))
+
+        async def refresh_focus() -> None:
+            while not ws.closed:
+                await asyncio.sleep(FOCUS_REFRESH_SECONDS)
+                await svc.focus_size()
+
+        await svc.focus_size()
+        await ws.send_json(svc.state())
+        svc.add_listener(on_state)
+        refresher = asyncio.create_task(refresh_focus())
+        try:
+            async for m in ws:
+                if m.type != web.WSMsgType.TEXT:
+                    continue
+                try:
+                    msg = json.loads(m.data)
+                except ValueError:
+                    await ws.send_json({"type": "error", "message": "invalid JSON"})
+                    continue
+                try:
+                    await svc.handle(session, msg)
+                except InputDisabled:
+                    await ws.close(code=INPUT_REFUSED, message=b"remote input is disabled")
+                    break
+                except (ValueError, InputUnavailable, EiError, OSError) as e:
+                    await ws.send_json({"type": "error", "message": str(e)})
+                    continue
+                # Optional extension: an "id" gets an ack, which lets clients measure round trips.
+                if isinstance(msg, dict) and "id" in msg:
+                    await ws.send_json({"type": "ack", "id": msg["id"]})
+        except (ConnectionResetError, asyncio.CancelledError):
+            pass
+        finally:
+            svc.remove_listener(on_state)
+            refresher.cancel()
+            await svc.close_session(session)
+        return ws
 
     # ---- plugins ----
 

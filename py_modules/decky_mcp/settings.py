@@ -17,6 +17,7 @@ class Settings:
     stream_fps: int = 30
     stream_quality: int = 70
     stream_width: int = 0  # 0 = native resolution
+    input_enabled: bool = False
 
     @classmethod
     def load(cls, settings_dir: str) -> "Settings":
@@ -55,6 +56,14 @@ class Settings:
         if width is not None:
             self.stream_width = max(0, min(MAX_STREAM_WIDTH, width))
         return self.stream_settings() != before
+
+    def update_input(self, enabled) -> bool:
+        """Set input_enabled (strict bool); returns whether it changed."""
+        if not isinstance(enabled, bool):
+            raise ValueError("enabled must be true or false")
+        changed = self.input_enabled != enabled
+        self.input_enabled = enabled
+        return changed
 
 
 def _as_int(name: str, value) -> int:

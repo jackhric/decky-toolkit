@@ -6,10 +6,12 @@ from typing import Any, Awaitable, Callable
 
 from .. import cdp
 from ..capture import CaptureUnavailable, ScreenCapturer
+from ..input.service import InputDisabled, InputService, InputUnavailable
 
 ToolFn = Callable[..., Awaitable[Any]]
 # Exceptions that are expected, user-facing failures: reported without a traceback.
-EXPECTED_ERRORS: tuple[type[BaseException], ...] = (ValueError, FileNotFoundError, cdp.CdpError, CaptureUnavailable)
+EXPECTED_ERRORS: tuple[type[BaseException], ...] = (ValueError, FileNotFoundError, cdp.CdpError, CaptureUnavailable,
+                                                     InputDisabled, InputUnavailable)
 _CONTENT_TYPES = {"text", "image", "audio", "resource", "resource_link"}
 
 
@@ -67,12 +69,13 @@ def error_result(text: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": text}], "isError": True}
 
 
-def build_registry(capturer: ScreenCapturer | None = None) -> ToolRegistry:
-    from . import cef, plugins, screen, system
+def build_registry(capturer: ScreenCapturer | None = None, input_service: InputService | None = None) -> ToolRegistry:
+    from . import cef, input, plugins, screen, system
 
     reg = ToolRegistry()
     system.register(reg)
     plugins.register(reg)
     cef.register(reg)
     screen.register(reg, capturer)
+    input.register(reg, input_service, capturer)
     return reg
