@@ -12,8 +12,8 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
-  <img alt="Plugin version 0.2.0" src="https://img.shields.io/badge/plugin-v0.2.0-9C6AEC">
-  <a href="extension/README.md"><img alt="VS Code extension version 0.6.0" src="https://img.shields.io/badge/VS%20Code%20extension-v0.6.0-0AA5FF"></a>
+  <a href="https://github.com/jackhric/decky-toolkit/releases"><img alt="Plugin version" src="https://img.shields.io/github/package-json/v/jackhric/decky-toolkit?label=plugin&color=9C6AEC"></a>
+  <a href="extension/README.md"><img alt="VS Code extension version" src="https://img.shields.io/github/package-json/v/jackhric/decky-toolkit?filename=extension%2Fpackage.json&label=VS%20Code%20extension&color=0AA5FF"></a>
   <a href="https://github.com/SteamDeckHomebrew/decky-loader"><img alt="Decky Loader 3.3+" src="https://img.shields.io/badge/Decky%20Loader-3.3%2B-1B1B1B?logo=steam&logoColor=white"></a>
   <img alt="Platform: SteamOS and Bazzite" src="https://img.shields.io/badge/platform-SteamOS%20%7C%20Bazzite-555">
 </p>
@@ -45,10 +45,34 @@ I've found that working on a Decky plugin with no additional tooling provides a 
 ### Requirements
 
 - A Steam Deck, SteamOS or Bazzite device running [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) 3.3 or newer.
-- On your computer: VS Code 1.90+ (or VSCodium), Node 18+, pnpm 9+, rsync, and SSH key access to
-  the device with passwordless `sudo`.
+- On your computer: VS Code 1.90+ (or VSCodium).
+
+Both pieces are published on the [Releases](https://github.com/jackhric/decky-toolkit/releases)
+page: `plugin-v…` releases carry the plugin zip, `extension-v…` releases the `.vsix`. Both are built
+by this repo's CI and signed with build provenance, so you can check a download with
+`gh attestation verify <file> -R jackhric/decky-toolkit`.
 
 ### 1. Install the plugin on the device
+
+Download `decky-toolkit-<version>.zip` from the latest `plugin-v…` release. On the device, enable
+Decky's developer mode (Decky settings → **General** → **Developer mode**), then go to
+**Developer** → **Install Plugin From ZIP File** and pick the zip.
+
+Open Quick Access (…) → **Decky Toolkit** on the device. The panel shows the device's IP address.
+
+### 2. Install the VS Code extension
+
+Download `decky-toolkit-<version>.vsix` from the latest `extension-v…` release, then:
+
+```sh
+code --install-extension decky-toolkit-<version>.vsix   # or: codium --install-extension …
+```
+
+Or in VS Code: Extensions view → **…** → **Install from VSIX…**.
+
+### Building from source
+
+Needs Node 18+, pnpm 9+, rsync, and SSH key access to the device with passwordless `sudo`.
 
 ```sh
 git clone https://github.com/jackhric/decky-toolkit.git
@@ -56,13 +80,7 @@ cd decky-toolkit
 pnpm install
 cp deploy.env.example deploy.env   # set DECK_HOST and DECK_USER for your device
 pnpm run deploy                    # builds, copies to the device and restarts Decky Loader
-```
 
-Open Quick Access (…) → **Decky Toolkit** on the device. The panel shows the device's IP address.
-
-### 2. Install the VS Code extension
-
-```sh
 cd extension
 pnpm install
 pnpm run package                   # creates decky-toolkit-<version>.vsix
