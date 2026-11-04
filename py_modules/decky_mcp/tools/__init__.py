@@ -81,7 +81,7 @@ def error_result(text: str) -> dict[str, Any]:
 
 def build_registry(capturer: ScreenCapturer | None = None, input_service: InputService | None = None,
                    controllers: "ControllerService | None" = None, navigator: "UiNavigator | None" = None) -> ToolRegistry:
-    from . import cef, controllers as controller_tools, input, plugins, screen, system, ui
+    from . import cef, controllers as controller_tools, input, plugin_api, plugins, screen, system, ui
 
     if controllers is None and input_service is not None:
         from ..controllers import ControllerService
@@ -91,6 +91,7 @@ def build_registry(capturer: ScreenCapturer | None = None, input_service: InputS
     system.register(reg)
     plugins.register(reg)
     cef.register(reg)
+    plugin_api.register(reg)
     screen.register(reg, capturer)
     input.register(reg, input_service, capturer)
     controller_tools.register(reg, controllers)
