@@ -1,0 +1,38 @@
+---
+title: Overview
+description: What Decky Toolkit is and how its pieces fit together.
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+Decky Toolkit lets you build, test and deploy SteamOS plugins from VS Code or VSCodium. It has two parts:
+
+- **The Decky Toolkit plugin** runs on your SteamOS device (Steam Deck, SteamOS, Bazzite) under
+  [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader). It starts an HTTP server on port `8765`
+  that also speaks MCP, and shows a small Quick Access panel where you approve pairing requests.
+- **The VS Code extension** connects to that server. It deploys the plugin in your workspace, shows the
+  device's screen, streams logs and gives you a console for the Steam UI.
+
+Scripts and MCP clients such as Claude Code can use the same server.
+
+<LinkCard title="Get started" description="Install the extension and the plugin, pair, and deploy." href="getting-started/" />
+
+## Features
+
+<CardGrid>
+  <Card title="Hot reload your plugin" icon="rocket">
+    Save a file and just your plugin reloads on the device, without restarting Decky Loader. [Read more](features/deploy/)
+  </Card>
+  <Card title="Remote control" icon="seti:image">
+    Remotely control and command your device from your editor. [Read more](features/screen/)
+  </Card>
+  <Card title="Logs where you work" icon="document">
+    Loader and plugin logs in output channels. [Read more](features/logs/)
+  </Card>
+  <Card title="Poke the Steam UI" icon="seti:javascript">
+    Evaluate JavaScript in Steam's `SharedJSContext`. [Read more](features/console/)
+  </Card>
+  <Card title="Scriptable" icon="setting">
+    An HTTP API and MCP server for your own tools and agents. [Read more](features/api/)
+  </Card>
+</CardGrid>

@@ -1,0 +1,22 @@
+---
+import { Button } from '@/components/starwind/button';
+import { editors, type Editor } from '../data/editors';
+import Icon from './Icon.astro';
+
+interface Props { editor: Editor; primary?: boolean }
+const { editor, primary = false } = Astro.props;
+const { name, store } = editors[editor];
+---
+
+<Button
+  href={store}
+  variant={primary ? 'default' : 'outline'}
+  class:list={[
+    'h-auto px-5 py-3 rounded-[10px] font-semibold leading-[1.2] no-underline backdrop-blur-sm select-none',
+    primary
+      ? 'bg-(--hero-text) text-(--hero-bg) hover:bg-(--hero-text)/90'
+      : 'text-(--hero-text) bg-(--hero-text)/6 dark:bg-(--hero-text)/6 border-(--hero-text)/22 dark:border-(--hero-text)/22 hover:bg-(--hero-text)/12 dark:hover:bg-(--hero-text)/12 hover:text-(--hero-text) shadow-none',
+  ]}
+>
+  <Icon name={editor} size={18} />Install for {name}
+</Button>

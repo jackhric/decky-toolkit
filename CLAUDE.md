@@ -21,6 +21,10 @@ See README.md for setup and docs/reference.md for the tool list and architecture
   a device is done with the extension itself (it detects the root `plugin.json`); there are no ssh scripts.
 - `scripts/install-gif/record.sh` — re-records `docs/images/install/vscode-install.gif` (official VS Code under
   Xvfb driven by Playwright, installing the published extension); needs node, xvfb-run, ffmpeg.
+- `site/` — landing page and docs (Astro, base `/decky-toolkit`), deployed by `.github/workflows/pages.yml` next to
+  `decky-toolkit.zip` and `update.json`. Colours only come from `site/src/styles/theme.css`; UI primitives are
+  Starwind UI (`src/components/starwind`, Tailwind v4 without preflight); docs are Starlight pages in
+  `src/content/docs/docs/`. `scripts/make-clip.sh` cuts hero background clips (WebM, MP4, WebP poster).
 
 ## Runtime facts (verified on the target device, 2026-11-03)
 - Device: Bazzite `bazzite-deck-44.20261012`, host `bazzite`, IP 10.0.70.18, user `jackh`
