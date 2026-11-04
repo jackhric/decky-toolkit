@@ -6,7 +6,6 @@ import {
   PanelSection,
   PanelSectionRow,
   ToggleField,
-  staticClasses,
 } from "@decky/ui";
 import { addEventListener, callable, definePlugin, removeEventListener, toaster } from "@decky/api";
 import { useEffect, useState } from "react";
@@ -234,7 +233,6 @@ export default definePlugin(() => {
   });
   return {
     name: "Decky-MCP",
-    titleView: <div className={staticClasses.Title}>Decky-MCP</div>,
     content: <Content />,
     icon: <FaPlug />,
     onDismount() {
