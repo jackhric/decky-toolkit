@@ -9,8 +9,11 @@ import collections
 import os
 import pwd
 import shutil
+import signal
 import time
-from typing import AsyncIterator, Callable
+from typing import Any, AsyncIterator, Callable
+
+from .settings import STREAM_LIMITS, Settings
 
 IDLE_STOP_SECONDS = 10
 BOUNDARY = b"frame"
@@ -50,8 +53,10 @@ def jpeg_size(data: bytes) -> tuple[int, int] | None:
 
 
 class ScreenCapturer:
-    def __init__(self, get_settings: Callable[[], object], logger) -> None:
+    def __init__(self, get_settings: Callable[[], Settings], logger, save_settings: Callable[[], None] | None = None) -> None:
         self._get_settings = get_settings
+        self._save_settings = save_settings
+        self._restarting = False
         self.log = logger
         self._proc: asyncio.subprocess.Process | None = None
         self._reader_task: asyncio.Task[None] | None = None
@@ -87,7 +92,12 @@ class ScreenCapturer:
         fps = max(1, min(60, int(getattr(s, "stream_fps", 30))))
         quality = max(10, min(100, int(getattr(s, "stream_quality", 70))))
         width = int(getattr(s, "stream_width", 0) or 0)
-        scale = ["!", "videoscale", "!", f"video/x-raw,width={width}"] if width > 0 else []
+        # gamescope advertises pixel-aspect-ratio=1/2147483647, which makes videoscale derive a height of 1
+        # (or keep 1080 if the output PAR is left open), so declare square pixels before scaling.
+        scale = [
+            "!", "capssetter", "caps=video/x-raw,pixel-aspect-ratio=1/1",
+            "!", "videoscale", "!", f"video/x-raw,width={width},pixel-aspect-ratio=1/1",
+        ] if width > 0 else []
         return [
             "gst-launch-1.0", "-q",
             "pipewiresrc", "target-object=gamescope", "do-timestamp=true", f"keepalive-time={KEEPALIVE_MS}",
@@ -136,22 +146,47 @@ class ScreenCapturer:
     async def stop(self) -> None:
         async with self._lock:
             proc, self._proc = self._proc, None
-            if self._reader_task:
-                self._reader_task.cancel()
-                self._reader_task = None
+            reader, self._reader_task = self._reader_task, None
             if proc and proc.returncode is None:
-                proc.terminate()
+                # SIGINT makes gst-launch take the pipeline down through PAUSED, which deactivates the
+                # PipeWire stream before disconnecting. Killing it while gamescope paints into its
+                # buffers crashes gamescope (SIGSEGV in paint_pipewire, 3.16.31, 2026-11-04). Keep
+                # reading stdout meanwhile so a full pipe cannot stall the shutdown.
+                proc.send_signal(signal.SIGINT)
                 try:
                     await asyncio.wait_for(proc.wait(), 2)
                 except asyncio.TimeoutError:
                     proc.kill()
+                    await proc.wait()
+            if reader:
+                reader.cancel()
             if proc:
                 self.log.info("screen capture stopped")
 
     async def restart(self) -> None:
-        await self.stop()
-        if self._subs:
-            await self.start()
+        # Subscribers wait through the gap instead of ending, so viewers just see a short pause.
+        self._restarting = True
+        try:
+            await self.stop()
+            if self._subs:
+                await self.start()
+        finally:
+            self._restarting = False
+
+    def stream_settings(self) -> dict[str, Any]:
+        return {**self._get_settings().stream_settings(), "limits": STREAM_LIMITS}
+
+    async def update_settings(self, fps: Any = None, quality: Any = None, width: Any = None) -> dict[str, Any]:
+        """Validate, persist and apply stream settings. Raises ValueError on non-integer input."""
+        if self._get_settings().update_stream(fps, quality, width):
+            if self._save_settings:
+                self._save_settings()
+            if self.running:
+                try:
+                    await self.restart()
+                except CaptureUnavailable as e:
+                    self.log.warning("capture restart failed: %s", e)
+        return self.stream_settings()
 
     async def _seed(self, proc: asyncio.subprocess.Process) -> None:
         # gamescope only pushes a PipeWire frame when it repaints, so a fresh consumer on a static
@@ -259,7 +294,7 @@ class ScreenCapturer:
             if self.latest is not None and time.monotonic() - self.latest_at < 1.0:
                 yield self.latest  # instant first frame for late joiners
             while True:
-                if not self.running:
+                if not self.running and not self._restarting:
                     raise CaptureUnavailable(self.last_error or "capture pipeline is not running")
                 try:
                     yield await asyncio.wait_for(q.get(), 5)
@@ -292,7 +327,6 @@ class ScreenCapturer:
         recent = [t for t in self.frame_times if now - t <= 2.0]
         fps = len(recent) / 2.0 if recent else 0.0
         recent_bytes = list(self.frame_bytes)[-len(recent):] if recent else []
-        s = self._get_settings()
         size = jpeg_size(self.latest) if self.latest else None
         return {
             "available": self.unavailable_reason() is None,
@@ -304,10 +338,7 @@ class ScreenCapturer:
             "uptime_s": round(now - self.started_at, 1) if self.running else 0,
             "width": size[0] if size else None,
             "height": size[1] if size else None,
-            "settings": {
-                "fps": getattr(s, "stream_fps", 30),
-                "quality": getattr(s, "stream_quality", 70),
-                "width": getattr(s, "stream_width", 0),
-            },
+            "settings": self._get_settings().stream_settings(),
+            "limits": STREAM_LIMITS,
             "error": self.last_error,
         }

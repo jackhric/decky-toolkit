@@ -23,7 +23,8 @@ protected by a bearer token shown in the plugin's Quick Access panel.
 | `cef_evaluate` | Run JS in a Steam tab (default `SharedJSContext`, where `window.DeckyPluginLoader` lives) |
 | `cef_screenshot` | PNG screenshot of a Steam tab via `Page.captureScreenshot` |
 | `screen_capture` | JPEG of the full gamescope display (games included) from its PipeWire video node |
-| `stream_status` | Live stream state: running, fps, bitrate, resolution, viewer count |
+| `stream_status` | Live stream state: running, fps, bitrate, resolution, viewer count, settings |
+| `set_stream_settings` | Change the stream's frame rate (1-60), JPEG quality and output width |
 | `toast` | Show a Decky toast in the Steam UI |
 | `read_file` / `write_file` | Read or write files on the device (runs as root) |
 
@@ -35,8 +36,15 @@ that browser an HttpOnly cookie, the panel counts paired devices and shows a toa
 IP, and the window closes after 120 s or when you press **Stop pairing**. Alternatively open
 `/viewer?token=<token>` once; the token moves into the same cookie. Either way the page shows the full display at 30 fps (1080p, roughly 50 Mbit/s at the default JPEG
 quality 70) with fps, bitrate and resolution readouts, pause, fit/actual size, snapshot and
-fullscreen. Other endpoints, all behind the same token: `/stream.mjpeg` (multipart MJPEG),
-`/frame.jpg` (one current frame) and `/stream/stats` (JSON).
+fullscreen. The **⚙ Stream** button opens frame rate (15/24/30/60 fps), JPEG quality and size
+(native, 1600, 1280, 960, 640 px wide) controls; a change applies within a fraction of a second
+without dropping the connection. Other endpoints, all behind the same token: `/stream.mjpeg`
+(multipart MJPEG), `/frame.jpg` (one current frame), `/stream/stats` (JSON) and `/stream/settings`
+(`GET`/`PUT` JSON).
+
+Stream settings are device-wide; the last change wins. There is one capture pipeline, and every
+viewer, MCP tool call and editor panel shares it, so changing the frame rate in one browser changes
+it for everybody.
 
 Capture comes from gamescope's own PipeWire `Video/Source` node, read by a `gst-launch-1.0`
 subprocess (`pipewiresrc ! videoconvert ! videorate ! jpegenc ! multipartmux`). Every element is
@@ -46,7 +54,11 @@ runs while a viewer or tool call is consuming frames and stops 10 s after the la
 gamescope only pushes a frame when it repaints, so the plugin nudges it with
 `gamescopectl debug_force_repaint` when a stream starts, and `pipewiresrc keepalive-time=100`
 re-emits the last frame so static screens still stream. Frame rate, JPEG quality and output width
-are settings (`stream_fps`, `stream_quality`, `stream_width`); lower the width or quality on Wi-Fi.
+are stored in `settings.json` (`stream_fps`, `stream_quality`, `stream_width`) and can be changed
+from the viewer, `PUT /stream/settings` or the `set_stream_settings` tool. Measured on the BC-250
+at 1080p, JPEG quality 70, with a changing screen: 60 fps costs about 33-40 % of one CPU core and
+30-100 Mbit/s depending on content; 30 fps about 23 % and up to ~50 Mbit/s. On Wi-Fi, lower the
+width or quality.
 
 ## REST endpoints
 
