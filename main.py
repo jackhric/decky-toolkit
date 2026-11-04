@@ -90,6 +90,7 @@ class Plugin:
             logger=decky.logger,
             pairing_open=self._pairing_open,
             on_paired=self._on_paired,
+            base_url=self._base_url,
         )
         # The loader SIGKILLs a plugin 5s after SIGTERM, so never wait long for in-flight requests.
         runner = web.AppRunner(api.build_app(), access_log=None, shutdown_timeout=2)
@@ -120,6 +121,9 @@ class Plugin:
             await self.runner.cleanup()
             self.runner = None
 
+    def _base_url(self, ip: str | None = None) -> str:
+        return f"http://{ip or _primary_ip()}:{self.settings.port}"
+
     # ---- pairing ----
 
     def _pairing_open(self) -> bool:
@@ -147,6 +151,7 @@ class Plugin:
 
     async def get_status(self) -> dict[str, Any]:
         ip = _primary_ip()
+        base = self._base_url(ip)
         return {
             "enabled": self.settings.enabled,
             "running": self.runner is not None,
@@ -154,9 +159,9 @@ class Plugin:
             "port": self.settings.port,
             "token": self.settings.token,
             "ip": ip,
-            "url": f"http://{ip}:{self.settings.port}/mcp",
-            "viewer_url": f"http://{ip}:{self.settings.port}/viewer?token={self.settings.token}",
-            "pair_url": f"http://{ip}:{self.settings.port}/viewer",
+            "url": f"{base}/mcp",
+            "viewer_url": f"{base}/viewer?token={self.settings.token}",
+            "pair_url": f"{base}/viewer",
             "pairing_seconds_left": self._pairing_seconds_left(),
             "pairing_count": self.pairing_count,
             "stream": self.capturer.stats() if self.capturer else None,

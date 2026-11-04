@@ -7,7 +7,7 @@ from aiohttp import web
 TOKEN_COOKIE = "decky_mcp_token"
 COOKIE_MAX_AGE = 30 * 86400
 # Routes that are public or do their own token handling (viewer accepts ?token= and pairing).
-SELF_AUTH_PATHS = frozenset({"/", "/health", "/viewer"})
+SELF_AUTH_PATHS = frozenset({"/", "/health", "/viewer", "/pair"})
 
 
 class TokenAuth:
