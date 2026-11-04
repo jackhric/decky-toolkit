@@ -51,6 +51,15 @@ See README.md for the tool list and architecture.
   reloads one backend in ~0.1 s (verified 2026-11-03); this is how `reload_plugin` avoids the
   single-client loader websocket.
 
+## Plugin reload facts (verified 2026-11-04)
+- `loader/reload_plugin` (via the Steam JS context) reloads a plugin's backend and frontend bundle and does
+  NOT require the `debug` flag. With `debug`, the loader's own file watcher additionally reloads the plugin
+  twice after its files change, so the extension uses `restart=none` for debug plugins and lets the watcher
+  do it. The watcher never imports a brand-new plugin dir; a first install needs a loader restart.
+- A `restart=loader` install that swapped the plugin dir while the loader was running raced the watcher and
+  left orphaned backends leaking memory; the install route now stages the dir and a systemd job stops the
+  loader, swaps, and starts it (same order as scripts/deploy.sh).
+
 ## Screen streaming facts (verified 2026-11-03)
 - gamescope publishes a PipeWire `Video/Source` node named `gamescope` (BGRx/NV12 1920x1080) that
   delivers 60 fps while the screen changes and **nothing at all while it is static**. A fresh
