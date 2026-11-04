@@ -145,7 +145,7 @@ loader (Decky only reloads plugins it has loaded).
 **The `debug` flag.** It is not needed for fast deploys. The template sets it, and with it the
 loader's own file watcher reloads the plugin after every install, normally twice (once per changed
 file). The extension then lets the watcher do the reload instead of asking for one, waits until
-the reloads have settled (about 2-3 s), and only asks Decky itself if the watcher has done nothing
+the reloads have settled (about 3 s), and only asks Decky itself if the watcher has done nothing
 after 4 s (it is off for 10 s after the loader starts). Without the flag a deploy is a single
 reload and finishes sooner.
 
@@ -314,7 +314,7 @@ The plugin must be named `Decky-MCP Test`, export `VERSION` from `src/version.ts
 `py_modules/testver/__init__.py`, set `window.__deckyMcpTestVersion = VERSION` in its frontend and
 have a `version` method. The script rewrites those per round: first install, fast deploy with and
 without the `debug` flag, a deploy with nothing to build and one full restart (skipped while a
-`/stream.mjpeg` viewer is connected). Each round checks the bundle's version via `cef_evaluate`,
+`/stream.mjpeg` viewer is connected, unless `IGNORE_VIEWERS=1`). Each round checks the bundle's version via `cef_evaluate`,
 the backend's via `loader/call_plugin_method`, `/plugins`, the number of `Loaded` lines and that
 exactly one backend process runs. At the end Decky uninstalls the plugin (no loader restart).
 

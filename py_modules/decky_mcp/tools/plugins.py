@@ -5,12 +5,13 @@ import binascii
 import json
 import logging
 import os
+import shlex
 from typing import Any
 
 from .. import cdp
 from ..install import install_plugin_zip
 from . import ToolRegistry
-from .system import plugins_dir, schedule_loader_restart
+from .system import plugins_dir, run
 
 RESTART_MODES = ("loader", "plugin", "none")
 log = logging.getLogger("decky_mcp.plugins")
@@ -47,14 +48,35 @@ async def reload_plugin(dirname: str) -> dict[str, Any]:
     return {"dir": dirname, "name": name, "scheduled": False}
 
 
+async def _swap_while_stopped(staged: str, target: str) -> None:
+    # Swapping a debug-flagged or new plugin into place makes the loader's file watcher import it a
+    # few seconds later. If that lands while the loader is stopping, the new backend is started
+    # outside the unit and orphaned, and an orphan's socket reader spins on EOF (5.9 GB RSS within
+    # 76 s, 2026-11-04), even with the restart delayed 5 s. So, like scripts/deploy.sh, swap the dir
+    # while the loader is down, from a transient unit outside its cgroup.
+    old = shlex.quote(staged + ".old")
+    script = (
+        f"systemctl stop plugin_loader; rm -rf {old}; "
+        f"if [ -e {shlex.quote(target)} ]; then mv {shlex.quote(target)} {old}; fi; "
+        f"mv {shlex.quote(staged)} {shlex.quote(target)}; rm -rf {old}; systemctl start plugin_loader"
+    )
+    code, out = await run("systemd-run", "--on-active=1", "--timer-property=AccuracySec=100ms", "sh", "-c", script)
+    if code != 0:
+        raise RuntimeError(out)
+
+
 async def install(src: str | bytes, restart: str = "loader", logger: logging.Logger = log) -> dict[str, Any]:
     if restart not in RESTART_MODES:
         raise ValueError(f"restart must be one of {', '.join(RESTART_MODES)}")
-    installed = await asyncio.to_thread(install_plugin_zip, src, plugins_dir(), logger=logger)
-    if restart == "loader":
-        await schedule_loader_restart()
-    elif restart == "plugin":
-        await reload_plugin(installed["dir"])
+    if restart != "loader":
+        installed = await asyncio.to_thread(install_plugin_zip, src, plugins_dir(), logger=logger)
+        if restart == "plugin":
+            await reload_plugin(installed["dir"])
+        return {"installed": installed, "restarted": restart}
+    # Same filesystem as plugins/, so the final mv is a rename.
+    pending = os.path.join(os.path.dirname(plugins_dir()), ".decky-mcp-pending")
+    installed = await asyncio.to_thread(install_plugin_zip, src, pending, logger=logger)
+    await _swap_while_stopped(os.path.join(pending, installed["dir"]), os.path.join(plugins_dir(), installed["dir"]))
     return {"installed": installed, "restarted": restart}
 
 
@@ -63,8 +85,10 @@ def register(reg: ToolRegistry) -> None:
         "install_plugin",
         "Install a Decky plugin zip (either '<dir>/...' as the single top-level directory or files at the zip root) "
         "into ~/homebrew/plugins, replacing any existing copy atomically. Give either 'path' (a zip on the device) "
-        "or 'zip_base64'. restart: 'loader' (default, fires 1s after the reply), 'plugin' (reload just this "
-        "plugin's backend) or 'none'.",
+        "or 'zip_base64'. restart: 'loader' (default; 1s after the reply the loader is stopped, the new files are "
+        "swapped in and it starts again), 'plugin' (re-import just this plugin, backend and frontend, without a "
+        "loader restart; it must already be loaded) or 'none' (a plugin with the 'debug' flag is then re-imported "
+        "by the loader's file watcher within a few seconds).",
         {
             "properties": {
                 "path": {"type": "string", "description": "Absolute path of a zip on the device"},

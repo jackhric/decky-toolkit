@@ -142,6 +142,7 @@ async function round(label, v, restart, opts = {}) {
 
 // A loader restart while a stream is live has crashed gamescope, so wait for viewers to leave.
 async function noViewers(timeoutMs = 300000) {
+  if (process.env.IGNORE_VIEWERS) return true;
   const start = Date.now();
   for (;;) {
     const s = await client.streamStats().catch(() => undefined);
