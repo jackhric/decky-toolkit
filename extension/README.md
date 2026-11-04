@@ -3,8 +3,9 @@
 Companion extension for the [Decky-MCP](../README.md) Decky Loader plugin. It talks to the plugin's
 HTTP server on the Steam Deck (port 8765) and gives you, inside VS Code or VSCodium:
 
-- a **Decky** sidebar (Activity Bar icon) that lists your Decks; connect to one and its actions,
-  plugins and a small live preview appear, so you never need the command palette,
+- a **Decky** sidebar (Activity Bar icon) that lists your Decks; connect to one and its actions
+  (grouped by Screen, Plugin, Loader, Steam and MCP), plugins and a small live preview appear, so
+  you never need the command palette,
 - a live view of the Deck's display (30 fps MJPEG) in an editor tab,
 - one-click build + deploy of the Decky plugin in your workspace, and install of any plugin zip,
 - live loader and plugin logs in output channels,
@@ -20,29 +21,22 @@ The Decky-MCP plugin must already be installed and enabled on the Deck.
    the **+** in the view title to add another (see [Adding a Deck](#adding-a-deck)).
 2. **Click the Deck** (or its plug icon). If it is not paired yet, pairing starts at once; see
    [Pairing](#pairing). If it is paired, it connects in a second.
-3. **Work.** When it is connected, the **Device**, **Plugins** and **Preview** views appear below the
-   list, with the Deck's name in their title bars. The screen panel opens automatically after the
-   first connect of a session (setting `decky-mcp.openScreenOnConnect`). Click **Deploy plugin** in
-   the Device view to build and install the plugin in your workspace.
-4. **Disconnect** with the icon on the device row or in the Device view title. The token is kept,
-   so the next connect needs no pairing.
+3. **Work.** When it is connected, the **Actions**, **Plugins** and **Preview** views appear below
+   the list, with the Deck's name in their title bars. The screen panel opens automatically after
+   the first connect of a session (setting `decky-mcp.openScreenOnConnect`). Click **Plugin →
+   Deploy** in the Actions view to build and install the plugin in your workspace.
+4. **Disconnect** with the icon on the device row. The token is kept, so the next connect needs no
+   pairing.
 
 The status bar shows `$(vm-connect) <name>` while connected and `$(vm) Decky: not connected`
-otherwise. Click it to connect, switch Deck, disconnect, add a Deck or change the sidebar layout.
+otherwise. Click it to connect, switch Deck, disconnect, open the screen or add a Deck.
 
-## Sidebar layouts
+## Sidebar
 
-There are three layouts so you can compare them. Change the layout with the **gear** icon in the
-title bar of any Decky view, with **Decky: Switch sidebar layout**, from the status bar picker, or
-with the `decky-mcp.sidebarLayout` setting. The sidebar changes at once; no window reload.
+Before you connect, the sidebar shows only **Devices**. After you connect, **Actions**, **Plugins**
+and **Preview** appear below it, all for the connected Deck.
 
-| Layout | Before you connect | After you connect |
-| --- | --- | --- |
-| `devices-first` (default) | **Devices**: one row per Deck (name, address, state) | **Devices** plus **Device** (Screen row and the 8 actions), **Plugins** and **Preview**, all for the connected Deck |
-| `unified` | **Decky**: one row per Deck; a Deck expands to Connect / Edit / Remove | The connected Deck expands to **Screen**, **Plugins**, **Actions** and **Settings**; **Preview** below |
-| `classic` | **Device** with the pairing buttons, **Plugins**, **Preview** (the 0.2 sidebar) | **Device**: Devices group, connection row, Screen, Actions; **Plugins**; **Preview** |
-
-### Device rows (`devices-first` and `unified`)
+### Devices
 
 Each Deck is shown once, and its row is also the connection state. If the name is the host, the
 row shows the host once and the state as the description; otherwise the description is
@@ -58,35 +52,51 @@ row shows the host once and the state as the description; otherwise the descript
 
 The `…` icon and the right-click menu hold the rest: **Re-pair** (only for a paired Deck),
 **Enter token manually**, **Edit**, **Copy viewer URL** and **Remove**. A connected Deck never
-shows Pair, Enter token or Connect as a row or a button.
+shows Pair, Enter token or Connect as a row or a button. Connect and disconnect live only here.
 
-The Devices view title has **Add device** (+), **Refresh** (also checks which Decks answer) and the
-layout gear. With no saved Decks the view shows **Add a Deck**.
+The view title has **Add device** (+) and **Refresh** (also checks which Decks answer). With no
+saved Decks the view shows **Add a Deck**.
 
-### Device, Plugins and Preview views
+### Actions
 
-- **Device** (`devices-first`): the **Screen** row (fps / Mbit/s from `/stream/stats`, polled every
-  5 s only while the view is visible; click to open the screen panel) and the actions Deploy plugin,
-  Restart loader, Reload plugin, Loader logs, Plugin logs, Evaluate JS in Steam UI, Toast on Deck and
-  Write MCP config. The title bar has Open screen and Disconnect.
-- **Plugins** lists the Deck's plugins (`GET /plugins`, falling back to the `list_plugins` tool) as
-  `Name  version · dir`; hover for flags, `api_version` and `has_backend`. The inline icons reload a
-  plugin's backend (`POST /plugins/{dir}/reload`) or open its log. The title bar has
-  **Install plugin zip…** (pick a `.zip`, upload to `/plugins/install?restart=loader`, wait for the
-  loader) and Refresh.
-- **Preview** fetches one `/frame.jpg` every 1.5 s while the view is visible (well under 1 Mbit/s,
-  instead of the ~40 Mbit/s stream), scaled to the sidebar width.
+Everything you can do with the connected Deck, in collapsible groups. Every leaf runs with one
+click. Screen, Plugin and Loader start expanded, Steam and MCP collapsed; VS Code remembers what
+you expand or collapse.
 
-In `unified` the same Screen row, plugin list (with the same inline icons) and actions are groups
-under the connected Deck, and **Settings** holds Edit, Copy viewer URL and Remove.
+- **Screen** (description: fps and Mbit/s from `/stream/stats`, polled every 5 s only while the
+  view is visible)
+  - **Open screen panel**: the live screen in an editor tab.
+  - **Open viewer in browser**: opens `http://host:port/viewer`. The browser is paired on its own:
+    press **Pair a browser** on the Deck, unless it still has the cookie from an earlier pairing.
+  - **Snapshot to file**: fetches `/frame.jpg` and saves it (default name `deck-<timestamp>.jpg`).
+- **Plugin** (description: the directory the workspace plugin deploys to)
+  - **Deploy**, **Reload backend**, **Show plugin logs** for the workspace folder that contains a
+    `plugin.json` (a picker asks if there are several). Without one the group says *no plugin.json
+    in workspace*, the actions show *needs a plugin folder*, and clicking one tells you to open
+    your plugin folder.
+- **Loader**
+  - **Restart loader**, **Show loader logs**, **Install plugin zip…** (pick any `.zip`).
+- **Steam**
+  - **Evaluate JS in Steam UI**, **Toast on Deck**.
+- **MCP**
+  - **Write MCP config for this workspace**, **Copy MCP URL** (`http://host:port/mcp`),
+    **Copy token** (the bearer token; a warning reminds you it is a secret).
 
-### Classic
+The view title has **Open screen** and **Refresh**.
 
-Unchanged from 0.2: while the active Deck is not paired, the Device view shows **Pair with device**,
-**Enter token manually**, **Switch device**, **Add device** and **Change host**. When paired it shows
-a Devices group (click another Deck to make it active), the `host:port` connection row (Pair, Enter
-token, Change host, Disconnect), Screen and Actions. Pairing uses the same flow as below. Here
-**Disconnect** forgets the token.
+### Plugins
+
+Lists the Deck's plugins (`GET /plugins`, falling back to the `list_plugins` tool) as
+`Name  version · dir`; hover for flags, `api_version` and `has_backend`. The inline icons reload a
+plugin's backend (`POST /plugins/{dir}/reload`) or open its log. The title bar has **Install
+plugin zip…** (pick a `.zip`, upload to `/plugins/install?restart=loader`, wait for the loader) and
+Refresh.
+
+### Preview
+
+Fetches one `/frame.jpg` every 1.5 s while the view is visible (well under 1 Mbit/s, instead of the
+~40 Mbit/s stream), scaled to the sidebar width. Click **Open full screen view** or the title icon
+for the screen panel.
 
 ## Pairing
 
@@ -119,8 +129,7 @@ name (press Enter to use the host). The port is 8765. A picker then offers **Con
   preview subscribe to its events.
 - **Health.** While connected, `/health` is checked every 15 s. If it fails, the Deck shows as
   unreachable but stays the connected Deck, with its token; when it answers again it is connected
-  again. Commands such as Deploy need a connected Deck in `devices-first` and `unified`; if there is
-  none they offer to connect.
+  again. Commands such as Deploy need a connected Deck; if there is none they offer to connect.
 - **Reconnect.** The connected Deck is remembered. After a window reload the extension reconnects to
   it silently if it answers and the token is still valid.
 
@@ -133,14 +142,14 @@ All of these are also in the command palette under the `Decky:` category.
 | Decky: Connect | Connects to a Deck; pairs first when there is no valid token |
 | Decky: Disconnect | Ends the session; keeps the token |
 | Decky: Re-pair | Runs pairing again for a Deck |
-| Decky: Pair with device | Pairing for the active Deck (classic) |
 | Decky: Enter token manually | Paste a token; it is checked with an MCP `tools/list` call |
 | Decky: Disconnect and forget token | Forgets the token for the active Deck |
-| Decky: Switch sidebar layout | Picks `devices-first`, `unified` or `classic` |
-| Decky: Switch device / Add device… / Edit device / Remove device | Manage saved Decks |
+| Decky: Switch device / Add device… / Edit device / Remove device | Connect to another saved Deck, manage saved Decks |
 | Decky: Copy viewer URL | Copies `http://host:port/viewer` for a browser |
 | Decky: Change host | Changes the active Deck's host/port and writes the `decky-mcp.host`/`port` settings |
 | Decky: Open screen | Live screen panel with fps / Mbps / resolution, pause, fit/actual, snapshot |
+| Decky: Open viewer in browser | Opens `http://host:port/viewer` in the default browser (pair the browser on the Deck) |
+| Decky: Snapshot to file | Saves the current `/frame.jpg` with a Save dialog |
 | Decky: Deploy plugin | `pnpm run build`, zip, `POST /plugins/install?restart=loader`, wait for `/health` |
 | Decky: Install plugin zip… | Uploads a plugin zip from disk to `/plugins/install?restart=loader` |
 | Decky: Restart loader | `POST /loader/restart` (falls back to the `restart_loader` tool) |
@@ -150,13 +159,14 @@ All of these are also in the command palette under the `Decky:` category.
 | Decky: Evaluate JS in Steam UI | Runs an expression with the `cef_evaluate` tool; result in an info message or the "Decky-MCP Console" output |
 | Decky: Toast on Deck | Shows a Decky toast |
 | Decky: Write MCP config for this workspace | Adds `mcpServers.decky` to `.mcp.json` in the first workspace folder |
+| Decky: Copy MCP URL | Copies `http://host:port/mcp` |
+| Decky: Copy token | Copies the bearer token (a secret) |
 | Decky: Refresh / Refresh plugins | Re-reads the token and `/health`, checks which Decks answer, reloads the plugin list |
 
 ## Settings
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `decky-mcp.sidebarLayout` | `devices-first` | `devices-first`, `unified` or `classic`; applies immediately |
 | `decky-mcp.openScreenOnConnect` | `true` | Open the screen panel after the first successful connect of a session |
 | `decky-mcp.host` | `10.0.70.18` | Deck IP or hostname. Seeds the first saved Deck; used when the device list is empty |
 | `decky-mcp.port` | `8765` | Decky-MCP server port (same rules as `host`) |
@@ -206,7 +216,7 @@ code --extensionDevelopmentPath="$PWD" /path/to/your/decky-plugin
 (`codium` works the same way.) Use `pnpm run watch` to rebuild on save, then run
 "Developer: Reload Window" in the development host.
 
-Install the packaged build with `code --install-extension decky-mcp-0.3.0.vsix`.
+Install the packaged build with `code --install-extension decky-mcp-0.4.0.vsix`.
 
 ### Smoke test (no device)
 
@@ -217,12 +227,13 @@ pnpm run smoke
 ```
 
 It evaluates the `when` clauses in `package.json` against the context keys the extension sets, and
-checks for each layout which views are visible, the device rows for an unpaired, a paired and a
-connected Deck, and the menus on them. It also checks that Connect on an unpaired Deck starts
-pairing (fake `/pair` answers 403, then a token), the reachability error with Retry, the pairing
-timeout (with a short timeout), the 15 s health check going unreachable and back, Add device, and
-that switching layouts writes the setting, sets `decky-mcp.layout` and refreshes every view. The
-classic checks from 0.2 still run in the `classic` layout.
+checks which views are visible before and after connecting, the device rows for an unpaired, a
+paired and a connected Deck and the menus on them, the view title buttons, and the Actions tree
+(exactly Screen, Plugin, Loader, Steam and MCP with their leaves, with and without a `plugin.json`
+in the workspace). It also checks that Connect on an unpaired Deck starts pairing (fake `/pair`
+answers 403, then a token), the reachability error with Retry, the pairing timeout (with a short
+timeout), the 15 s health check going unreachable and back, Add device, snapshot, Copy MCP URL /
+token and Open viewer.
 
 ### Headless integration check
 
