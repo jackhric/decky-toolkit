@@ -48,17 +48,17 @@
   const img = document.getElementById('img'), msg = document.getElementById('msg'), dot = document.getElementById('dot');
   const el = id => document.getElementById(id);
   let paused = false, abort = null, frames = 0, lastUrl = null;
-  let winFrames = [], winBytes = 0;
+  let win = []; // [time, bytes] for the last 2 s
 
   const show = t => { msg.textContent = t; msg.hidden = !t; };
 
   function stats(bytes) {
     const now = performance.now();
-    winFrames.push(now); winBytes += bytes;
-    while (winFrames.length && now - winFrames[0] > 2000) winFrames.shift();
-    el('fps').textContent = (winFrames.length / 2).toFixed(1);
+    win.push([now, bytes]);
+    while (win.length && now - win[0][0] > 2000) win.shift();
+    el('fps').textContent = (win.length / 2).toFixed(1);
     el('frames').textContent = ++frames;
-    if (frames % 10 === 0) { el('mbps').textContent = (winBytes * 8 / 2 / 1e6).toFixed(1); winBytes = 0; }
+    if (frames % 10 === 0) el('mbps').textContent = (win.reduce((a, [, b]) => a + b, 0) * 8 / 2 / 1e6).toFixed(1);
   }
 
   function present(buf) {
