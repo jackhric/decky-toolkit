@@ -1,6 +1,6 @@
 # Decky Toolkit for VS Code
 
-Companion extension for the [Decky Toolkit](../README.md) Decky Loader plugin. It talks to the plugin's
+Companion extension for the [Decky Toolkit](https://github.com/jackhric/decky-toolkit#readme) Decky Loader plugin. It talks to the plugin's
 HTTP server on the device (port 8765; any machine running Decky Loader: Steam Deck, SteamOS,
 Bazzite, …) and gives you, inside VS Code or VSCodium:
 
