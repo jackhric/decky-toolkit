@@ -4,6 +4,7 @@ import * as path from 'path';
 import { ActionsTreeProvider, WORKSPACE_PLUGIN } from './actionsTree';
 import { DeckyClient, describeError, isMissingRoute } from './client';
 import { Connection } from './connection';
+import { ControllerWatcher, ControllersTreeProvider, addVirtualController, removeVirtualController } from './controllers';
 import { DeployController, PluginWorkspace } from './deploy';
 import {
   addDevice, changeHost, copyViewerUrl, deviceActions, deviceFrom, editDevice, removeDevice, switchDevice, viewerUrl,
@@ -11,6 +12,7 @@ import {
 import { DevicesTreeProvider } from './devicesTree';
 import { toggleInput } from './input';
 import { LogManager } from './logs';
+import { navigate, openPluginPanel, simpleNavigate } from './navigation';
 import { connect, enterToken, pair } from './pairing';
 import { PluginsTreeProvider } from './pluginsTree';
 import { PreviewViewProvider } from './preview';
@@ -18,6 +20,7 @@ import { ScreenPanel, StatusBar } from './screenPanel';
 
 export { connectionTimings } from './connection';
 export { pairingTimings } from './pairing';
+export { controllerTimings } from './controllers';
 
 let conn: Connection | undefined;
 
@@ -38,14 +41,19 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   const devicesView = vscode.window.createTreeView('decky-mcp.devices', { treeDataProvider: devicesTree });
   const actionsView = vscode.window.createTreeView('decky-mcp.actions', { treeDataProvider: actionsTree });
   const pluginsView = vscode.window.createTreeView('decky-mcp.plugins', { treeDataProvider: pluginsTree });
+  const controllers = new ControllerWatcher(c, () => c.proxy.start());
+  const controllersTree = new ControllersTreeProvider(controllers);
+  const controllersView = vscode.window.createTreeView('decky-mcp.controllers', { treeDataProvider: controllersTree });
   ctx.subscriptions.push(
     c, status, logs, deployOut, consoleOut, workspacePlugins, devicesTree, actionsTree, pluginsTree, devicesView, actionsView, pluginsView,
+    controllers, controllersTree, controllersView,
     vscode.window.registerWebviewViewProvider(PreviewViewProvider.viewId, preview),
   );
   const refreshPlugins = () => pluginsTree.refresh();
 
   let connectedContext: boolean | undefined;
   let statsLease: vscode.Disposable | undefined;
+  let controllersLease: vscode.Disposable | undefined;
   let sessionId: string | undefined;
   const sync = () => {
     const connected = c.connectedDevice;
@@ -56,10 +64,12 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     if (connected?.id !== sessionId) {
       sessionId = connected?.id;
       refreshPlugins();
+      controllersTree.refresh();
     }
     const d = connected && (c.health.kind === 'unreachable' ? `${connected.name} · unreachable` : connected.name);
     actionsView.description = d;
     pluginsView.description = d;
+    controllersView.description = d;
     preview.setDescription(d);
     if (c.paired && connected && actionsView.visible) {
       statsLease ??= c.watchStats();
@@ -67,11 +77,19 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
       statsLease?.dispose();
       statsLease = undefined;
     }
+    if (c.paired && connected && controllersView.visible) {
+      controllersLease ??= controllers.watch();
+    } else {
+      controllersLease?.dispose();
+      controllersLease = undefined;
+    }
   };
   ctx.subscriptions.push(
     actionsView.onDidChangeVisibility(sync),
+    controllersView.onDidChangeVisibility(sync),
     c.onDidChange(sync),
     { dispose: () => statsLease?.dispose() },
+    { dispose: () => controllersLease?.dispose() },
   );
   sync();
 
@@ -121,7 +139,7 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   command('decky-mcp.deviceActions', arg => deviceActions(c, arg));
   command('decky-mcp.copyViewerUrl', arg => copyViewerUrl(c, arg));
   command('decky-mcp.openScreen', async () => {
-    if (await c.client()) await ScreenPanel.show(ctx, c);
+    if (await c.client()) await ScreenPanel.show(ctx, c, controllers);
   });
   command('decky-mcp.openViewer', async () => {
     const d = (await c.client()) && c.connectedDevice;
@@ -129,6 +147,14 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   });
   command('decky-mcp.snapshot', () => snapshot(c));
   command('decky-mcp.toggleInput', () => toggleInput(c));
+  command('decky-mcp.addVirtualController', () => addVirtualController(c, controllers));
+  command('decky-mcp.removeVirtualController', arg => removeVirtualController(c, controllers, arg));
+  command('decky-mcp.refreshControllers', async () => controllersTree.refresh());
+  command('decky-mcp.navigate', () => navigate(c));
+  command('decky-mcp.openPluginPanel', arg => openPluginPanel(c, arg));
+  command('decky-mcp.uiBack', () => simpleNavigate(c, { action: 'back' }));
+  command('decky-mcp.uiQuickAccess', () => simpleNavigate(c, { action: 'quick_access' }));
+  command('decky-mcp.uiCloseMenus', () => simpleNavigate(c, { action: 'close_menus' }));
   command('decky-mcp.deploy', () => deployer.deploy());
   command('decky-mcp.deployFull', () => deployer.deploy({ full: true }));
   command('decky-mcp.toggleAutoDeploy', async () => {

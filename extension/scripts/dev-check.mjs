@@ -245,6 +245,37 @@ await check('MCP tools/call loader_log via client', async () => {
   return `${text.split('\n').length} lines`;
 });
 
+// Read-only: never adds pads or navigates on the shared device. Passes on 404 (older device).
+await check('controllers and Steam UI routes probe (informational)', async () => {
+  const c = new DeckyClient({ host, port }, token);
+  const parts = [];
+  try {
+    const l = await c.controllers();
+    const rows = l.controllers.map(x => `${x.name} [${x.kind}, Steam Input: ${x.steam ? `${x.steam.type} slot ${x.steam.slot}` : 'not seen'}]`);
+    parts.push(`/controllers: ${rows.join(', ') || 'none'}; ${l.virtual.length} virtual (${l.virtual.map(v => `${v.name}${v.auto ? ' auto' : ''}`).join(', ')}); input_enabled=${l.input_enabled}`);
+  } catch (e) {
+    parts.push(`/controllers → ${redact(e.message)}`);
+  }
+  try {
+    const r = await c.uiRoutes();
+    parts.push(`/ui/routes: current ${r.current}, ${r.official.length} official, ${r.plugins.length} plugin routes, tabs ${r.quick_access_tabs.join('/') || 'none'}`);
+  } catch (e) {
+    parts.push(`/ui/routes → ${redact(e.message)}`);
+  }
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), 5000);
+  try {
+    const res = await fetch(base + '/controllers/events', { signal: ac.signal, headers: { Accept: 'text/event-stream', Origin: 'vscode-webview://dev-check' } });
+    parts.push(`/controllers/events via proxy → ${res.status} ${res.headers.get('content-type') ?? ''}`.trim());
+    ac.abort();
+  } catch (e) {
+    parts.push(`/controllers/events via proxy → ${e.name === 'AbortError' ? 'no headers in 5 s' : redact(e.message)}`);
+  } finally {
+    clearTimeout(t);
+  }
+  return parts.join('; ');
+});
+
 await check('planned routes probe (informational)', async () => {
   const c = new DeckyClient({ host, port }, token);
   const probe = async (p, init) => (await c.fetch(p, { timeoutMs: 5000, ...init }).then(r => { r.body?.cancel(); return r.status; }));

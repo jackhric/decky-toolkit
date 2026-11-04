@@ -17,7 +17,8 @@ const outfile = path.join(root, 'out', 'smoke.cjs');
 await esbuild.build({
   stdin: {
     contents: "export * from './src/extension'; export * from './src/actionsTree'; export * from './src/pluginsTree'; " +
-      "export * from './src/pluginDeploy'; export * from './src/stage'; export { AUTO_DEPLOY_DEBOUNCE_MS } from './src/deploy';",
+      "export * from './src/pluginDeploy'; export * from './src/stage'; export { AUTO_DEPLOY_DEBOUNCE_MS } from './src/deploy'; " +
+      "export * from './src/controllers'; export * from './src/navigation'; export { HttpError } from './src/client';",
     resolveDir: root,
     loader: 'ts',
   },
@@ -207,10 +208,34 @@ let plugins = [
 ];
 const device = { up: true, pairQueue: [], pairRequests: [], pairCancelled: [], pairUnsupported: false, installs: [], journal: ['boot'], pluginLog: {}, installMeta: { name: 'My Plugin', version: '1.2.3' }, downFor: 0, inputSupported: true, input: { enabled: false, backend: 'ei', available: true, reason: null } };
 const frameJpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 0xff, 0xd9]);
+// Controllers and Steam UI routes as in the API contract; `streams` are open /controllers/events bodies.
+const steamDeck = { id: 'evdev:deck', name: 'Steam Deck', kind: 'physical', virtual_id: null, vendor: '28de', product: '1205', device: '/dev/input/event5', steam: { type: 'steamdeck', slot: 0, name: 'Steam Deck' } };
+const ctl = {
+  missing: false, eventsStatus: 200, refuse: null, nextId: 1, posts: [], streams: new Set(),
+  controllers: [steamDeck, { id: 'evdev:auto', name: 'Decky-MCP pad', kind: 'virtual', virtual_id: 'auto0', vendor: '045e', product: '028e', device: '/dev/input/event9', steam: { type: 'xbox360', slot: 1, name: 'Xbox 360 Controller' } }],
+  virtual: [{ id: 'auto0', name: 'Decky-MCP pad', type: 'x360', created_at: 1, last_event_at: 2, auto: true }],
+};
+const ctlPush = () => {
+  const line = new TextEncoder().encode(`data: ${JSON.stringify({ type: 'controllers', controllers: ctl.controllers, virtual: ctl.virtual })}\n\n`);
+  for (const s of ctl.streams) s.enqueue(line);
+};
+const ctlCloseStreams = () => { for (const s of ctl.streams) { try { s.close(); } catch { /* closed */ } } ctl.streams.clear(); };
+const uiRoutes = {
+  current: '/library/home',
+  official: [{ path: '/library/home', title: 'Library' }, { path: '/library/app/{appid}', title: 'Game details', template: true }, { path: '/settings', title: 'Settings' }],
+  plugins: [{ plugin: 'Tender', path: '/tender', title: 'Tender' }],
+  quick_access_tabs: ['Notifications', 'Decky'],
+};
+const uiDevice = { missing: false, posts: [] };
 const fetched = [];
 globalThis.fetch = async (url, init = {}) => {
-  const u = new URL(url);
-  const auth = new Headers(init.headers).get('authorization');
+  let u = new URL(url);
+  let auth = new Headers(init.headers).get('authorization');
+  // Requests through the extension's loopback proxy: the proxy adds the token.
+  if (u.hostname === '127.0.0.1') {
+    u = new URL(`http://${settings.host}:${settings.port}${u.pathname.replace(/^\/[^/]+/, '')}${u.search}`);
+    auth = 'Bearer fake-token';
+  }
   if (device.downFor > 0 && u.pathname === '/health') {
     device.downFor--;
     throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED', message: 'connect ECONNREFUSED' } });
@@ -276,6 +301,45 @@ globalThis.fetch = async (url, init = {}) => {
     if (init.method === 'PUT') device.input = { ...device.input, enabled: JSON.parse(init.body).enabled };
     return json(device.input);
   }
+  if (u.pathname.startsWith('/controllers') && ctl.missing) return new Response('404: Not Found', { status: 404 });
+  if (u.pathname === '/controllers') return json({ controllers: ctl.controllers, virtual: ctl.virtual, input_enabled: device.input.enabled });
+  if (u.pathname === '/controllers/events') {
+    if (ctl.eventsStatus !== 200) return json({ error: 'events unavailable' }, ctl.eventsStatus);
+    let c;
+    const body = new ReadableStream({ start(ctrl) { c = ctrl; ctl.streams.add(ctrl); }, cancel() { ctl.streams.delete(c); } });
+    init.signal?.addEventListener('abort', () => { ctl.streams.delete(c); try { c.error(new DOMException('aborted', 'AbortError')); } catch { /* closed */ } });
+    return new Response(body, { headers: { 'content-type': 'text/event-stream' } });
+  }
+  if (u.pathname === '/controllers/virtual' && init.method === 'POST') {
+    const req = JSON.parse(init.body);
+    ctl.posts.push(req);
+    if (ctl.refuse) return json({ error: ctl.refuse }, 422);
+    if (ctl.virtual.filter(v => !v.auto).length >= 4) return json({ error: 'all 4 virtual controller slots are in use' }, 409);
+    const id = `v${ctl.nextId++}`;
+    const name = req.name ?? `Virtual pad ${ctl.nextId - 1}`;
+    ctl.virtual.push({ id, name, type: 'x360', created_at: 3, last_event_at: null, auto: false });
+    ctl.controllers.push({ id: `evdev:${id}`, name, kind: 'virtual', virtual_id: id, vendor: '045e', product: '028e', device: `/dev/input/event1${ctl.nextId}`, steam: { type: 'xbox360', slot: ctl.controllers.length, name: 'Xbox 360 Controller' } });
+    ctlPush();
+    return json({ id, name, type: 'x360' }, 201);
+  }
+  const removePad = /^\/controllers\/virtual\/([^/]+)$/.exec(u.pathname);
+  if (removePad && init.method === 'DELETE') {
+    const id = decodeURIComponent(removePad[1]);
+    if (!ctl.virtual.some(v => v.id === id)) return json({ error: `unknown virtual controller ${id}` }, 404);
+    ctl.virtual = ctl.virtual.filter(v => v.id !== id);
+    ctl.controllers = ctl.controllers.filter(c => c.virtual_id !== id);
+    ctlPush();
+    return json({ removed: id });
+  }
+  if (u.pathname.startsWith('/ui/') && uiDevice.missing) return new Response('404: Not Found', { status: 404 });
+  if (u.pathname === '/ui/routes') return json(uiRoutes);
+  if (u.pathname === '/ui/navigate' && init.method === 'POST') {
+    const body = JSON.parse(init.body);
+    uiDevice.posts.push(body);
+    if (body.path && !/^\/(library|settings|tender)/.test(body.path)) return json({ error: `unknown path ${body.path}`, official: uiRoutes.official.map(r => r.path) }, 400);
+    if (body.path) uiRoutes.current = body.path;
+    return json({ ok: true, current: body.path ?? (body.action === 'plugin' ? `/quickaccess/${body.plugin}` : uiRoutes.current) });
+  }
   if (u.pathname === '/frame.jpg') return new Response(frameJpeg, { headers: { 'content-type': 'image/jpeg' } });
   const reload = /^\/plugins\/([^/]+)\/reload$/.exec(u.pathname);
   if (reload && init.method === 'POST') return json({ ok: true, dir: decodeURIComponent(reload[1]) });
@@ -333,6 +397,7 @@ const lastMessage = kind => calls.messages.filter(m => m.kind === kind).at(-1);
 
 ext.connectionTimings.healthPollMs = 40;
 ext.pairingTimings.retryMs = 20;
+ext.controllerTimings.pollMs = 40;
 
 await ext.activate(ctx);
 await settle();
@@ -354,7 +419,10 @@ const EXPECTED_ACTIONS = {
     ['Show plugin logs', 'decky-mcp.pluginLogs'], ['Auto-deploy on change: Off', 'decky-mcp.toggleAutoDeploy']]],
   Loader: ['server', 2, [
     ['Restart loader', 'decky-mcp.restartLoader'], ['Show loader logs', 'decky-mcp.loaderLogs'], ['Install plugin zip…', 'decky-mcp.installZip']]],
-  Steam: ['game', 1, [['Evaluate JS in Steam UI', 'decky-mcp.evaluate'], ['Toast on device', 'decky-mcp.toast']]],
+  Steam: ['game', 1, [
+    ['Navigate to…', 'decky-mcp.navigate'], ['Open plugin panel…', 'decky-mcp.openPluginPanel'], ['Back', 'decky-mcp.uiBack'],
+    ['Quick Access', 'decky-mcp.uiQuickAccess'], ['Close menus', 'decky-mcp.uiCloseMenus'],
+    ['Evaluate JS in Steam UI', 'decky-mcp.evaluate'], ['Toast on device', 'decky-mcp.toast']]],
   MCP: ['server-process', 1, [
     ['Write MCP config for this workspace', 'decky-mcp.writeMcpConfig'], ['Copy MCP URL', 'decky-mcp.copyMcpUrl'], ['Copy token', 'decky-mcp.copyToken']]],
 };
@@ -387,24 +455,24 @@ async function actionsTree() {
   return { roots, kids };
 }
 
-await check('activate() registers the four views', async () => {
+await check('activate() registers the five views', async () => {
   const trees = [...calls.treeViews.map(t => t.id), ...calls.treeProviders.map(t => t.id)].sort();
-  assert.deepEqual(trees, ['decky-mcp.actions', 'decky-mcp.devices', 'decky-mcp.plugins']);
+  assert.deepEqual(trees, ['decky-mcp.actions', 'decky-mcp.controllers', 'decky-mcp.devices', 'decky-mcp.plugins']);
   assert.deepEqual(calls.webviewProviders.map(w => w.id), ['decky-mcp.preview']);
   const declared = pkg.contributes.views['decky-mcp'].map(v => [v.id, v.name]);
   assert.deepEqual(declared, [
-    ['decky-mcp.devices', 'Devices'], ['decky-mcp.actions', 'Actions'], ['decky-mcp.plugins', 'Plugins'], ['decky-mcp.preview', 'Preview']]);
+    ['decky-mcp.devices', 'Devices'], ['decky-mcp.actions', 'Actions'], ['decky-mcp.plugins', 'Plugins'], ['decky-mcp.controllers', 'Controllers'], ['decky-mcp.preview', 'Preview']]);
   return `createTreeView(${trees.join(', ')}), registerWebviewViewProvider(decky-mcp.preview)`;
 });
 
 await check('package.json: container, activation, commands, menus, version', async () => {
-  assert.equal(pkg.version, '0.5.0');
+  assert.equal(pkg.version, '0.6.0');
   const container = pkg.contributes.viewsContainers.activitybar[0];
   assert.equal(container.id, 'decky-mcp');
   assert.equal(container.title, 'Decky');
   assert.equal(readFileSync(path.join(root, container.icon), 'utf8').includes('currentColor'), true);
   for (const v of pkg.contributes.views['decky-mcp']) assert.ok(pkg.activationEvents.includes(`onView:${v.id}`), v.id);
-  assert.equal(pkg.activationEvents.length, 7);
+  assert.equal(pkg.activationEvents.length, 8);
   for (const glob of ['plugin.json', '*/plugin.json', '*/*/plugin.json']) assert.ok(pkg.activationEvents.includes(`workspaceContains:${glob}`), glob);
   assert.deepEqual(pkg.contributes.keybindings, [{ command: 'decky-mcp.deploy', key: 'ctrl+alt+d', mac: 'cmd+alt+d' }]);
   for (const v of pkg.contributes.views['decky-mcp']) {
@@ -422,7 +490,7 @@ await check('package.json: container, activation, commands, menus, version', asy
   for (const w of whens.filter(Boolean)) {
     for (const [, key] of w.replace(/\/(?:\\.|[^/])+\//g, '/re/').matchAll(/(?:^|&&|\|\||\(|!)\s*([A-Za-z][\w.-]*)/g)) assert.ok(allowedKeys.has(key), `context key ${key} in ${w}`);
   }
-  assert.deepEqual(pkg.contributes.viewsWelcome.map(w => w.view), ['decky-mcp.devices']);
+  assert.deepEqual(pkg.contributes.viewsWelcome.map(w => w.view), ['decky-mcp.devices', 'decky-mcp.controllers']);
   assert.deepEqual(Object.keys(pkg.contributes.configuration.properties).sort(),
     ['decky-mcp.deploy.build', 'decky-mcp.deploy.onChange', 'decky-mcp.host', 'decky-mcp.openScreenOnConnect', 'decky-mcp.pluginDirName', 'decky-mcp.port']);
   assert.deepEqual(pkg.contributes.configuration.properties['decky-mcp.deploy.build'].enum, ['auto', 'always', 'never']);
@@ -433,11 +501,12 @@ await check('package.json: container, activation, commands, menus, version', asy
     'decky-mcp.devices': ['decky-mcp.addDevice', 'decky-mcp.refresh'],
     'decky-mcp.actions': ['decky-mcp.openScreen', 'decky-mcp.refresh'],
     'decky-mcp.plugins': ['decky-mcp.installZip', 'decky-mcp.refreshPlugins'],
+    'decky-mcp.controllers': ['decky-mcp.addVirtualController', 'decky-mcp.refreshControllers'],
     'decky-mcp.preview': ['decky-mcp.openScreen'],
   };
   for (const [view, want] of Object.entries(titles)) assert.deepEqual(titleMenu(view), want, `${view} title`);
   for (const view of Object.keys(titles)) {
-    for (const viewItem of ['plugin', 'deck.unpaired', 'deck.paired', 'deck.session', 'deck.busy', 'action', 'group.screen']) {
+    for (const viewItem of ['plugin', 'deck.unpaired', 'deck.paired', 'deck.session', 'deck.busy', 'action', 'group.screen', 'controller.virtual', 'controller.physical', 'controller.unsupported']) {
       for (const inline of [true, false]) assert.deepEqual(dupes(itemMenu(view, viewItem, inline)), [], `${view} ${viewItem}`);
     }
   }
@@ -541,7 +610,7 @@ await check('Connect on an unpaired device files a pairing request, waits for ap
 
 await check('connected: views, device row, titles and status bar', async () => {
   await settle(100);
-  assert.deepEqual(visibleViews(), ['decky-mcp.devices', 'decky-mcp.actions', 'decky-mcp.plugins', 'decky-mcp.preview']);
+  assert.deepEqual(visibleViews(), ['decky-mcp.devices', 'decky-mcp.actions', 'decky-mcp.plugins', 'decky-mcp.controllers', 'decky-mcp.preview']);
   const [r] = devicesProvider().getChildren();
   assert.equal(r.label, '10.1.2.3');
   assert.equal(r.description, 'connected');
@@ -980,6 +1049,284 @@ await check('screen panel: stream settings popover, audio controls, mute/volume 
   return 'ready → GET, setStream → PUT {fps, audio} only, tick mirrors, 404 → hidden; screen.js: mute 🔇/🔊, volume 0.35 saved, Applying… → done, audio off hides controls';
 });
 
+await check('Controllers view with fake clients: empty, physical + virtual, 404, error', async () => {
+  const fakeConn = client => ({ connectedDevice: { id: 'x', name: 'h', host: 'h', port: 1 }, authedClient: () => client, onDidChangeTarget: new EventEmitter().event, label: 'h' });
+  const treeFor = controllers => new ext.ControllersTreeProvider(new ext.ControllerWatcher(fakeConn({ controllers }), async () => 'http://127.0.0.1:1/x'));
+
+  assert.deepEqual(await treeFor(async () => ({ controllers: [], virtual: [], input_enabled: false })).getChildren(), [], 'empty → welcome');
+  const welcome = pkg.contributes.viewsWelcome.find(w => w.view === 'decky-mcp.controllers').contents;
+  assert.equal(welcome, 'No controllers seen by Steam Input.\n[Add virtual controller](command:decky-mcp.addVirtualController)');
+
+  const list = {
+    controllers: [
+      steamDeck,
+      { id: 'evdev:v1', name: 'Virtual pad 1', kind: 'virtual', virtual_id: 'v1', vendor: '045e', product: '028e', device: '/dev/input/event12', steam: { type: 'xbox360', slot: 1, name: 'Xbox 360 Controller' } },
+      { id: 'evdev:8bd', name: '8BitDo Pro 2', kind: 'physical', virtual_id: null, vendor: '2dc8', product: '6003', device: '/dev/input/event7', steam: null },
+    ],
+    virtual: [{ id: 'v1', name: 'Virtual pad 1', type: 'x360', auto: false }, { id: 'v2', name: 'Couch', type: 'x360', auto: false }],
+    input_enabled: true,
+  };
+  const rows = await treeFor(async () => list).getChildren();
+  assert.deepEqual(rows.map(r => [r.label, r.description]), [
+    ['Steam Deck', 'physical · Steam Input: steamdeck (slot 0)'],
+    ['Virtual pad 1', 'virtual · Steam Input: xbox360 (slot 1)'],
+    ['8BitDo Pro 2', 'physical · not seen by Steam Input'],
+    ['Couch (virtual)', 'virtual · not seen by Steam Input'],
+  ]);
+  assert.deepEqual(rows.map(r => [r.iconPath.id, r.iconPath.color?.id]), [['game', undefined], ['game', 'charts.blue'], ['game', undefined], ['game', 'charts.blue']]);
+  assert.deepEqual(rows.map(r => r.virtualId), [undefined, 'v1', undefined, 'v2']);
+  const ctx = new Map([['decky-mcp.connected', true]]);
+  const inline = r => pkg.contributes.menus['view/item/context'].filter(m => m.group.startsWith('inline') && evalWhen(m.when, new Map([...ctx, ['view', 'decky-mcp.controllers'], ['viewItem', r.contextValue]]))).map(m => m.command);
+  assert.deepEqual(rows.map(inline), [[], ['decky-mcp.removeVirtualController'], [], ['decky-mcp.removeVirtualController']]);
+  assert.match(rows[1].tooltip.value, /Steam Input: xbox360, slot 1/);
+
+  const [old] = await treeFor(async () => { throw new ext.HttpError(404, '404: Not Found', '/controllers'); }).getChildren();
+  assert.deepEqual([old.label, old.description, old.iconPath.color.id, old.contextValue], ['Controllers', 'update Decky-MCP on the device', 'disabledForeground', 'controller.unsupported']);
+  assert.deepEqual(inline(old), []);
+  const [err] = await treeFor(async () => { throw new Error('boom'); }).getChildren();
+  assert.equal(err.label, 'Could not load controllers: boom');
+  assert.equal(err.command.command, 'decky-mcp.refreshControllers');
+  return rows.map(r => `${r.label} — ${r.description}`).join(' | ') + `; 404 → "${old.description}"`;
+});
+
+await check('Controllers view live: SSE through the proxy, add / remove, 409 and Steam Input refusal as-is, poll fallback, 404', async () => {
+  const provider = tree('decky-mcp.controllers').provider;
+  const rowLabels = async () => labels(await provider.getChildren());
+  await settle(100);
+  assert.deepEqual(await rowLabels(), ['Steam Deck', 'Decky-MCP pad (virtual)']);
+  assert.equal(tree('decky-mcp.controllers').view.description, '10.1.2.3');
+  assert.ok(fetched.includes('/controllers/events'), 'events requested through the proxy');
+  assert.ok(ctl.streams.size >= 1, 'event stream open');
+
+  // A change on the device arrives over SSE, without polling.
+  fetched.length = 0;
+  ctl.controllers = [...ctl.controllers, { id: 'evdev:8bd', name: '8BitDo Pro 2', kind: 'physical', virtual_id: null, vendor: '2dc8', product: '6003', device: '/dev/input/event7', steam: null }];
+  ctlPush();
+  await settle(120);
+  assert.deepEqual(await rowLabels(), ['Steam Deck', 'Decky-MCP pad (virtual)', '8BitDo Pro 2']);
+  assert.ok(!fetched.includes('/controllers'), 'no polling while the stream is open');
+
+  // Add: optional name, Enter takes "Virtual pad N" (the auto pad does not count).
+  let prompt;
+  ui.inputBox = opts => { prompt = opts; return ''; };
+  await run('decky-mcp.addVirtualController');
+  await settle();
+  assert.equal(prompt.placeHolder, 'Virtual pad 1');
+  assert.deepEqual(ctl.posts.at(-1), { name: 'Virtual pad 1' });
+  assert.equal(lastMessage('info').m, 'Decky-MCP: Virtual controller added and recognised by Steam Input (Virtual pad 1).');
+  let rows = await provider.getChildren();
+  const added = rows.find(r => r.label === 'Virtual pad 1');
+  assert.equal(added.description, 'virtual · Steam Input: xbox360 (slot 3)');
+
+  ui.inputBox = () => 'Couch';
+  await run('decky-mcp.addVirtualController');
+  assert.deepEqual(ctl.posts.at(-1), { name: 'Couch' });
+  ui.inputBox = () => undefined;
+  const posts = ctl.posts.length;
+  await run('decky-mcp.addVirtualController');
+  assert.equal(ctl.posts.length, posts, 'Escape adds nothing');
+
+  // Remove: inline on the row, or a pick from the palette.
+  await run('decky-mcp.removeVirtualController', added);
+  await settle();
+  assert.ok(!(await rowLabels()).includes('Virtual pad 1'));
+  let offered;
+  ui.quickPick = items => { offered = labels(items); return items.find(i => i.label === 'Couch'); };
+  await run('decky-mcp.removeVirtualController');
+  await settle();
+  assert.deepEqual(offered, ['Decky-MCP pad', 'Couch']);
+  assert.ok(!(await rowLabels()).includes('Couch (virtual)'));
+
+  // Refusals: the server's text as-is.
+  ui.inputBox = () => '';
+  ctl.refuse = 'Steam Input did not pick up the new pad within 5 s; it was removed';
+  await run('decky-mcp.addVirtualController');
+  assert.equal(lastMessage('warning').m, 'Decky-MCP: Steam Input did not pick up the new pad within 5 s; it was removed');
+  ctl.refuse = null;
+  for (let i = 0; i < 4; i++) await run('decky-mcp.addVirtualController');
+  await run('decky-mcp.addVirtualController');
+  assert.equal(lastMessage('warning').m, 'Decky-MCP: all 4 virtual controller slots are in use');
+  for (const v of ctl.virtual.filter(p => !p.auto)) await run('decky-mcp.removeVirtualController', v.id);
+
+  // The stream fails: a 5 s poll (40 ms here) keeps the list current and the stream is retried.
+  ctl.eventsStatus = 500;
+  ctlCloseStreams();
+  await settle(60);
+  ctl.controllers = ctl.controllers.filter(c => c.id !== 'evdev:8bd');
+  await settle(150);
+  assert.deepEqual(await rowLabels(), ['Steam Deck', 'Decky-MCP pad (virtual)'], 'poll picked up the change');
+  ctl.eventsStatus = 200;
+  await settle(150);
+  assert.ok(ctl.streams.size >= 1, 'stream reopened');
+
+  // An older device: one disabled row, add explains.
+  ctl.missing = true;
+  ctlCloseStreams();
+  await settle(150);
+  rows = await provider.getChildren();
+  assert.deepEqual(rows.map(r => [r.label, r.description]), [['Controllers', 'update Decky-MCP on the device']]);
+  await run('decky-mcp.addVirtualController');
+  assert.match(lastMessage('warning').m, /update Decky-MCP on the device \(10\.1\.2\.3\)/);
+  ctl.missing = false;
+  await settle(150);
+  assert.deepEqual(await rowLabels(), ['Steam Deck', 'Decky-MCP pad (virtual)'], 'recovers once the device answers');
+  return `SSE update, add "Virtual pad 1" (slot 3), remove inline + palette, refusal and 409 as-is, poll fallback, 404 → "${rows[0].description}"`;
+});
+
+await check('screen panel: "Forward to" select (pads message, addPad, pad field on gamepad messages)', async () => {
+  const panel = calls.panels[0];
+  assert.match(panel.webview.html, /<select id="pad-target"[^>]*><option value="">Auto<\/option><\/select>/);
+  const padMsgs = () => panel._posted.filter(m => m.type === 'pads');
+  panel._posted.length = 0;
+  panel._received.fire({ type: 'ready' });
+  await settle();
+  assert.deepEqual(padMsgs().at(-1), { type: 'pads', pads: [] }, 'the auto pad is "Auto", not a choice');
+  ui.inputBox = () => 'Couch';
+  panel._received.fire({ type: 'addPad' });
+  await settle(100);
+  const id = ctl.virtual.find(v => v.name === 'Couch').id;
+  assert.deepEqual(padMsgs().at(-1), { type: 'pads', pads: [{ id, name: 'Couch' }], select: id }, 'the new pad is selected');
+  ctl.missing = true;
+  await run('decky-mcp.refreshControllers');
+  await settle();
+  assert.deepEqual(padMsgs().at(-1), { type: 'pads', pads: null }, '404 hides the select');
+  ctl.missing = false;
+  await run('decky-mcp.refreshControllers');
+  await settle();
+  await run('decky-mcp.removeVirtualController', id);
+
+  // The real media/screen.js: the chosen id goes into the `pad` field.
+  const src = readFileSync(path.join(root, 'media', 'screen.js'), 'utf8');
+  const els = new Map();
+  const el = eid => {
+    if (!els.has(eid)) {
+      const classes = new Set();
+      const options = [];
+      els.set(eid, {
+        id: eid, textContent: '', hidden: eid === 'pad-ind' || eid === 'pad-fwd', value: '', checked: false, disabled: false, title: '', options,
+        add: o => options.push(o), remove: i => options.splice(i, 1),
+        addEventListener() {}, setAttribute() {}, focus() {},
+        classList: { add: c => classes.add(c), remove: c => classes.delete(c), contains: c => classes.has(c), toggle: (c, on) => ((on ?? !classes.has(c)) ? classes.add(c) : classes.delete(c), classes.has(c)) },
+      });
+    }
+    return els.get(eid);
+  };
+  const listeners = {}, posted = [], sent = [];
+  let state;
+  const fakeVscode = { postMessage: m => posted.push(m), getState: () => state, setState: s => { state = s; } };
+  const document = { getElementById: el, body: { dataset: { base: 'http://127.0.0.1:1/x' } }, addEventListener() {}, hasFocus: () => true };
+  const window = { addEventListener: (t, fn) => { (listeners[t] ??= []).push(fn); } };
+  class FakeWs { constructor(url) { this.url = url; this.readyState = 1; FakeWs.last = this; } send(d) { sent.push(JSON.parse(d)); } close() {} }
+  FakeWs.OPEN = 1;
+  class Option { constructor(text, value) { this.text = text; this.value = value; } }
+  let gamepads = [];
+  const navigator = { getGamepads: () => gamepads };
+  new Function('acquireVsCodeApi', 'document', 'window', 'fetch', 'WebSocket', 'requestAnimationFrame', 'Option', 'navigator', src)(
+    () => fakeVscode, document, window, () => new Promise(() => {}), FakeWs, () => 0, Option, navigator);
+  const post = data => listeners.message.forEach(fn => fn({ data }));
+  const fire = t => listeners[t].forEach(fn => fn({}));
+  post({ type: 'input', state: { supported: true, enabled: true, available: true, backend: 'libei', reason: null } });
+  FakeWs.last.onopen();
+  post({ type: 'pads', pads: [{ id: 'v1', name: 'Virtual pad 1' }, { id: 'v2', name: 'Couch' }] });
+  const sel = el('pad-target');
+  assert.deepEqual(sel.options.map(o => [o.value, o.text]), [['', 'Auto'], ['v1', 'Virtual pad 1'], ['v2', 'Couch'], ['__add__', 'New virtual pad…']]);
+  assert.equal(sel.value, '');
+  assert.equal(el('pad-fwd').hidden, true, 'hidden until a gamepad shows up');
+
+  const pressed = i => ({ pressed: i === 0, value: i === 0 ? 1 : 0 });
+  gamepads = [{ connected: true, mapping: 'standard', buttons: Array.from({ length: 17 }, (_, i) => pressed(i)), axes: [0, 0, 0, 0] }];
+  fire('gamepadconnected');
+  assert.equal(el('pad-fwd').hidden, false);
+  const pads = () => sent.filter(m => m.type === 'gamepad');
+  assert.equal(pads().at(-1).buttons.a, true);
+  assert.equal('pad' in pads().at(-1), false, 'Auto sends no pad field');
+
+  sel.value = 'v2'; sel.onchange();
+  assert.deepEqual([pads().at(-1).buttons.a, 'pad' in pads().at(-1)], [false, false], 'Auto got a neutral state first');
+  fire('gamepadconnected');
+  assert.deepEqual([pads().at(-1).buttons.a, pads().at(-1).pad], [true, 'v2']);
+  assert.equal(state.padTarget, 'v2', 'choice kept in the webview state');
+
+  sel.value = '__add__'; sel.onchange();
+  assert.deepEqual(posted.at(-1), { type: 'addPad' });
+  assert.equal(sel.value, 'v2', 'the select goes back to the current target');
+  post({ type: 'pads', pads: [{ id: 'v1', name: 'Virtual pad 1' }, { id: 'v2', name: 'Couch' }, { id: 'v3', name: 'New' }], select: 'v3' });
+  assert.equal(sel.value, 'v3');
+  fire('gamepadconnected');
+  assert.equal(pads().at(-1).pad, 'v3');
+  post({ type: 'pads', pads: [{ id: 'v1', name: 'Virtual pad 1' }] });
+  assert.equal(sel.value, '', 'a removed target falls back to Auto');
+  post({ type: 'pads', pads: null });
+  assert.equal(el('pad-fwd').hidden, true, 'older device: no select');
+  gamepads = [];
+  fire('gamepaddisconnected');
+  return `options Auto / Virtual pad 1 / Couch / New virtual pad…; Auto → no pad field, Couch → pad "v2", New virtual pad… → addPad, removed → Auto, 404 → hidden`;
+});
+
+await check('Steam UI navigation: Navigate to… QuickPick, template prompt, plugin panel, back / Quick Access / close menus, 400, 404', async () => {
+  let offered;
+  ui.quickPick = (items, opts) => { offered = { items, opts }; return items.find(i => i.label === 'Settings'); };
+  await run('decky-mcp.navigate');
+  assert.equal(offered.opts.placeHolder, 'Current: /library/home');
+  const placeHolder = offered.opts.placeHolder;
+  const sections = offered.items.filter(i => i.kind === vscode.QuickPickItemKind.Separator).map(i => i.label);
+  assert.deepEqual(sections, ['Official', 'Plugins', 'Menus']);
+  assert.deepEqual(offered.items.filter(i => i.kind === undefined).map(i => [i.label, i.description]), [
+    ['Library', '/library/home · current'], ['Game details', '/library/app/{appid}'], ['Settings', '/settings'], ['Tender', '/tender'],
+    ['Main menu', undefined], ['Quick Access', undefined], ['Quick Access › Notifications', undefined], ['Quick Access › Decky', undefined]]);
+  assert.deepEqual(uiDevice.posts.at(-1), { path: '/settings' });
+  assert.match(calls.statusMessages.at(-1), /Steam UI at \/settings/);
+
+  let prompt;
+  ui.quickPick = items => items.find(i => i.label === 'Game details');
+  ui.inputBox = opts => { prompt = opts; return ' 620 '; };
+  await run('decky-mcp.navigate');
+  assert.match(prompt.prompt, /Steam app ID/);
+  assert.equal(prompt.validateInput('abc'), 'Digits only');
+  assert.equal(prompt.validateInput('620'), undefined);
+  assert.deepEqual(uiDevice.posts.at(-1), { path: '/library/app/620' });
+  ui.inputBox = () => undefined;
+  const before = uiDevice.posts.length;
+  await run('decky-mcp.navigate');
+  assert.equal(uiDevice.posts.length, before, 'cancelled template prompt sends nothing');
+
+  ui.quickPick = items => items.find(i => i.label === 'Quick Access › Decky');
+  await run('decky-mcp.navigate');
+  assert.deepEqual(uiDevice.posts.at(-1), { action: 'quick_access', tab: 'Decky' });
+
+  ui.quickPick = (items, opts) => { offered = { items, opts }; return items.find(i => i.label === 'Tender'); };
+  await run('decky-mcp.openPluginPanel');
+  assert.deepEqual(labels(offered.items), ['Decky-MCP', 'My Plugin', 'Tender']);
+  assert.deepEqual(uiDevice.posts.at(-1), { action: 'plugin', plugin: 'Tender' });
+  const [row] = await pluginsProvider().getChildren();
+  await run('decky-mcp.openPluginPanel', row);
+  assert.deepEqual(uiDevice.posts.at(-1), { action: 'plugin', plugin: 'Decky-MCP' });
+  assert.ok(itemMenu('decky-mcp.plugins', 'plugin', false).includes('decky-mcp.openPluginPanel'));
+
+  for (const [cmd, body] of [['decky-mcp.uiBack', { action: 'back' }], ['decky-mcp.uiQuickAccess', { action: 'quick_access' }], ['decky-mcp.uiCloseMenus', { action: 'close_menus' }]]) {
+    await run(cmd);
+    assert.deepEqual(uiDevice.posts.at(-1), body, cmd);
+  }
+
+  let shown;
+  ui.error = m => { shown = m; };
+  ui.quickPick = items => items.find(i => i.label === 'Game details');
+  const realPaths = uiRoutes.official;
+  uiRoutes.official = [{ path: '/nowhere/{appid}', title: 'Game details', template: true }];
+  ui.inputBox = () => '1';
+  await run('decky-mcp.navigate');
+  uiRoutes.official = realPaths;
+  assert.equal(shown, 'Decky-MCP: Steam UI navigation: unknown path /nowhere/1');
+
+  uiDevice.missing = true;
+  await run('decky-mcp.navigate');
+  assert.match(lastMessage('warning').m, /update Decky-MCP on the device \(10\.1\.2\.3\)/);
+  await run('decky-mcp.uiBack');
+  assert.match(lastMessage('warning').m, /update Decky-MCP on the device/);
+  uiDevice.missing = false;
+  return `sections ${sections.join(' / ')}, placeholder "${placeHolder}", template → /library/app/620, plugin panel, back / quick_access / close_menus, 400 "${shown}", 404 → update`;
+});
+
 await check('stats polling stops when the Actions view is hidden', async () => {
   calls.panels[0].dispose();
   const t = tree('decky-mcp.actions');
@@ -1191,6 +1538,75 @@ await check('Copy viewer URL and the … overflow menu', async () => {
   await run('decky-mcp.deviceActions', seedId());
   assert.deepEqual(offered.map(l => l.replace(/^\$\([^)]+\) /, '')), ['Re-pair', 'Enter token manually', 'Edit', 'Copy viewer URL', 'Remove']);
   return offered.join(' | ');
+});
+
+await check('browser viewer (static/viewer.html): Controllers popover, live updates, add / refusal, 404 hides it', async () => {
+  const html = readFileSync(path.join(root, '..', 'static', 'viewer.html'), 'utf8');
+  const src = html.match(/<script>([\s\S]*)<\/script>/)[1];
+  for (const id of ['ctl-wrap', 'ctl-btn', 'ctl-pop', 'ctl-list', 'ctl-add', 'ctl-name', 'pad-fwd', 'pad-target']) assert.ok(html.includes(`id="${id}"`), id);
+  const els = new Map();
+  const mk = (tag = 'div') => {
+    const classes = new Set();
+    const listeners = {};
+    return {
+      tag, textContent: '', hidden: false, value: '', disabled: false, title: '', placeholder: '', className: '', children: [], options: [],
+      append(...c) { this.children.push(...c); }, replaceChildren(...c) { this.children = [...c]; if (this.tag === 'select') this.options = [...c]; },
+      addEventListener(t, fn) { (listeners[t] ??= []).push(fn); }, setAttribute() {}, focus() {},
+      classList: { add: c => classes.add(c), remove: c => classes.delete(c), contains: c => classes.has(c), toggle: (c, on) => ((on ?? !classes.has(c)) ? classes.add(c) : classes.delete(c), classes.has(c)) },
+      _listeners: listeners,
+    };
+  };
+  const initiallyHidden = ['ctl-wrap', 'ctl-pop', 'pad-fwd', 'pad-ind', 'input-ctl', 'settings', 'pop', 'audio-ctl', 'a-hint', 'a-stat'];
+  const el = id => { if (!els.has(id)) { const e = mk(id === 'pad-target' ? 'select' : 'div'); e.hidden = initiallyHidden.includes(id); els.set(id, e); } return els.get(id); };
+  const document = { getElementById: el, createElement: mk, querySelectorAll: () => [], addEventListener() {}, hasFocus: () => true, hidden: false, activeElement: null };
+  class Option { constructor(text, value) { this.text = text; this.value = value; } }
+  const dev = { missing: false, refuse: null, list: { controllers: [steamDeck], virtual: [{ id: 'auto0', name: 'Decky-MCP pad', auto: true }], input_enabled: false } };
+  const requests = [];
+  const reply = (b, status = 200) => ({ ok: status < 400, status, json: async () => b, text: async () => JSON.stringify(b) });
+  const viewerFetch = async (url, init = {}) => {
+    requests.push(`${init.method ?? 'GET'} ${url}`);
+    if (url.startsWith('/controllers') && dev.missing) return reply({}, 404);
+    if (url === '/controllers') return reply(dev.list);
+    if (url === '/controllers/virtual') {
+      if (dev.refuse) return reply({ error: dev.refuse }, 422);
+      const { name } = JSON.parse(init.body);
+      dev.list.virtual.push({ id: 'v1', name, auto: false });
+      return reply({ id: 'v1', name, type: 'x360' }, 201);
+    }
+    return new Promise(() => {});
+  };
+  const sources = [];
+  class EventSource { constructor(u) { this.u = u; sources.push(this); } close() { this.closed = true; } }
+  new Function('document', 'window', 'fetch', 'EventSource', 'Option', 'localStorage', 'navigator', 'WebSocket', 'requestAnimationFrame', src)(
+    document, { addEventListener() {}, open() {}, EventSource }, viewerFetch, EventSource, Option, { getItem: () => null, setItem() {} }, {}, class {}, () => 0);
+  await settle(10);
+  assert.equal(el('ctl-wrap').hidden, false, 'button shown when /controllers answers');
+  el('ctl-btn').onclick({ stopPropagation() {} });
+  await settle(10);
+  assert.equal(el('ctl-pop').hidden, false);
+  assert.deepEqual(sources.map(s => s.u), ['/controllers/events'], 'live while open');
+  const rowText = () => el('ctl-list').children.filter(r => r.className.startsWith('ctl-row')).map(r => r.children[0].children.map(c => c.textContent).join(' | '));
+  assert.deepEqual(rowText(), ['🎮 Steam Deck | physical · Steam Input: steamdeck (slot 0)', '🎮 Decky-MCP pad (virtual) | virtual · not seen by Steam Input · auto']);
+  assert.equal(el('ctl-name').placeholder, 'Virtual pad 1');
+  await el('ctl-add').onsubmit({ preventDefault() {} });
+  assert.ok(requests.includes('POST /controllers/virtual'));
+  assert.equal(el('ctl-note').textContent, 'Virtual controller added and recognised by Steam Input');
+  assert.deepEqual(el('pad-target').options.map(o => o.text), ['Auto', 'Virtual pad 1', 'New virtual pad…'], '"Forward to" follows the list');
+  sources[0].onmessage({ data: JSON.stringify({ type: 'controllers', controllers: [], virtual: [] }) });
+  assert.deepEqual(rowText(), [], 'SSE update applied');
+  assert.equal(el('ctl-list').children[0].textContent, 'No controllers seen by Steam Input.');
+  dev.refuse = 'Steam Input did not pick up the new pad';
+  await el('ctl-add').onsubmit({ preventDefault() {} });
+  assert.equal(el('ctl-note').textContent, 'Steam Input did not pick up the new pad', 'refusal shown as-is');
+  sources[0].onerror();
+  assert.equal(sources[0].closed, true, 'stream failure → poll');
+  el('ctl-btn').onclick({ stopPropagation() {} });
+  assert.equal(el('ctl-pop').hidden, true);
+  dev.missing = true;
+  await el('pad-target')._listeners.focus[0]();
+  assert.equal(el('ctl-wrap').hidden, true, '404 hides the button');
+  assert.equal(el('pad-fwd').hidden, true, '404 hides "Forward to"');
+  return requests.filter(r => r.includes('controllers')).join(', ');
 });
 
 await check('no unexpected error messages', async () => {

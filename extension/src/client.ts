@@ -1,10 +1,13 @@
 import type {
+  ControllersList,
   Health,
   InputSettings,
   InstallResult,
   JsonRpcResponse,
   LogQuery,
   LogTail,
+  NavigateRequest,
+  NavigateResult,
   PairClientKind,
   PairPoll,
   PairRequestCreated,
@@ -14,6 +17,8 @@ import type {
   ToolCallResult,
   ToolDescription,
   ToolsListResult,
+  UiRoutes,
+  VirtualPadCreated,
 } from './api';
 
 export interface DeviceAddress {
@@ -50,6 +55,24 @@ export function isMissingRoute(e: unknown): boolean {
   } catch {
     return true;
   }
+}
+
+/** For GET/POST routes where 404 has no meaning of its own: the device predates the route. */
+export function isOldDevice(e: unknown): boolean {
+  return e instanceof HttpError && (e.status === 404 || e.status === 405);
+}
+
+/** The server's own `{"error"}` text, for messages that must show it as-is. */
+export function serverError(e: unknown): string {
+  if (e instanceof HttpError) {
+    try {
+      const parsed = JSON.parse(e.body);
+      if (parsed && typeof parsed.error === 'string') return parsed.error;
+    } catch {
+      // not JSON
+    }
+  }
+  return describeError(e);
 }
 
 export function isConnectionError(e: unknown): boolean {
@@ -251,6 +274,37 @@ export class DeckyClient {
       if (isMissingRoute(e)) return this.callToolText('restart_loader');
       throw e;
     }
+  }
+
+  controllers(): Promise<ControllersList> {
+    return this.json<ControllersList>('/controllers', { timeoutMs: 5000 });
+  }
+
+  /** 409 when every explicit slot is taken; the server also refuses pads Steam Input does not pick up. */
+  addVirtualController(name?: string): Promise<VirtualPadCreated> {
+    return this.json<VirtualPadCreated>('/controllers/virtual', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(name ? { name } : {}),
+      timeoutMs: 20000,
+    });
+  }
+
+  removeVirtualController(id: string): Promise<{ removed: unknown }> {
+    return this.json<{ removed: unknown }>(`/controllers/virtual/${encodeURIComponent(id)}`, { method: 'DELETE', timeoutMs: 10000 });
+  }
+
+  uiRoutes(): Promise<UiRoutes> {
+    return this.json<UiRoutes>('/ui/routes', { timeoutMs: 10000 });
+  }
+
+  navigate(body: NavigateRequest): Promise<NavigateResult> {
+    return this.json<NavigateResult>('/ui/navigate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      timeoutMs: 15000,
+    });
   }
 
   logTail(q: LogQuery): Promise<LogTail> {

@@ -39,8 +39,8 @@ main.actual { overflow: auto; align-items: flex-start; justify-content: flex-sta
 .dot.live { background: var(--vscode-testing-iconPassed, var(--vscode-charts-green)); opacity: 1; }
 button:disabled { opacity: .5; cursor: not-allowed; }
 .input-ctl, .audio-ctl { display: inline-flex; align-items: center; gap: 6px; }
-.input-ctl[hidden], .audio-ctl[hidden], #pad-ind[hidden], #a-hint[hidden], .stat[hidden], #pop[hidden], .settings[hidden], button[hidden] { display: none; }
-#pad-ind, #inp-note { color: var(--vscode-descriptionForeground); font-size: 12px; }
+.input-ctl[hidden], .audio-ctl[hidden], #pad-ind[hidden], #pad-fwd[hidden], #a-hint[hidden], .stat[hidden], #pop[hidden], .settings[hidden], button[hidden] { display: none; }
+#pad-ind, #pad-fwd, #inp-note { color: var(--vscode-descriptionForeground); font-size: 12px; }
 #a-hint { color: var(--vscode-editorWarning-foreground, var(--vscode-descriptionForeground)); font-size: 12px; }
 #vol { width: 80px; accent-color: var(--vscode-button-background); }
 .settings { position: relative; }
@@ -63,3 +63,8 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 main:focus { outline: none; }
 main.capturing, main.capturing:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
 main.capturing img { cursor: crosshair; }
+#pad-target {
+  font-family: inherit; font-size: 12px; padding: 1px 4px; border-radius: 2px; max-width: 160px;
+  background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground);
+  border: 1px solid var(--vscode-dropdown-border, transparent);
+}

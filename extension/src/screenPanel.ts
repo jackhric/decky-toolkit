@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
 import { HttpError, describeError } from './client';
 import { Connection, ConnectionState, InputState, externalProxyBase } from './connection';
+import { ControllerWatcher, addVirtualController, isList } from './controllers';
 import { INPUT_UNSUPPORTED, inputBackendLabel, inputOn, toggleInput } from './input';
 
 export class StatusBar implements vscode.Disposable {
@@ -39,7 +40,7 @@ export class ScreenPanel {
   private static current?: ScreenPanel;
   private readonly disposables: vscode.Disposable[] = [];
 
-  static async show(ctx: vscode.ExtensionContext, conn: Connection): Promise<void> {
+  static async show(ctx: vscode.ExtensionContext, conn: Connection, controllers: ControllerWatcher): Promise<void> {
     if (ScreenPanel.current) {
       ScreenPanel.current.panel.reveal();
       return;
@@ -50,12 +51,13 @@ export class ScreenPanel {
       retainContextWhenHidden: true,
       localResourceRoots: [vscode.Uri.joinPath(ctx.extensionUri, 'media')],
     });
-    ScreenPanel.current = new ScreenPanel(ctx, conn, panel, base, external);
+    ScreenPanel.current = new ScreenPanel(ctx, conn, controllers, panel, base, external);
   }
 
   private constructor(
     ctx: vscode.ExtensionContext,
     conn: Connection,
+    controllers: ControllerWatcher,
     private readonly panel: vscode.WebviewPanel,
     private readonly base: string,
     external: string,
@@ -89,7 +91,26 @@ export class ScreenPanel {
         if (e instanceof HttpError && e.status === 404) postStream({ settings: null });
       }
     };
+    // The "Forward to" choices: the explicit virtual pads ("Auto" is the server's implicit one).
+    let sentPads: string | undefined;
+    const sendPads = (force = false, select?: string) => {
+      const s = controllers.state;
+      if (s === undefined || (!isList(s) && s !== 'unsupported')) return;
+      const pads = isList(s) ? s.virtual.filter(v => !v.auto).map(v => ({ id: v.id, name: v.name })) : null;
+      const json = JSON.stringify(pads);
+      if (!force && select === undefined && json === sentPads) return;
+      sentPads = json;
+      void panel.webview.postMessage({ type: 'pads', pads, ...(select !== undefined ? { select } : {}) });
+    };
+    controllers.onDidChange(() => sendPads(), null, this.disposables);
+    this.disposables.push(controllers.watch());
     panel.webview.onDidReceiveMessage(async m => {
+      if (m?.type === 'ready') sendPads(true);
+      if (m?.type === 'addPad') {
+        const id = await addVirtualController(conn, controllers);
+        await controllers.refresh();
+        sendPads(true, id);
+      }
       if (m?.type === 'ready') { sentStream = undefined; void loadStream(); }
       // Same rule as input: the extension owns device-wide settings, the webview only asks.
       if (m?.type === 'setStream') {
@@ -184,6 +205,7 @@ export class ScreenPanel {
   </span>
   <span class="input-ctl" id="input-ctl" hidden>
     <span id="pad-ind" hidden>Gamepad connected</span>
+    <label id="pad-fwd" hidden>Forward to <select id="pad-target" title="Which controller on the device receives this gamepad. Auto: the pad the device creates on its own."><option value="">Auto</option></select></label>
     <span id="inp-note"></span>
     <button id="inp" title="Remote keyboard, mouse and gamepad input (device-wide)">Input</button>
   </span>

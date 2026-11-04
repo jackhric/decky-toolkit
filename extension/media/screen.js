@@ -79,6 +79,7 @@
     if (m.type === 'visible' && m.visible !== visible) { visible = m.visible; if (visible) { show('Connecting…'); run(); connectAudio(); } else { stop(); releaseAll(); closeAudio(); } }
     if (m.type === 'input') applyInput(m.state);
     if (m.type === 'stream') streamSettings(m);
+    if (m.type === 'pads') setPads(m.pads, m.select);
   });
 
   el('pause').onclick = () => { paused = !paused; el('pause').textContent = paused ? 'Resume' : 'Pause'; el('pause').classList.toggle('on', paused); };
@@ -156,7 +157,7 @@
     for (const k of heldKeys) send({ type: 'key', key: k, down: false });
     for (const b of heldButtons) send({ type: 'mouse_button', button: b, down: false });
     heldKeys.clear(); heldButtons.clear();
-    if (padSent) { send({ type: 'gamepad', ...NEUTRAL_PAD }); padSent = null; }
+    if (padSent) { send(padMsg(NEUTRAL_PAD)); padSent = null; }
     send({ type: 'release_all' });
   }
 
@@ -271,6 +272,36 @@
   const NEUTRAL_PAD = { buttons: { a: false, b: false, x: false, y: false, lb: false, rb: false, back: false, start: false, ls: false, rs: false, guide: false }, axes: { lx: 0, ly: 0, rx: 0, ry: 0, lt: 0, rt: 0 }, hat: [0, 0] };
   const PAD_NAMES = ['a', 'b', 'x', 'y', 'lb', 'rb', null, null, 'back', 'start', 'ls', 'rs'];
   let padTimer = null, padSent = null, padSentAt = 0;
+  // "Forward to": '' is Auto (the device's implicit pad), else a virtual pad id from the extension.
+  const ADD_PAD = '__add__';
+  let pads = null, padTarget = ((vscode.getState && vscode.getState()) || {}).padTarget || '';
+  const padMsg = st => padTarget ? { type: 'gamepad', ...st, pad: padTarget } : { type: 'gamepad', ...st };
+  function updatePadUi() { el('pad-fwd').hidden = !pads || el('pad-ind').hidden; }
+  function setPads(list, select) {
+    pads = list;
+    if (select) retarget(select);
+    if (!list || (padTarget && !list.some(p => p.id === padTarget))) retarget('');
+    const sel = el('pad-target');
+    if (list) {
+      while (sel.options.length) sel.remove(0);
+      [['', 'Auto'], ...list.map(p => [p.id, p.name]), [ADD_PAD, 'New virtual pad…']].forEach(([v, t]) => sel.add(new Option(t, v)));
+      sel.value = padTarget;
+    }
+    updatePadUi();
+  }
+  // The old target gets a neutral state so nothing stays held there.
+  function retarget(id) {
+    if (id === padTarget) return;
+    if (padSent) send(padMsg(NEUTRAL_PAD));
+    padSent = null;
+    padTarget = id;
+    if (vscode.setState) vscode.setState({ ...((vscode.getState && vscode.getState()) || {}), padTarget });
+  }
+  el('pad-target').onchange = () => {
+    const sel = el('pad-target');
+    if (sel.value === ADD_PAD) { sel.value = padTarget; vscode.postMessage({ type: 'addPad' }); return; }
+    retarget(sel.value);
+  };
   function readPad() {
     const pad = [...(navigator.getGamepads ? navigator.getGamepads() : [])].find(p => p && p.connected && p.mapping === 'standard');
     if (!pad) return null;
@@ -285,18 +316,19 @@
     // getGamepads throws where the frame's permissions policy blocks the API.
     try { st = readPad(); } catch (e) { /* no gamepad */ }
     el('pad-ind').hidden = !st;
+    updatePadUi();
     if (!st) { clearInterval(padTimer); padTimer = null; return; }
     if (!inp || !inp.enabled || !wsOpen() || !document.hasFocus()) {
-      if (padSent) { send({ type: 'gamepad', ...NEUTRAL_PAD }); padSent = null; }
+      if (padSent) { send(padMsg(NEUTRAL_PAD)); padSent = null; }
       return;
     }
     const json = JSON.stringify(st), now = performance.now();
     // Resend now and then so the server does not retire the pad while a stick is held still.
-    if (json !== padSent || now - padSentAt > 10000) { send({ type: 'gamepad', ...st }); padSent = json; padSentAt = now; }
+    if (json !== padSent || now - padSentAt > 10000) { send(padMsg(st)); padSent = json; padSentAt = now; }
   }
   const startPad = () => { if (!padTimer) padTimer = setInterval(pollPad, 16); pollPad(); };
   window.addEventListener('gamepadconnected', startPad);
-  window.addEventListener('gamepaddisconnected', () => { if (padSent) { send({ type: 'gamepad', ...NEUTRAL_PAD }); padSent = null; } pollPad(); });
+  window.addEventListener('gamepaddisconnected', () => { if (padSent) { send(padMsg(NEUTRAL_PAD)); padSent = null; } pollPad(); });
 
   // ---- audio ----
   // Raw 48 kHz s16le stereo over /audio, played by an AudioWorklet with a ~120 ms ring buffer. When

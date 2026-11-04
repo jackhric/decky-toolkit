@@ -102,6 +102,72 @@ export interface LogTail {
   lines: string[];
 }
 
+export interface SteamInputSlot {
+  type: string;
+  slot: number | null;
+  name: string;
+}
+
+export interface ControllerInfo {
+  id: string;
+  name: string;
+  kind: 'physical' | 'virtual';
+  virtual_id: string | null;
+  vendor: string;
+  product: string;
+  device: string;
+  /** Null while Steam Input has not picked the device up. */
+  steam: SteamInputSlot | null;
+}
+
+export interface VirtualPad {
+  id: string;
+  name: string;
+  type: 'x360';
+  created_at: number | string;
+  last_event_at: number | string | null;
+  /** The pad the server creates on its own for gamepad messages without `pad`. */
+  auto: boolean;
+}
+
+export interface ControllersList {
+  controllers: ControllerInfo[];
+  virtual: VirtualPad[];
+  input_enabled: boolean;
+}
+
+export interface VirtualPadCreated {
+  id: string;
+  name: string;
+  type: string;
+}
+
+export interface UiRoute {
+  path: string;
+  title: string;
+  /** Set when `path` holds `{placeholders}` such as `/library/app/{appid}`. */
+  template?: boolean | string;
+}
+
+export interface UiRoutes {
+  current: string;
+  official: UiRoute[];
+  plugins: { plugin: string; path: string; title: string }[];
+  quick_access_tabs: string[];
+}
+
+export type NavigateRequest =
+  | { path: string }
+  | { action: 'back' | 'main_menu' | 'close_menus' }
+  | { action: 'quick_access'; tab?: string }
+  | { action: 'plugin'; plugin: string }
+  | { action: 'app'; appid: number | string };
+
+export interface NavigateResult {
+  ok: boolean;
+  current: string;
+}
+
 export interface ErrorBody {
   error: string;
 }
