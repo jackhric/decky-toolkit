@@ -3,7 +3,7 @@
 ## What this is
 A Decky Loader plugin whose Python backend hosts an MCP Streamable-HTTP server (port 8765, bearer
 token) so external coding agents can inspect/control the Steam Deck during plugin development.
-See README.md for the tool list and architecture.
+See README.md for setup and docs/reference.md for the tool list and architecture.
 
 ## Layout
 - `main.py` — Decky `Plugin` class: settings, aiohttp server lifecycle, frontend-callable methods.
