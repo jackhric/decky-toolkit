@@ -13,7 +13,8 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
   <a href="https://github.com/jackhric/decky-toolkit/releases"><img alt="Plugin version" src="https://img.shields.io/github/package-json/v/jackhric/decky-toolkit?label=plugin&color=9C6AEC"></a>
-  <a href="extension/README.md"><img alt="VS Code extension version" src="https://img.shields.io/github/package-json/v/jackhric/decky-toolkit?filename=extension%2Fpackage.json&label=VS%20Code%20extension&color=0AA5FF"></a>
+  <a href="https://marketplace.visualstudio.com/items?itemName=jackhric.decky-toolkit"><img alt="VS Code Marketplace" src="https://img.shields.io/github/package-json/v/jackhric/decky-toolkit?filename=extension%2Fpackage.json&label=VS%20Code%20Marketplace&color=0AA5FF&logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48cGF0aCBmaWxsPSIjZmZmIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiIGQ9Ik03MC45IDk5LjZDNzIuNSAxMDAuMiA3NC4zIDEwMC4yIDc1LjkgOTkuNEw5Ni41IDg5LjRDOTguNiA4OC40IDEwMCA4Ni4yIDEwMCA4My44VjE2LjJDMTAwIDEzLjggOTguNiAxMS42IDk2LjUgMTAuNkw3NS45IDAuNkM3My44LTAuNCA3MS4zLTAuMSA2OS41IDEuMkM2OS4zIDEuNCA2OSAxLjYgNjguOCAxLjhMMjkuNCAzOEwxMi4yIDI0LjlDMTAuNiAyMy43IDguNCAyMy44IDYuOSAyNS4xTDEuNCAzMC4yQy0wLjUgMzEuOC0wLjUgMzQuNyAxLjQgMzYuM0wxNi4yIDUwTDEuNCA2My43Qy0wLjUgNjUuMy0wLjUgNjguMiAxLjQgNjkuOEw2LjkgNzQuOUM4LjQgNzYuMiAxMC42IDc2LjMgMTIuMiA3NS4xTDI5LjQgNjJMNjguOCA5OC4yQzY5LjQgOTguOCA3MC4xIDk5LjMgNzAuOSA5OS42Wk03NSAyNy4yTDQ1LjEgNTBMNzUgNzIuOFYyNy4yWiIvPjwvc3ZnPg=="></a>
+  <a href="https://open-vsx.org/extension/jackhric/decky-toolkit"><img alt="Open VSX" src="https://img.shields.io/open-vsx/v/jackhric/decky-toolkit?label=Open%20VSX&color=0AA5FF&logo=vscodium&logoColor=white"></a>
   <a href="https://github.com/SteamDeckHomebrew/decky-loader"><img alt="Decky Loader 3.3+" src="https://img.shields.io/badge/Decky%20Loader-3.3%2B-1B1B1B?logo=steam&logoColor=white"></a>
   <img alt="Platform: SteamOS and Bazzite" src="https://img.shields.io/badge/platform-SteamOS%20%7C%20Bazzite-555">
 </p>
@@ -47,9 +48,11 @@ I've found that working on a Decky plugin with no additional tooling provides a 
 - A Steam Deck, SteamOS or Bazzite device running [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) 3.3 or newer.
 - On your computer: VS Code 1.90+ (or VSCodium).
 
-Both pieces are published on the [Releases](https://github.com/jackhric/decky-toolkit/releases)
-page: `plugin-v…` releases carry the plugin zip, `extension-v…` releases the `.vsix`. Both are built
-by this repo's CI and signed with build provenance, so you can check a download with
+The extension is on the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=jackhric.decky-toolkit)
+and [Open VSX](https://open-vsx.org/extension/jackhric/decky-toolkit). Both pieces are also on the
+[Releases](https://github.com/jackhric/decky-toolkit/releases) page: `plugin-v…` releases carry the
+plugin zip, `extension-v…` releases the `.vsix`. Both are built by this repo's CI and signed with
+build provenance, so you can check a download with
 `gh attestation verify <file> -R jackhric/decky-toolkit`.
 
 ### 1. Install the plugin on the device
@@ -62,13 +65,22 @@ Open Quick Access (…) → **Decky Toolkit** on the device. The panel shows the
 
 ### 2. Install the VS Code extension
 
-Download `decky-toolkit-<version>.vsix` from the latest `extension-v…` release, then:
+- **VS Code:** install
+  [Decky Toolkit from the VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=jackhric.decky-toolkit),
+  or search for "Decky Toolkit" in the Extensions view.
+- **VSCodium and other editors that use Open VSX:** install
+  [Decky Toolkit from Open VSX](https://open-vsx.org/extension/jackhric/decky-toolkit), or search
+  for "Decky Toolkit" in the Extensions view.
+
+From a terminal:
 
 ```sh
-code --install-extension decky-toolkit-<version>.vsix   # or: codium --install-extension …
+code --install-extension jackhric.decky-toolkit     # VS Code
+codium --install-extension jackhric.decky-toolkit   # VSCodium
 ```
 
-Or in VS Code: Extensions view → **…** → **Install from VSIX…**.
+Offline or a specific version: download `decky-toolkit-<version>.vsix` from an `extension-v…`
+release and use Extensions view → **…** → **Install from VSIX…**.
 
 ### Building from source
 
