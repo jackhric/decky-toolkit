@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
-import type { Health, StreamStats } from './api';
+import type { Health, InputSettings, StreamStats } from './api';
 import { DeckyClient, DeviceAddress, HttpError, describeError, isConnectionError } from './client';
 import { DeviceProxy, ProxyTarget } from './proxy';
 
@@ -22,6 +22,9 @@ export interface SavedDevice {
   port: number;
 }
 
+/** `unsupported`: the device answers 404 to `/input/settings` (plugin predates remote input). */
+export type InputState = InputSettings | 'unsupported';
+
 export type HealthState =
   | { kind: 'unknown' }
   | { kind: 'ok'; health: Health }
@@ -38,6 +41,8 @@ export interface ConnectionState {
   readonly health: HealthState;
   readonly stats?: StreamStats;
   readonly statsError?: string;
+  /** Undefined until the first `/input/settings` answer for the connected device. */
+  readonly input?: InputState;
   readonly onDidChange: vscode.Event<void>;
   /** Host, port or token changed; unlike `onDidChange` not fired for health/stats updates. */
   readonly onDidChangeTarget: vscode.Event<void>;
@@ -65,6 +70,7 @@ export class Connection implements ConnectionState, vscode.Disposable {
   health: HealthState = { kind: 'unknown' };
   stats?: StreamStats;
   statsError?: string;
+  input?: InputState;
   tokenRejected = false;
   private statsLeases = 0;
   private statsTimer?: NodeJS.Timeout;
@@ -171,6 +177,7 @@ export class Connection implements ConnectionState, vscode.Disposable {
     this.health = { kind: 'unknown' };
     this.stats = undefined;
     this.statsError = undefined;
+    this.input = undefined;
     this.tokenRejected = false;
     this.targetChanged.fire();
     this.statusChanged.fire();
@@ -258,6 +265,7 @@ export class Connection implements ConnectionState, vscode.Disposable {
     await this.ctx.globalState.update(SESSION_KEY, id);
     this.fireStatus();
     void this.checkHealth();
+    void this.refreshInput();
   }
 
   async disconnect(): Promise<void> {
@@ -300,9 +308,41 @@ export class Connection implements ConnectionState, vscode.Disposable {
     });
   }
 
+  /** Errors other than 404 keep the last known state; health polling reports reachability. */
+  async refreshInput(): Promise<InputState | undefined> {
+    const client = this.authedClient();
+    if (!client) return undefined;
+    const gen = this.generation;
+    let next: InputState;
+    try {
+      next = await client.getInputSettings();
+    } catch (e) {
+      if (!(e instanceof HttpError && e.status === 404)) return this.input;
+      next = 'unsupported';
+    }
+    if (gen === this.generation) this.setInput(next);
+    return next;
+  }
+
+  async setInputEnabled(enabled: boolean): Promise<InputSettings> {
+    const client = this.authedClient();
+    if (!client) throw new Error('not paired');
+    const gen = this.generation;
+    const next = await client.setInputEnabled(enabled);
+    if (gen === this.generation) this.setInput(next);
+    return next;
+  }
+
+  private setInput(next: InputState): void {
+    if (JSON.stringify(next) === JSON.stringify(this.input)) return;
+    this.input = next;
+    this.changed.fire();
+  }
+
   private async pollStats(): Promise<void> {
     const client = this.authedClient();
     if (!client) return;
+    if (this.session) void this.refreshInput();
     const gen = this.generation;
     try {
       const stats = await client.streamStats();

@@ -105,6 +105,12 @@
         "icon": "$(device-camera)"
       },
       {
+        "command": "decky-mcp.toggleInput",
+        "title": "Toggle remote input",
+        "category": "Decky",
+        "icon": "$(keyboard)"
+      },
+      {
         "command": "decky-mcp.deploy",
         "title": "Deploy plugin",
         "category": "Decky",

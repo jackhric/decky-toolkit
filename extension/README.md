@@ -98,6 +98,34 @@ Fetches one `/frame.jpg` every 1.5 s while the view is visible (well under 1 Mbi
 ~40 Mbit/s stream), scaled to the sidebar width. Click **Open full screen view** or the title icon
 for the screen panel.
 
+## Remote input
+
+The screen panel can drive the Deck with your keyboard, mouse and a gamepad. Remote input is **off
+by default** and is a device-wide switch: it is the same flag as the **Allow remote input** toggle
+in the Deck's Decky-MCP panel and the **⌨ Input** button in the browser viewer.
+
+- **Turn it on or off** with the **Input** button in the screen panel toolbar (highlighted while
+  on), or run **Decky: Toggle remote input** from the command palette. The extension sends
+  `PUT /input/settings`; the panel itself never calls the Deck for this. While input is on the
+  status bar shows `$(keyboard)` after the Deck's name. If the Deck cannot inject input, the button
+  is disabled and its tooltip gives the reason. A Deck whose plugin predates remote input shows
+  *not supported by this device version*.
+- **UI mode** (default): click the picture to capture input (a focus outline shows it). Mouse
+  moves, clicks and the wheel land on the matching spot of the Deck screen, and keys are sent by
+  physical position (`KeyboardEvent.code`), so VS Code keybindings do not fire while the picture
+  has focus. Click the toolbar, switch tabs or leave the window to give the keyboard back; every
+  held key and button is released.
+- **Game mode**: clicking the picture asks for pointer lock and sends relative mouse motion, for
+  games with mouse look. Esc releases the pointer. VS Code webviews may refuse pointer lock; the
+  toolbar then says *Pointer lock unavailable in this webview, use the browser viewer for Game
+  mode*. Use **Open viewer in browser** for Game mode in that case.
+- **Gamepad**: a controller connected to this computer is forwarded about 60 times a second while
+  the panel has focus ("Gamepad connected" in the toolbar). It appears on the Deck as an Xbox 360
+  pad. Whether the Gamepad API works inside a webview depends on the VS Code build.
+
+The panel's WebSocket (`/input`) goes through the same loopback proxy as the stream, which adds the
+token during the handshake. The UI/Game switch appears only while input is on.
+
 ## Pairing
 
 Pairing starts when you connect to a Deck without a token (or whose token the Deck rejects), or
@@ -147,9 +175,10 @@ All of these are also in the command palette under the `Decky:` category.
 | Decky: Switch device / Add device… / Edit device / Remove device | Connect to another saved Deck, manage saved Decks |
 | Decky: Copy viewer URL | Copies `http://host:port/viewer` for a browser |
 | Decky: Change host | Changes the active Deck's host/port and writes the `decky-mcp.host`/`port` settings |
-| Decky: Open screen | Live screen panel with fps / Mbps / resolution, pause, fit/actual, snapshot |
+| Decky: Open screen | Live screen panel with fps / Mbps / resolution, pause, fit/actual, snapshot and the remote input toggle |
 | Decky: Open viewer in browser | Opens `http://host:port/viewer` in the default browser (pair the browser on the Deck) |
 | Decky: Snapshot to file | Saves the current `/frame.jpg` with a Save dialog |
+| Decky: Toggle remote input | Turns remote keyboard, mouse and gamepad input on or off for the whole Deck (`PUT /input/settings`) |
 | Decky: Deploy plugin | `pnpm run build`, zip, `POST /plugins/install?restart=loader`, wait for `/health` |
 | Decky: Install plugin zip… | Uploads a plugin zip from disk to `/plugins/install?restart=loader` |
 | Decky: Restart loader | `POST /loader/restart` (falls back to the `restart_loader` tool) |
@@ -180,8 +209,9 @@ Tokens are stored per `host:port` in secret storage.
 - **Token handling.** The token lives in `context.secrets`. Webviews never see it: the extension runs
   a loopback proxy (`127.0.0.1`, random port, random path prefix) that adds the
   `Authorization: Bearer` header and strips browser `Origin`/`Cookie` headers before forwarding to
-  the Deck. The screen panel and the preview only know the proxy URL, and their CSP allows only that
-  origin and `blob:`. The one place the token leaves secret storage is `.mcp.json`, after a
+  the Deck. WebSocket upgrades (`/input`) are forwarded the same way. The screen panel and the
+  preview only know the proxy URL, and their CSP allows only that origin (plus its `ws:` form for
+  the screen panel) and `blob:`. The one place the token leaves secret storage is `.mcp.json`, after a
   confirmation.
 - **Theme.** The screen panel and preview use only VS Code theme colours (`--vscode-*` variables);
   only the video area itself is black.
@@ -233,7 +263,8 @@ paired and a connected Deck and the menus on them, the view title buttons, and t
 in the workspace). It also checks that Connect on an unpaired Deck starts pairing (fake `/pair`
 answers 403, then a token), the reachability error with Retry, the pairing timeout (with a short
 timeout), the 15 s health check going unreachable and back, Add device, snapshot, Copy MCP URL /
-token and Open viewer.
+token and Open viewer, and the remote input toggle (screen panel message, palette command, status
+bar indicator, unavailable and unsupported devices).
 
 ### Headless integration check
 
@@ -247,5 +278,6 @@ DECKY_TOKEN_FILE=~/deck-token node scripts/dev-check.mjs [host] [port]
 It checks `/health`, `/stream.mjpeg` (at least two thirds of the device's fps cap for 5 s),
 `/plugins` and `/frame.jpg` through the proxy, runs `media/screen.js` in a minimal DOM against the
 proxy and compares its fps readout with `/stream/stats` (within 10 %), calls MCP `tools/list`
-through the client, probes the newer routes, and validates a staged zip with `unzip -t`. The
+through the client, opens a WebSocket to `/input` through the proxy and expects close code 4003
+(input must be off on the Deck; the check never turns it on), probes the newer routes, and validates a staged zip with `unzip -t`. The
 stream checks need a screen that changes: gamescope sends no frames while the screen is static.

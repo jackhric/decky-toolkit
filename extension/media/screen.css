@@ -37,3 +37,14 @@ main.actual { overflow: auto; align-items: flex-start; justify-content: flex-sta
 #msg[hidden] { display: none; }
 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; background: var(--vscode-descriptionForeground); opacity: .6; }
 .dot.live { background: var(--vscode-testing-iconPassed, var(--vscode-charts-green)); opacity: 1; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+.input-ctl { display: inline-flex; align-items: center; gap: 6px; }
+.input-ctl[hidden], .seg[hidden], #pad-ind[hidden] { display: none; }
+#pad-ind, #inp-note { color: var(--vscode-descriptionForeground); font-size: 12px; }
+.seg { display: inline-flex; gap: 1px; }
+.seg button { border-radius: 0; }
+.seg button:first-child { border-radius: 2px 0 0 2px; }
+.seg button:last-child { border-radius: 0 2px 2px 0; }
+main:focus { outline: none; }
+main.capturing, main.capturing:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+main.capturing img { cursor: crosshair; }
