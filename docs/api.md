@@ -141,6 +141,34 @@ Official routes (each opened on the device and checked on screen, 2026-11-04): `
 `/downloads`, `/friends`, `/media`, `/settings/developer` (needs developer mode), `/settings/controller`
 without parameters (shows System).
 
+## Apps and game files
+
+Library data comes from the Steam client in SharedJSContext (`appStore.allApps`, `SteamClient.Apps.RegisterForAppDetails`,
+`SteamClient.InstallFolder.GetInstallFolders`, `SteamUIStore.RunningApps`); paths are resolved on disk as root, with
+`~` meaning the desktop user's home (`DECKY_USER_HOME`). `appid` is a Steam appid or a non-Steam shortcut's id.
+Errors: `400` bad argument, `403` sensitive path, `404` unknown app/path, `502` Steam UI unreachable.
+
+| Route | Auth | Status | Notes |
+| --- | --- | --- | --- |
+| `GET /apps` | bearer/cookie | live | Query: `installed_only=1` (default; installed on this device), `query=<name substring or appid>`, `include_tools=1` (Proton, runtimes). `{count, apps: [{appid, name, type: game\|tool\|shortcut\|application\|..., installed, running, install_dir, compat_tool (e.g. "proton_11", "steamlinuxruntime_sniper" for native titles), compat_tool_display, size_on_disk, library, last_played (ISO), installed_elsewhere?, shortcut_exe?}]}` |
+| `GET /apps/{appid}` | bearer/cookie | live | `app_info`: the list fields plus `gameid, developer, platforms, playtime_minutes, launch_options, build_id, cloud, processes` (when running) and `dirs` (as below). |
+| `GET /apps/{appid}/dirs` | bearer/cookie | live | `game_dirs`: `{appid, name, developer, platform: proton\|native, compat_tool, steam_root, library, libraries, install_dir, manifest, compatdata, prefix, prefix_user_dirs: {appdata_roaming, appdata_local, appdata_locallow, documents, saved_games}, account_id, userdata, cloud_remote, remotecache, shader_cache, xdg, match_keys}`. Each dir is `{path, exists, mtime?}`; prefix user dirs add `matches` (subdirs named after the game or developer, two levels deep for Company/Product); `xdg` (native titles only) lists matching entries of `~/.local/share`, `~/.config`, `~/.config/unity3d` and `~`. |
+| `GET /apps/{appid}/saves` | bearer/cookie | live | `game_saves`: `{appid, name, steam_cloud: [{name, root, size, time, local_path, candidates}], candidates: [{path, size, mtime, found_by, rank, score}], notes}`. Rank 0: files in Steam Cloud's `remotecache.vdf` mapped to local paths by their root (0 userdata remote, 2 Documents, 3 AppData/Local, ...; native titles also try the XDG dirs) and the cloud `remote/` dir; 1: files next to a `steam_autocloud.vdf` marker; 2: save-like files under dirs named after the game; 3: save-like names in the install dir. |
+| `GET /fs` | bearer/cookie | live | `fs_list`. Query: `path` (absolute or `~/...`), `depth` 1-5 (default 1), `glob` (on the name, or on the relative path if it has a `/`). `{path, depth, glob, entries: [{path, type: file\|dir\|symlink\|other, size, mtime, target?, sensitive?}], count, truncated}`, at most 2000 entries. Sensitive files (Steam `config/loginusers.vdf`, `config/config.vdf`, `ssfn*`) are flagged in listings and refused (`403`) as the path itself, also through symlinks. |
+
+## Recordings
+
+`screen_record` subscribes to the live screen stream and the audio stream like a viewer and muxes their JPEG
+frames and PCM chunks into Matroska (`V_MJPEG` + `A_PCM/INT/LIT` 48 kHz stereo) itself: no second gamescope
+consumer, no re-encode, viewers are not affected. Resolution, quality and the maximum fps are the stream settings
+(1080p q70 at 60 fps is about 12-13 MB/s). Files live in `DECKY_PLUGIN_RUNTIME_DIR/recordings/<name>.mkv`
+(`<name>.mkv.part` while recording); at most 120 s, one recording at a time, refused with less than 2 GiB free.
+
+| Route | Auth | Status | Notes |
+| --- | --- | --- | --- |
+| `GET /recordings` | bearer/cookie | live | `{dir, recordings: [{name, path, size, modified, download}], active: {name, path, seconds, fps, started}\|null, last: <result of the last recording or {error}>}` |
+| `GET /recordings/{name}` | bearer/cookie | live | The file (`video/x-matroska`, `Content-Disposition: attachment`, range requests supported). `name` with or without `.mkv`; `400` for an invalid name, `404` if missing. |
+
 ## Pairing
 
 A client asks for access, the device owner approves or denies it in the Decky panel (Quick Access →
@@ -194,6 +222,18 @@ request: approval needs someone at the device.
 an error while input is disabled. `list_controllers`, `add_virtual_controller` (`name`),
 `remove_virtual_controller` (`id`): as `/controllers`. `ui_routes`, `ui_navigate` (`path` or `action` plus
 `tab`/`plugin`/`appid`, and `capture: true` for a frame 0.7 s later): as `/ui/...`.
+`apps_list` (`installed_only`, `query`, `include_tools`), `app_info` (`appid`), `game_dirs` (`appid`),
+`game_saves` (`appid`, `limit`): as `/apps...`. `apps_running`: `{running: [{appid, name, pid, processes}],
+main_appid}`. `app_launch` (`appid`, `wait` s, default 15): `{launched, running}`, plus `game_actions` and a note
+when Steam did not start it (a dialog). `app_terminate` (`appid`, `confirm: true` required, `wait`).
+`fs_list` (`path`, `depth`, `glob`): as `/fs`. `fs_stat` (`path`). `fs_delete` (`path`, `confirm: true` required;
+only inside `steamapps/common/<game>/...`, a `compatdata/<appid>` or `shadercache/<appid>` entry,
+`userdata/<account>/<appid>/...` or the plugin runtime dir). `proton_log` (`appid`, `lines`): `~/steam-<appid>.log`
+plus the matching lines of Steam's `logs/`. `screen_record` (`seconds` up to 120, `fps`, `with_audio`, `name`,
+`wait`), `screen_record_stop`, `recordings_list`, `recording_delete` (`name`, `confirm: true` required): see
+Recordings. `perf_overlay` (`level` 0-4, `show_over_steam`), `perf_overlay_status`: Steam's MangoHud overlay level as
+on the Quick Access performance tab (`SteamClient.System.Perf.UpdateSettings`); gamescope does not paint this
+external overlay into its PipeWire stream, so captures and recordings never show it.
 
 ## Events (backend → Decky frontend)
 

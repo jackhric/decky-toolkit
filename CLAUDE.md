@@ -14,7 +14,10 @@ See README.md for the tool list and architecture.
   libei over ctypes, `uinput.py`, `keymap.py`, `service.py` owning state and the virtual pad registry; tools
   in `tools/input.py`), `controllers.py` (Steam Input controller list + evdev merge, virtual pad
   creation confirmed by Steam; tools in `tools/controllers.py`), `ui.py` (Steam UI navigation; tools
-  in `tools/ui.py`).
+  in `tools/ui.py`), `apps.py` (Steam library/launch via the client JS; tools in `tools/apps.py`), `games.py`
+  (game/prefix/save paths, `fs_*` file browser with its sensitive-path and delete guards, Proton logs; `vdf.py`
+  parses KeyValues; tools in `tools/games.py`), `record.py` (screen recording to MKV; tools in `tools/record.py`),
+  `tools/perf.py` (Steam performance overlay).
 - `src/index.tsx` — Quick Access panel (React, `@decky/ui`, `@decky/api`). Built by `pnpm run build`
   into `dist/index.js`.
 - `scripts/deploy.sh`, `scripts/smoke.sh`, `scripts/logs.sh` — read `deploy.env` (gitignored).
@@ -204,6 +207,48 @@ See README.md for the tool list and architecture.
   props}) and `_routePatches`; the owner plugin is not recorded (decky-loader `frontend/src/router-hook.tsx`).
   Opening a plugin panel = `DeckyPluginLoader.deckyState.setActivePlugin(name)` (decky-loader
   `frontend/src/components/DeckyState.tsx`) then `OpenQuickAccessMenu(999)`.
+
+## Apps, game files, recording and perf overlay facts (verified 2026-11-04, Steam client 1792618285)
+- Library: `appStore.allApps` (overviews: `appid`, `display_name`, `app_type` 1 game / 4 tool / 1073741824 non-Steam
+  shortcut, `m_gameid`, `rt_last_time_played`, `size_on_disk` string or null). **`overview.installed` is true when
+  the app is installed on any family/streaming client**; local install is `local_per_client_data.installed`
+  (`per_client_data[]` lists other machines by `client_name`). `appStore.GetAppOverviewByAppID(id)`.
+- Details: `SteamClient.Apps.RegisterForAppDetails(id, cb)` fires once right away with `strInstallFolder`,
+  `strCompatToolName` (`proton_11`, `proton_experimental`, `steamlinuxruntime_sniper` for native titles, `""` for
+  most shortcuts), `strCompatToolDisplayName`, `strDeveloperName`, `vecPlatforms`, `lDiskUsageBytes`,
+  `strShortcutExe`/`strShortcutStartDir`, cloud fields. It can fire inside the register call, so unregister on the next
+  tick. 157 apps in parallel take ~0.3 s. `appDetailsStore` only caches apps something registered for.
+- No `SteamClient.Apps.GetRunningApps` / `GetAvailableCompatTools` on this build (compat tools moved to an internal
+  `CompatManager` service). Running apps: `SteamUIStore.RunningApps` (`appid`, `display_name`) and
+  `MainRunningAppID`; the pid comes from `/proc`: `reaper SteamLaunch AppId=<id> -- ...` and its descendants.
+- `SteamClient.Apps.RunGame(String(gameid), "", -1, 100)` launched VVVVVV (in RunningApps within ~2 s);
+  `SteamClient.Apps.TerminateApp(String(gameid), false)` ended it within ~1 s. `SteamClient.InstallFolder.GetInstallFolders()`
+  gives `strFolderPath` and `vecApps[{nAppID, ...}]` per library.
+- Every `Runtime.evaluate` in SharedJSContext shares one global scope: a top-level `const` in an injected script
+  fails the second time ("Identifier has already been declared"), so wrap helpers in a function.
+- Steam account id = SteamID64 (`App.m_CurrentUser.strSteamID`) - 76561197960265728 = the `userdata/<id>` dir.
+- Saves: `userdata/<id>/<appid>/remotecache.vdf` lists the cloud files with a `root`: 0 = `userdata/.../remote`
+  (Castle Crashers), 3 = prefix `AppData/Local` (Chained Together), 2 = prefix `Documents` (Skyrim SE) and, for the
+  native VVVVVV (OSType -203), `~/.local/share` (Steam's Linux root override reuses the Windows id). Auto-Cloud dirs
+  hold a `steam_autocloud.vdf` marker. Proton prefixes are `<library>/steamapps/compatdata/<appid>/pfx`.
+- Recording: a second gamescope PipeWire consumer (`gst-launch ... vp8enc ! webmmux` next to the live stream) left
+  gamescope logging "pipewire: warning: out of buffers" 60 times a second, froze the live stream (keepalive kept
+  re-sending the last frame) until the live pipeline was restarted, and its `-e` EOS never completed. A fresh second
+  consumer on a static screen also gets no frames even after `debug_force_repaint`. So `record.py` muxes the live
+  stream's own JPEG frames and PCM chunks into Matroska in Python. 5 s at 1080p60 q70: 295 frames, 249 audio chunks,
+  64 MB; `ffprobe`/`ffmpeg -f null` clean; live stream stayed at 60 fps meanwhile. Bazzite has `vp8enc`, `vp9enc`,
+  `webmmux`, `avimux`, `opusenc` but no `x264enc`/VA encoders (SteamOS not checked for vpx); vp8enc at 1080p30
+  `cpu-used=8` took ~1 core.
+- Perf overlay: `SystemPerfStore` (window.SystemPerfStore, created lazily by the Quick Access tab) builds
+  `CMsgSystemPerfUpdateSettings {1 gameid=active_profile_game_id, 3 settings_delta {1 global {5 perf_overlay_level}}}`
+  and calls `SteamClient.System.Perf.UpdateSettings(base64)`; state comes from `SteamClient.System.Perf.RegisterForStateChanges`
+  (ArrayBuffer `CMsgSystemPerfState`). Slider 0-4 = enum 0, 4, 1, 2, 3. Here `perf_overlay_is_standalone` (limits
+  field 7) is true, so the tab shows only the slider (no service toggle); the global profile id is 769. Setting
+  level 2 moved Steam's own slider to 2 and wrote `preset=2` to mangoapp's `MANGOHUD_CONFIGFILE`.
+- The overlay never appears in `screen_capture`: mangoapp is a gamescope external overlay, and `paint_pipewire` paints
+  only focus/override/underlay/decoration windows plus the Steam overlay (gamescope `src/steamcompmgr.cpp`).
+  `gamescopectl screenshot <path> <type>` (0 all real layers, 1 base plane (default), 2 full composition, 3 screen
+  buffer) did not show it either. Check the level with the Quick Access perf tab in a capture instead.
 
 ## Pairing
 A client files `POST /pair/request` and long-polls `GET /pair/request/{id}?wait=25`; the device owner
