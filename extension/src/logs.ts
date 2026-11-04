@@ -66,7 +66,7 @@ class LogSession {
 
   private untilChanged(signal: AbortSignal): Promise<void> {
     return new Promise(resolve => {
-      const sub = this.conn.onDidChange(() => { sub.dispose(); resolve(); });
+      const sub = this.conn.onDidChangeTarget(() => { sub.dispose(); resolve(); });
       signal.addEventListener('abort', () => { sub.dispose(); resolve(); }, { once: true });
     });
   }

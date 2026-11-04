@@ -41,7 +41,9 @@ export interface PluginInfo {
   author?: string;
   flags?: string[];
   api_version?: number;
-  version?: string;
+  version?: string | null;
+  has_backend?: boolean;
+  path?: string;
   [key: string]: unknown;
 }
 

@@ -2,7 +2,11 @@ import * as vscode from 'vscode';
 import { DeckyClient, HttpError, describeError, isMissingRoute, sleep } from './client';
 import { Connection } from './connection';
 import { deploy, findPluginFolders, pluginDirName } from './deploy';
+import { addDevice, changeHost, editDevice, removeDevice, setActiveDevice, switchDevice } from './devices';
+import { DeviceTreeProvider } from './deviceTree';
 import { LogManager } from './logs';
+import { PluginsTreeProvider } from './pluginsTree';
+import { PreviewViewProvider } from './preview';
 import { ScreenPanel, StatusBar } from './screenPanel';
 
 const PAIR_TIMEOUT_MS = 120_000;
@@ -13,17 +17,48 @@ let conn: Connection | undefined;
 export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   conn = new Connection(ctx);
   const c = conn;
+  await c.initDevices();
   await c.refresh();
   const status = new StatusBar(c);
   const logs = new LogManager(c);
   const deployOut = vscode.window.createOutputChannel('Decky-MCP Deploy');
   const consoleOut = vscode.window.createOutputChannel('Decky-MCP Console');
-  ctx.subscriptions.push(c, status, logs, deployOut, consoleOut);
+  const deviceTree = new DeviceTreeProvider(c);
+  const pluginsTree = new PluginsTreeProvider(c);
+  const deviceView = vscode.window.createTreeView('decky-mcp.device', { treeDataProvider: deviceTree });
+  const pluginsView = vscode.window.createTreeView('decky-mcp.plugins', { treeDataProvider: pluginsTree });
+  ctx.subscriptions.push(
+    c, status, logs, deployOut, consoleOut, deviceTree, pluginsTree, deviceView, pluginsView,
+    vscode.window.registerWebviewViewProvider(PreviewViewProvider.viewId, new PreviewViewProvider(ctx.extensionUri, c)),
+  );
 
-  const command = (id: string, fn: () => Promise<unknown>) =>
-    ctx.subscriptions.push(vscode.commands.registerCommand(id, async () => {
+  let statsLease: vscode.Disposable | undefined;
+  const sync = () => {
+    void vscode.commands.executeCommand('setContext', 'decky-mcp.paired', c.paired);
+    deviceView.description = c.paired ? undefined : `${c.label} · not paired`;
+    if (deviceView.visible && c.paired) {
+      statsLease ??= c.watchStats();
+    } else {
+      statsLease?.dispose();
+      statsLease = undefined;
+    }
+  };
+  ctx.subscriptions.push(
+    deviceView.onDidChangeVisibility(sync),
+    c.onDidChangeTarget(sync),
+    { dispose: () => statsLease?.dispose() },
+  );
+  sync();
+
+  const afterDeviceChange = async () => {
+    await c.checkHealth();
+    pluginsTree.refresh();
+  };
+
+  const command = (id: string, fn: (arg?: unknown) => Promise<unknown>) =>
+    ctx.subscriptions.push(vscode.commands.registerCommand(id, async (arg?: unknown) => {
       try {
-        await fn();
+        await fn(arg);
       } catch (e) {
         void vscode.window.showErrorMessage(`Decky-MCP: ${describeError(e)}`);
       }
@@ -35,26 +70,53 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     await c.clearToken();
     void vscode.window.showInformationMessage(`Decky-MCP: forgot the token for ${c.label}.`);
   });
+  command('decky-mcp.refresh', async () => {
+    await c.refresh();
+    pluginsTree.refresh();
+  });
+  command('decky-mcp.refreshPlugins', async () => pluginsTree.refresh());
+  command('decky-mcp.changeHost', () => changeHost(c));
+  command('decky-mcp.addDevice', () => addDevice(c));
+  command('decky-mcp.editDevice', arg => editDevice(c, arg));
+  command('decky-mcp.removeDevice', arg => removeDevice(c, arg));
+  command('decky-mcp.setActiveDevice', arg => setActiveDevice(c, arg));
+  command('decky-mcp.switchDevice', () => switchDevice(c));
   command('decky-mcp.openScreen', async () => {
-    if (await c.client()) await ScreenPanel.show(ctx, c, status);
+    if (await c.client()) await ScreenPanel.show(ctx, c);
   });
   command('decky-mcp.deploy', async () => {
     const client = await c.client();
-    if (client) await deploy(client, deployOut);
+    if (!client) return;
+    try {
+      await deploy(client, deployOut);
+    } finally {
+      await afterDeviceChange();
+    }
+  });
+  command('decky-mcp.installZip', async () => {
+    try {
+      await installZip(c);
+    } finally {
+      await afterDeviceChange();
+    }
   });
   command('decky-mcp.restartLoader', async () => {
     const client = await c.client();
     if (!client) return;
-    await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Restarting Decky Loader' }, async progress => {
-      await client.restartLoader();
-      progress.report({ message: 'waiting for it to come back…' });
-      const h = await client.waitForRestart();
-      void vscode.window.showInformationMessage(`Decky-MCP: loader restarted (${h.name} ${h.version}).`);
-    });
+    try {
+      await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Restarting Decky Loader' }, async progress => {
+        await client.restartLoader();
+        progress.report({ message: 'waiting for it to come back…' });
+        const h = await client.waitForRestart();
+        void vscode.window.showInformationMessage(`Decky-MCP: loader restarted (${h.name} ${h.version}).`);
+      });
+    } finally {
+      await afterDeviceChange();
+    }
   });
-  command('decky-mcp.reloadPlugin', async () => {
+  command('decky-mcp.reloadPlugin', async arg => {
     const client = await c.client();
-    const dir = client && await pickDeviceDir(client, 'Plugin to reload');
+    const dir = client && (dirFrom(arg) ?? await pickDeviceDir(client, 'Plugin to reload'));
     if (!client || !dir) return;
     try {
       await client.reloadPlugin(dir);
@@ -65,13 +127,14 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
       throw e;
     }
     void vscode.window.showInformationMessage(`Decky-MCP: reloaded ${dir}.`);
+    pluginsTree.refresh();
   });
   command('decky-mcp.loaderLogs', async () => {
     if (await c.client()) logs.show('loader', 'Decky Loader', { source: 'loader' });
   });
-  command('decky-mcp.pluginLogs', async () => {
+  command('decky-mcp.pluginLogs', async arg => {
     const client = await c.client();
-    const dir = client && await pickDeviceDir(client, 'Show logs of which plugin?');
+    const dir = client && (dirFrom(arg) ?? await pickDeviceDir(client, 'Show logs of which plugin?'));
     if (dir) logs.show(`plugin:${dir}`, `Decky: ${dir}`, { source: 'plugin', plugin: dir });
   });
   command('decky-mcp.evaluate', () => evaluate(c, consoleOut, ctx));
@@ -90,12 +153,49 @@ export function deactivate(): void {
   conn = undefined;
 }
 
+/** Tree items pass themselves as the command argument; palette invocations pass nothing. */
+function dirFrom(arg: unknown): string | undefined {
+  if (typeof arg === 'string') return arg;
+  const dir = (arg as { info?: { dir?: unknown } } | undefined)?.info?.dir;
+  return typeof dir === 'string' ? dir : undefined;
+}
+
+async function installZip(c: Connection): Promise<void> {
+  const client = await c.client();
+  if (!client) return;
+  const [uri] = await vscode.window.showOpenDialog({
+    canSelectMany: false,
+    filters: { 'Plugin zip': ['zip'] },
+    openLabel: 'Install on Deck',
+    title: `Install a Decky plugin zip on ${c.label}`,
+  }) ?? [];
+  if (!uri) return;
+  const filename = uri.path.split('/').pop() || 'plugin.zip';
+  await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Installing ${filename} on ${c.label}` }, async progress => {
+    const data = await vscode.workspace.fs.readFile(uri);
+    progress.report({ message: `uploading ${(data.length / 1024).toFixed(0)} KiB…` });
+    let result;
+    try {
+      result = await client.installPlugin(data, filename, 'loader');
+    } catch (e) {
+      if (isMissingRoute(e)) throw new Error('the Decky-MCP plugin on the device has no POST /plugins/install yet; update it.');
+      throw e;
+    }
+    if (result.restarted === 'loader') {
+      progress.report({ message: 'waiting for the loader to restart…' });
+      await client.waitForRestart();
+    }
+    const { name, version, dir } = result.installed;
+    void vscode.window.showInformationMessage(`Decky-MCP: installed ${name}${version ? ` ${version}` : ''} as ${dir}.`);
+  });
+}
+
 async function pair(c: Connection): Promise<void> {
   const client = c.unauthenticatedClient();
   try {
     await client.health();
   } catch (e) {
-    throw new Error(`cannot reach ${client.baseUrl} (${describeError(e)}). Check decky-mcp.host / decky-mcp.port.`);
+    throw new Error(`cannot reach ${client.baseUrl} (${describeError(e)}). Use "Change host" or edit the device.`);
   }
   const offerManual = async (why: string) => {
     const choice = await vscode.window.showWarningMessage(`Decky-MCP: ${why}`, 'Enter token manually');
@@ -103,26 +203,33 @@ async function pair(c: Connection): Promise<void> {
   };
 
   const grant = await vscode.window.withProgress(
-    {
-      location: vscode.ProgressLocation.Notification,
-      title: `Pairing with ${c.label}: press "Pair a browser" in the Decky-MCP panel on the Deck`,
-      cancellable: true,
-    },
+    { location: vscode.ProgressLocation.Notification, title: `Pairing with ${c.label}`, cancellable: true },
     async (progress, token) => {
       const start = Date.now();
-      while (!token.isCancellationRequested && Date.now() - start < PAIR_TIMEOUT_MS) {
-        const left = Math.ceil((PAIR_TIMEOUT_MS - (Date.now() - start)) / 1000);
-        progress.report({ message: `waiting… ${left} s` });
-        try {
-          const r = await client.pair();
-          if (r === 'unsupported') return 'unsupported' as const;
-          if (r !== 'closed') return r;
-        } catch {
-          // transient (loader restarting); keep polling
+      const abort = new AbortController();
+      const cancelSub = token.onCancellationRequested(() => abort.abort());
+      const report = () => {
+        const left = Math.max(0, Math.ceil((PAIR_TIMEOUT_MS - (Date.now() - start)) / 1000));
+        progress.report({ message: `Waiting for the Deck… ${left} s left. Press "Pair a browser" in the Decky-MCP panel.` });
+      };
+      report();
+      const ticker = setInterval(report, 1000);
+      try {
+        while (!abort.signal.aborted && Date.now() - start < PAIR_TIMEOUT_MS) {
+          try {
+            const r = await client.pair();
+            if (r === 'unsupported') return 'unsupported' as const;
+            if (r !== 'closed') return r;
+          } catch {
+            // transient (loader restarting); keep polling
+          }
+          await sleep(PAIR_POLL_MS, abort.signal).catch(() => undefined);
         }
-        await sleep(PAIR_POLL_MS);
+        return abort.signal.aborted ? 'cancelled' as const : 'timeout' as const;
+      } finally {
+        clearInterval(ticker);
+        cancelSub.dispose();
       }
-      return token.isCancellationRequested ? 'cancelled' as const : 'timeout' as const;
     });
 
   if (grant === 'cancelled') return;
@@ -131,7 +238,7 @@ async function pair(c: Connection): Promise<void> {
   }
   if (grant === 'timeout') return offerManual('no pairing window was opened within 120 s.');
   await c.setToken(grant.token);
-  await announce(c, 'Paired');
+  await announce(c, 'Paired with');
 }
 
 async function enterToken(c: Connection): Promise<void> {
@@ -155,7 +262,9 @@ async function enterToken(c: Connection): Promise<void> {
 async function announce(c: Connection, verb: string): Promise<void> {
   try {
     const h = await c.unauthenticatedClient().health();
-    void vscode.window.showInformationMessage(`Decky-MCP: ${verb} ${c.label}: ${h.name} ${h.version}, API v${h.api_version}, ${h.tools} tools.`);
+    const choice = await vscode.window.showInformationMessage(
+      `Decky-MCP: ${verb} ${c.label}: ${h.name} ${h.version}, API v${h.api_version}, ${h.tools} tools.`, 'Open screen');
+    if (choice) await vscode.commands.executeCommand('decky-mcp.openScreen');
   } catch (e) {
     void vscode.window.showWarningMessage(`Decky-MCP: token saved, but /health failed: ${describeError(e)}`);
   }
