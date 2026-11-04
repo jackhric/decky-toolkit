@@ -114,12 +114,9 @@ function Content() {
   const current = [...pending].sort((a, b) => b.age_s - a.age_s)[0];
   if (current) {
     return (
-      <PanelSection title="Approve pairing request?">
+      <PanelSection title="Pairing">
         <PanelSectionRow>
-          <div style={{ fontSize: "0.95em", lineHeight: 1.4, padding: "4px 0 10px" }}>
-            {current.client_name} ({current.remote}) · code{" "}
-            <span style={{ fontFamily: "monospace", fontSize: "1.2em", fontWeight: "bold" }}>{current.code}</span>
-          </div>
+          <Field label={current.client_name} description={`${current.remote} · code ${current.code}`} focusable bottomSeparator="none" />
         </PanelSectionRow>
         <PanelSectionRow>
           <Focusable style={{ display: "flex", gap: "8px" }}>
@@ -133,9 +130,7 @@ function Content() {
         </PanelSectionRow>
         {pending.length > 1 && (
           <PanelSectionRow>
-            <div style={{ fontSize: "0.75em", opacity: 0.7, textAlign: "center", paddingTop: "6px" }}>
-              1 of {pending.length}
-            </div>
+            <Field label="Requests" focusable>{`1 of ${pending.length}`}</Field>
           </PanelSectionRow>
         )}
       </PanelSection>
@@ -156,21 +151,13 @@ function Content() {
 
   return (
     <>
-      <PanelSection title="Connect from VS Code / VSCodium">
+      <PanelSection title="Connect">
         <PanelSectionRow>
-          <div style={{ textAlign: "center", padding: "6px 0" }}>
-            <div style={{ fontFamily: "monospace", fontSize: "1.8em", fontWeight: "bold", wordBreak: "break-all" }}>
-              {status.ip}
-            </div>
-            <div style={{ fontSize: "0.85em", opacity: 0.7 }}>port {status.port}</div>
-          </div>
+          <Field label={status.ip} description={`Port ${status.port} · add this address in the Decky-MCP extension`} focusable />
         </PanelSectionRow>
         <PanelSectionRow>
-          <div style={{ fontSize: "0.8em", opacity: 0.8 }}>Decky-MCP server: {serverState}</div>
+          <Field label="Server" focusable>{serverState}</Field>
         </PanelSectionRow>
-      </PanelSection>
-
-      <PanelSection>
         <PanelSectionRow>
           <ButtonItem layout="below" onClick={() => setShowAdvanced((s) => !s)}>
             {showAdvanced ? "Hide advanced" : "Advanced"}
