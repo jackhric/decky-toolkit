@@ -1115,8 +1115,8 @@ await check('Controllers view live: SSE through the proxy, add / remove, 409 and
   assert.deepEqual(ctl.posts.at(-1), { name: 'Virtual pad 1' });
   assert.equal(lastMessage('info').m, 'Decky-MCP: Virtual controller added and recognised by Steam Input (Virtual pad 1).');
   let rows = await provider.getChildren();
-  const added = rows.find(r => r.label === 'Virtual pad 1');
-  assert.equal(added.description, 'virtual · Steam Input: xbox360 (slot 3)');
+  const added = rows.find(r => String(r.label).endsWith('Virtual pad 1'));
+  assert.equal(added.description, 'virtual · Steam Input: xbox360 · Slot 4');
 
   ui.inputBox = () => 'Couch';
   await run('decky-mcp.addVirtualController');
