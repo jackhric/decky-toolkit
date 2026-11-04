@@ -3,7 +3,7 @@ name: Pages
 on:
   push:
     branches: [main]
-    paths: ['site/**', '.github/workflows/pages.yml']
+    paths: ['site/**', 'scripts/og-image/**', '.github/workflows/pages.yml']
   workflow_call:
   workflow_dispatch:
 
@@ -32,6 +32,9 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm run build
           mv dist ../_site
+      - name: Capture the link-preview image
+        continue-on-error: true
+        run: OG_SITE_DIR=_site OG_CHROME="$(command -v google-chrome)" ./scripts/og-image/capture.sh _site/og.jpg
       - name: Add the latest plugin zip
         env:
           GH_TOKEN: ${{ github.token }}
