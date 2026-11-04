@@ -24,8 +24,30 @@ export interface StreamStats {
   uptime_s: number;
   width: number | null;
   height: number | null;
-  settings: { fps: number; quality: number; width: number };
+  settings: { fps: number; quality: number; width: number; audio?: boolean };
+  /** Absent on devices without audio streaming. */
+  audio?: AudioStats | null;
   error: string | null;
+}
+
+export interface AudioStats {
+  enabled: boolean;
+  available: boolean;
+  running: boolean;
+  subscribers: number;
+  kbps: number;
+  chunks_total: number;
+  rms_db: number | null;
+  error: string | null;
+}
+
+export interface StreamSettings {
+  fps: number;
+  quality: number;
+  width: number;
+  /** Absent on devices without audio streaming. */
+  audio?: boolean;
+  limits: { fps: [number, number]; quality: [number, number]; widths: number[]; audio?: [boolean, boolean] };
 }
 
 export interface InputSettings {

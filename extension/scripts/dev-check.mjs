@@ -204,6 +204,36 @@ await check('/input WebSocket through the proxy upgrades and is closed with 4003
     `closed ${r.code} "${r.reason}"; without the prefix the handshake is refused`;
 });
 
+// Reads the device's audio flag but never changes it.
+await check('/audio WebSocket through the proxy: format frame and >= 10 PCM chunks in 1 s', async () => {
+  const st = await new DeckyClient({ host, port }, token).getStreamSettings();
+  if (st.audio === undefined) throw new Error('device predates audio streaming (no "audio" in /stream/settings)');
+  if (!st.audio) throw new Error('audio is off on the device; this check needs it on and does not change it');
+  const ws = new WebSocket(base.replace(/^http/, 'ws') + '/audio');
+  ws.binaryType = 'arraybuffer';
+  const r = await new Promise((resolve, reject) => {
+    let format = null, chunks = 0, bytes = 0, first = 0;
+    const t = setTimeout(() => { ws.close(); reject(new Error(`timeout: format=${JSON.stringify(format)} chunks=${chunks}`)); }, 10000);
+    ws.onerror = () => { clearTimeout(t); reject(new Error('handshake refused')); };
+    ws.onclose = e => { clearTimeout(t); reject(new Error(`closed ${e.code} ${e.reason} after ${chunks} chunks`)); };
+    ws.onmessage = ev => {
+      if (typeof ev.data === 'string') { format = JSON.parse(ev.data); return; }
+      if (!format) { clearTimeout(t); reject(new Error('binary before the format frame')); return; }
+      if (!first) first = Date.now();
+      chunks++; bytes += ev.data.byteLength;
+      // The pipeline may still be starting for the first chunk; time the second second only.
+      if (Date.now() - first >= 1000) {
+        clearTimeout(t); ws.onclose = null; ws.close();
+        resolve({ format, chunks, bytes });
+      }
+    };
+  });
+  const f = r.format;
+  if (f.type !== 'format' || f.codec !== 'pcm_s16le' || f.rate !== 48000 || f.channels !== 2) throw new Error(`unexpected format ${JSON.stringify(f)}`);
+  if (r.chunks < 10) throw new Error(`only ${r.chunks} chunks in 1 s`);
+  return `format ${f.codec} ${f.rate} Hz ${f.channels} ch ${f.chunk_ms} ms; ${r.chunks} chunks (${(r.bytes * 8 / 1000).toFixed(0)} kbit) in 1 s`;
+});
+
 await check('MCP tools/list via client', async () => {
   const tools = await new DeckyClient({ host, port }, token).listTools();
   if (tools.length < 13) throw new Error(`only ${tools.length} tools`);

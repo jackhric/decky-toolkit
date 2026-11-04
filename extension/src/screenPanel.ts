@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
-import { describeError } from './client';
+import { HttpError, describeError } from './client';
 import { Connection, ConnectionState, InputState, externalProxyBase } from './connection';
 import { INPUT_UNSUPPORTED, inputBackendLabel, inputOn, toggleInput } from './input';
 
@@ -71,7 +71,41 @@ export class ScreenPanel {
       sentInput = json;
       void panel.webview.postMessage({ type: 'input', state });
     };
+    let sentStream: string | undefined;
+    const postStream = (msg: { settings?: StreamSettingsView | null; applied?: string[]; error?: string }) => {
+      if (msg.settings !== undefined && !msg.applied) {
+        const json = JSON.stringify(msg.settings);
+        if (json === sentStream) return;
+        sentStream = json;
+      }
+      void panel.webview.postMessage({ type: 'stream', ...msg });
+    };
+    const loadStream = async () => {
+      const client = conn.authedClient();
+      if (!client) return;
+      try {
+        postStream({ settings: await client.getStreamSettings() });
+      } catch (e) {
+        if (e instanceof HttpError && e.status === 404) postStream({ settings: null });
+      }
+    };
     panel.webview.onDidReceiveMessage(async m => {
+      if (m?.type === 'ready') { sentStream = undefined; void loadStream(); }
+      // Same rule as input: the extension owns device-wide settings, the webview only asks.
+      if (m?.type === 'setStream') {
+        const patch = pickStreamPatch(m.patch);
+        try {
+          const client = conn.authedClient();
+          if (!client) throw new Error('not paired');
+          const settings = await client.setStreamSettings(patch);
+          sentStream = JSON.stringify(settings);
+          postStream({ settings, applied: Object.keys(patch) });
+        } catch (e) {
+          postStream({ error: describeError(e) });
+          sentStream = undefined;
+          void loadStream();
+        }
+      }
       if (m?.type === 'snapshot') void vscode.env.openExternal(vscode.Uri.parse(`${this.base}/frame.jpg?t=${Date.now()}`));
       if (m?.type === 'ready') sendInput(true);
       if (m?.type === 'ready' || m?.type === 'refreshInput') void conn.refreshInput();
@@ -85,10 +119,17 @@ export class ScreenPanel {
         sendInput(true);
       }
     }, null, this.disposables);
-    conn.onDidChange(() => sendInput(), null, this.disposables);
+    conn.onDidChange(() => {
+      sendInput();
+      // The 5 s stats tick carries the settings, so changes from other clients reach the panel.
+      const st = conn.stats?.settings;
+      if (st) postStream({ settings: { ...st } });
+    }, null, this.disposables);
     conn.onDidChangeTarget(() => {
       panel.title = `Screen: ${conn.label}`;
       void panel.webview.postMessage({ type: 'reconnect' });
+      sentStream = undefined;
+      void loadStream();
     }, null, this.disposables);
     this.disposables.push(conn.watchStats());
   }
@@ -103,7 +144,10 @@ export class ScreenPanel {
       `img-src ${origin} blob:`,
       `connect-src ${origin} ${origin.replace(/^http/, 'ws')}`,
       `style-src ${webview.cspSource}`,
-      `script-src 'nonce-${nonce}'`,
+      // Chromium checks AudioWorklet modules against script-src (verified), so the inline worklet
+      // that plays /audio needs blob: here; worker-src alone is not enough.
+      `script-src 'nonce-${nonce}' blob:`,
+      'worker-src blob:',
     ].join('; ');
     const attr = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
     return `<!doctype html>
@@ -122,19 +166,36 @@ export class ScreenPanel {
   <span class="stat">Mbps <span id="mbps">–</span></span>
   <span class="stat">res <span id="res">–</span></span>
   <span class="stat">frames <span id="frames">0</span></span>
+  <span class="stat" id="a-stat" hidden>audio kbps <span id="akbps">–</span></span>
   <span class="spacer"></span>
+  <span class="settings" id="settings" hidden>
+    <button id="gear" title="Stream settings (device-wide)" aria-expanded="false">Stream</button>
+    <div id="pop" hidden>
+      <label for="s-fps">Frame rate</label>
+      <select id="s-fps"><option value="15">15 fps</option><option value="24">24 fps</option><option value="30">30 fps</option><option value="60">60 fps</option></select>
+      <label for="s-quality">JPEG quality</label>
+      <select id="s-quality"><option value="50">50</option><option value="60">60</option><option value="70">70</option><option value="80">80</option><option value="90">90</option></select>
+      <label for="s-width">Size</label>
+      <select id="s-width"><option value="0">Native</option><option value="1600">1600 px</option><option value="1280">1280 px</option><option value="960">960 px</option><option value="640">640 px</option></select>
+      <label for="s-audio" id="s-audio-label" hidden>Audio</label>
+      <input type="checkbox" id="s-audio" title="Stream what the device is playing (device-wide)" hidden>
+      <span class="note" id="s-note">Applies to every viewer.</span>
+    </div>
+  </span>
   <span class="input-ctl" id="input-ctl" hidden>
     <span id="pad-ind" hidden>Gamepad connected</span>
     <span id="inp-note"></span>
-    <span class="seg" id="mode" hidden>
-      <button id="mode-ui" class="on" title="Clicks and moves map onto the screen; click the picture to capture the keyboard">UI</button>
-      <button id="mode-game" title="Pointer lock: relative mouse for games (Esc releases)">Game</button>
-    </span>
     <button id="inp" title="Remote keyboard, mouse and gamepad input (device-wide)">Input</button>
+  </span>
+  <span class="audio-ctl" id="audio-ctl" hidden>
+    <span id="a-hint" hidden>Click anywhere to enable audio</span>
+    <button id="mute" title="Mute audio on this computer">🔊</button>
+    <input type="range" id="vol" min="0" max="100" value="80" title="Volume on this computer">
   </span>
   <button id="pause">Pause</button>
   <button id="fit" class="on">Fit</button>
   <button id="snap">Snapshot</button>
+  <button id="full" hidden>Fullscreen</button>
 </header>
 <main id="main" tabindex="-1">
   <img id="img" alt="Device display">
@@ -156,4 +217,15 @@ function webviewInputState(input: InputState | undefined) {
   if (!input) return null;
   if (input === 'unsupported') return { supported: false, enabled: false, available: false, backend: null, reason: INPUT_UNSUPPORTED };
   return { supported: true, enabled: input.enabled, available: input.available, backend: inputBackendLabel(input.backend), reason: input.reason };
+}
+
+type StreamSettingsView = { fps?: number; quality?: number; width?: number; audio?: boolean };
+
+/** Only the known fields of a webview request, with the types the device expects. */
+function pickStreamPatch(raw: unknown): StreamSettingsView {
+  const p = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const out: StreamSettingsView = {};
+  for (const k of ['fps', 'quality', 'width'] as const) if (typeof p[k] === 'number' && Number.isFinite(p[k])) out[k] = p[k] as number;
+  if (typeof p.audio === 'boolean') out.audio = p.audio;
+  return out;
 }

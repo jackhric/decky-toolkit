@@ -57,12 +57,13 @@
           const frame = buf.slice(start, start + len);
           buf = buf.subarray(start + len);
           stats(len);
+          if (applying === 'sent') doneApplying('');
           if (!paused) present(frame);
         }
       }
-      show('Stream ended. Reconnecting…');
+      show(applying ? 'Applying stream settings…' : 'Stream ended. Reconnecting…');
     } catch (e) {
-      if (e.name !== 'AbortError') show('Disconnected: ' + e.message + '\nReconnecting…');
+      if (e.name !== 'AbortError') show(applying ? 'Applying stream settings…' : 'Disconnected: ' + e.message + '\nReconnecting…');
     }
     dot.classList.remove('live');
     if (my === gen && visible && !abort.signal.aborted) retry = setTimeout(run, 2000);
@@ -72,33 +73,84 @@
 
   window.addEventListener('message', e => {
     const m = e.data;
-    if (m.type === 'reconnect') { if (m.base) base = m.base; stop(); closeWs(); if (visible) run(); if (inp && inp.enabled) connectWs(); }
+    if (m.type === 'reconnect') { if (m.base) base = m.base; stop(); closeWs(); closeAudio(); if (visible) run(); if (inp && inp.enabled) connectWs(); connectAudio(); }
     // Hidden panels keep their context; stop pulling ~50 Mbit/s nobody is looking at.
     // onDidChangeViewState also fires on focus changes, so only act when visibility really flips.
-    if (m.type === 'visible' && m.visible !== visible) { visible = m.visible; if (visible) { show('Connecting…'); run(); } else { stop(); releaseAll(); } }
+    if (m.type === 'visible' && m.visible !== visible) { visible = m.visible; if (visible) { show('Connecting…'); run(); connectAudio(); } else { stop(); releaseAll(); closeAudio(); } }
     if (m.type === 'input') applyInput(m.state);
+    if (m.type === 'stream') streamSettings(m);
   });
 
   el('pause').onclick = () => { paused = !paused; el('pause').textContent = paused ? 'Resume' : 'Pause'; el('pause').classList.toggle('on', paused); };
   el('fit').onclick = () => { const actual = el('main').classList.toggle('actual'); el('fit').classList.toggle('on', !actual); el('fit').textContent = actual ? 'Actual' : 'Fit'; };
   el('snap').onclick = () => vscode.postMessage({ type: 'snapshot' });
-  document.addEventListener('keydown', e => { if (capturing()) return; if (e.key === ' ') { e.preventDefault(); el('pause').click(); } });
+  el('full').hidden = !document.fullscreenEnabled;
+  el('full').onclick = () => document.fullscreenElement ? document.exitFullscreen() : el('main').requestFullscreen();
+  document.addEventListener('keydown', e => {
+    if (capturing()) return;
+    if (e.key === 'Escape') togglePop(false);
+    if (e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT') return;
+    if (e.key === ' ') { e.preventDefault(); el('pause').click(); }
+    if (e.key === 'f' && !el('full').hidden) el('full').click();
+  });
+
+  // Stream settings are device-wide; like the input flag, the extension loads and applies them
+  // (postMessage 'setStream') and pushes changes made elsewhere with its 5 s stats tick.
+  const selects = { fps: el('s-fps'), quality: el('s-quality'), width: el('s-width') };
+  let applying = false, applyTimer = null;
+  function fill(st) {
+    for (const [key, sel] of Object.entries(selects)) {
+      if (st[key] === undefined) continue;
+      const v = String(st[key]);
+      if (sel.options && typeof Option === 'function' && ![...sel.options].some(o => o.value === v)) sel.add(new Option(v + (key === 'fps' ? ' fps' : ''), v));
+      sel.value = v;
+    }
+    if (typeof st.audio === 'boolean') {
+      el('s-audio').hidden = el('s-audio-label').hidden = false;
+      el('s-audio').checked = st.audio;
+      setDeviceAudio(st.audio);
+    }
+  }
+  function setDisabled(on) { Object.values(selects).forEach(s => s.disabled = on); el('s-audio').disabled = on; }
+  function doneApplying(text) {
+    applying = false; clearTimeout(applyTimer);
+    setDisabled(false);
+    el('s-note').textContent = text || 'Applies to every viewer.';
+  }
+  function apply(patch) {
+    applying = 'pending'; setDisabled(true);
+    el('s-note').textContent = 'Applying…';
+    vscode.postMessage({ type: 'setStream', patch });
+  }
+  function streamSettings(m) {
+    if (m.error) { doneApplying('Failed: ' + m.error); return; }
+    if (m.settings === null) { el('settings').hidden = true; togglePop(false); return; }
+    if (applying && !m.applied) return; // a stats tick from before the change
+    el('settings').hidden = false;
+    fill(m.settings);
+    if (!m.applied) return;
+    // The video pipeline has restarted by the time PUT returns, so the next frame is from the new one.
+    if (m.applied.some(k => k !== 'audio') && visible) { applying = 'sent'; applyTimer = setTimeout(() => doneApplying(''), 6000); }
+    else doneApplying('');
+  }
+  for (const [key, sel] of Object.entries(selects)) sel.onchange = () => apply({ [key]: +sel.value });
+  el('s-audio').onchange = () => apply({ audio: el('s-audio').checked });
+  function togglePop(open) { el('pop').hidden = !open; el('gear').classList.toggle('on', open); el('gear').setAttribute?.('aria-expanded', String(open)); }
+  el('gear').onclick = e => { e.stopPropagation(); togglePop(el('pop').hidden); };
+  el('pop').onclick = e => e.stopPropagation();
+  document.addEventListener('click', () => togglePop(false));
 
   // Remote input, ported from static/viewer.html. The on/off flag is device-wide and owned by the
   // extension (postMessage 'setInput'); only the /input WebSocket goes from here to the proxy.
   const main = el('main');
-  const LOCK_HINT = 'Pointer lock unavailable in this webview, use the browser viewer for Game mode';
-  let inp = null, ws = null, wsRetry = null, mode = 'ui';
-  let lockTimer = null, lockWorked = false;
+  let inp = null, ws = null, wsRetry = null;
   const heldKeys = new Set(), heldButtons = new Set();
-  let pendingMove = null, relX = 0, relY = 0, moveFrame = 0, wheelAcc = 0;
+  let pendingMove = null, moveFrame = 0, wheelAcc = 0;
   const wsOpen = () => ws && ws.readyState === WebSocket.OPEN;
   const send = m => { if (wsOpen()) ws.send(JSON.stringify(m)); };
-  const locked = () => document.pointerLockElement === main;
   // Keys are only captured while the picture has focus (click it); toolbar clicks give them back.
-  function capturing() { return !!(inp && inp.enabled && wsOpen() && (document.activeElement === main || locked())); }
+  function capturing() { return !!(inp && inp.enabled && wsOpen() && document.activeElement === main); }
   const note = t => { el('inp-note').textContent = t || ''; };
-  const gameNote = 'Click the picture to lock the pointer; Esc releases it.';
 
   function releaseAll() {
     for (const k of heldKeys) send({ type: 'key', key: k, down: false });
@@ -120,7 +172,6 @@
       : !st.available && !st.enabled ? (st.reason || 'Input unavailable')
       : st.enabled ? 'Remote input is on (' + st.backend + '). Click to turn it off for every client.'
       : 'Turn on remote keyboard, mouse and gamepad input (device-wide)';
-    el('mode').hidden = !st.enabled;
     if (st.enabled) connectWs(); else { closeWs(); note(''); }
     updateCapture();
   }
@@ -135,7 +186,7 @@
     if (ws) return;
     clearTimeout(wsRetry);
     const sock = ws = new WebSocket(base.replace(/^http/, 'ws') + '/input');
-    sock.onopen = () => { note(mode === 'game' ? gameNote : ''); updateCapture(); };
+    sock.onopen = () => { note(''); updateCapture(); };
     sock.onmessage = ev => {
       const m = JSON.parse(ev.data);
       if (m.type === 'error') { note(m.message); console.warn('input:', m.message); }
@@ -143,7 +194,6 @@
     sock.onclose = ev => {
       if (ws !== sock) return;
       ws = null; heldKeys.clear(); heldButtons.clear(); padSent = null;
-      if (locked()) document.exitPointerLock();
       updateCapture();
       // 4003: input was turned off or pairing is open; the extension's next state update says which.
       if (ev.code === 4003) { note(ev.reason || 'Input refused'); vscode.postMessage({ type: 'refreshInput' }); return; }
@@ -153,36 +203,14 @@
   function closeWs() {
     clearTimeout(wsRetry);
     if (ws) { releaseAll(); const s = ws; ws = null; s.close(); }
-    if (locked()) document.exitPointerLock();
     updateCapture();
   }
 
   function updateCapture() { main.classList.toggle('capturing', capturing()); }
   main.addEventListener('focus', updateCapture);
-  main.addEventListener('blur', () => { if (!locked()) releaseAll(); updateCapture(); });
+  main.addEventListener('blur', () => { releaseAll(); updateCapture(); });
   window.addEventListener('blur', () => { releaseAll(); updateCapture(); });
   document.addEventListener('visibilitychange', () => { if (document.hidden) releaseAll(); });
-
-  for (const [id, m] of [['mode-ui', 'ui'], ['mode-game', 'game']]) el(id).onclick = () => {
-    mode = m; el('mode-ui').classList.toggle('on', m === 'ui'); el('mode-game').classList.toggle('on', m === 'game');
-    if (m === 'ui' && locked()) document.exitPointerLock();
-    note(m === 'game' ? gameNote : '');
-  };
-
-  // VS Code may run webviews without pointer-lock permission; the request then rejects, fires
-  // pointerlockerror or does nothing at all, so a timeout covers the silent case.
-  function lockFailed() {
-    clearTimeout(lockTimer); lockTimer = null;
-    if (!locked()) note(lockWorked ? 'Pointer lock refused; click the picture again.' : LOCK_HINT);
-  }
-  function requestLock() {
-    if (lockTimer) return;
-    lockTimer = setTimeout(lockFailed, 1500);
-    const attempt = opts => { try { return main.requestPointerLock(opts); } catch (e) { return Promise.reject(e); } };
-    const p = attempt({ unadjustedMovement: true });
-    // Rejects with NotSupportedError where unadjustedMovement is unknown; retry without it.
-    if (p && p.then) p.catch(() => { if (locked()) return; const q = attempt(); if (q && q.then) q.catch(lockFailed); });
-  }
 
   // Map a client point onto the picture, allowing for object-fit: contain letterboxing.
   function norm(e) {
@@ -195,32 +223,22 @@
   function flushMove() {
     moveFrame = 0;
     if (pendingMove) { send({ type: 'mouse_move', x: +pendingMove[0].toFixed(5), y: +pendingMove[1].toFixed(5) }); pendingMove = null; }
-    if (relX || relY) { send({ type: 'mouse_move', dx: relX, dy: relY }); relX = relY = 0; }
   }
   const scheduleMove = () => { if (!moveFrame) moveFrame = requestAnimationFrame(flushMove); };
   const BUTTONS = ['left', 'middle', 'right', 'back', 'forward'];
   const press = b => { heldButtons.add(b); send({ type: 'mouse_button', button: b, down: true }); };
 
   img.addEventListener('mousemove', e => {
-    if (mode !== 'ui' || !capturing()) return;
+    if (!capturing()) return;
     pendingMove = norm(e); scheduleMove();
-  });
-  document.addEventListener('mousemove', e => {
-    if (!locked()) return;
-    relX += e.movementX; relY += e.movementY; scheduleMove();
   });
   img.addEventListener('mousedown', e => {
     if (!inp || !inp.enabled || !wsOpen()) return;
     e.preventDefault();
     main.focus();
-    if (mode === 'game') {
-      if (!locked()) { requestLock(); return; }
-    } else {
-      pendingMove = norm(e); flushMove();
-    }
+    pendingMove = norm(e); flushMove();
     const b = BUTTONS[e.button]; if (b) press(b);
   });
-  main.addEventListener('mousedown', e => { if (locked() && e.target !== img) { const b = BUTTONS[e.button]; if (b) press(b); } });
   window.addEventListener('mouseup', e => {
     const b = BUTTONS[e.button];
     if (b && heldButtons.delete(b)) { flushMove(); send({ type: 'mouse_button', button: b, down: false }); }
@@ -234,20 +252,10 @@
     const n = Math.trunc(wheelAcc);
     if (n) { wheelAcc -= n; send({ type: 'wheel', dx: 0, dy: Math.max(-20, Math.min(20, n)) }); }
   }, { passive: false });
-  document.addEventListener('pointerlockchange', () => {
-    if (locked()) { lockWorked = true; clearTimeout(lockTimer); lockTimer = null; note('Pointer locked; Esc releases it.'); }
-    else { releaseAll(); if (mode === 'game' && !lockTimer) note(gameNote); }
-    updateCapture();
-  });
-  // The promise-less form only reports failure through this event; let a pending retry finish first.
-  document.addEventListener('pointerlockerror', () => setTimeout(() => { if (lockTimer && !locked()) lockFailed(); }, 300));
-
   // Capture phase plus stopImmediatePropagation keeps captured keys from VS Code's keybindings,
   // which the webview host picks up from a bubbling listener on window.
   document.addEventListener('keydown', e => {
     if (!capturing()) return;
-    // The browser itself uses Escape to leave pointer lock.
-    if (locked() && e.code === 'Escape') return;
     e.preventDefault(); e.stopImmediatePropagation();
     if (e.repeat || !e.code || heldKeys.has(e.code)) return;
     heldKeys.add(e.code); send({ type: 'key', key: e.code, down: true });
@@ -289,6 +297,144 @@
   const startPad = () => { if (!padTimer) padTimer = setInterval(pollPad, 16); pollPad(); };
   window.addEventListener('gamepadconnected', startPad);
   window.addEventListener('gamepaddisconnected', () => { if (padSent) { send({ type: 'gamepad', ...NEUTRAL_PAD }); padSent = null; } pollPad(); });
+
+  // ---- audio ----
+  // Raw 48 kHz s16le stereo over /audio, played by an AudioWorklet with a ~120 ms ring buffer. When
+  // the buffer grows past 300 ms (tab throttled, network burst) it drops back to 120 ms, so the
+  // sound never drifts behind the picture. Mute and volume are local; on/off is device-wide.
+  const WORKLET = `
+class PcmPlayer extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.cap = sampleRate;
+    this.buf = new Float32Array(this.cap * 2);
+    this.r = 0; this.n = 0; this.playing = false;
+    this.target = Math.round(sampleRate * 0.12); this.max = Math.round(sampleRate * 0.3);
+    this.port.onmessage = e => this.push(new Int16Array(e.data));
+  }
+  push(s) {
+    const frames = s.length >> 1;
+    let w = (this.r + this.n) % this.cap;
+    for (let i = 0; i < frames; i++) {
+      this.buf[w * 2] = s[i * 2] / 32768; this.buf[w * 2 + 1] = s[i * 2 + 1] / 32768;
+      w = (w + 1) % this.cap;
+    }
+    this.n += frames;
+    if (this.n > this.max) { const drop = this.n - this.target; this.r = (this.r + drop) % this.cap; this.n -= drop; }
+    if (!this.playing && this.n >= this.target) this.playing = true;
+  }
+  process(inputs, outputs) {
+    const out = outputs[0], L = out[0], R = out[1] || out[0];
+    for (let i = 0; i < L.length; i++) {
+      if (this.playing && this.n > 0) {
+        L[i] = this.buf[this.r * 2]; R[i] = this.buf[this.r * 2 + 1];
+        this.r = (this.r + 1) % this.cap; this.n--;
+      } else { L[i] = 0; R[i] = 0; this.playing = false; }
+    }
+    return true;
+  }
+}
+registerProcessor('pcm-player', PcmPlayer);`;
+  let actx = null, anode = null, again = null, aws = null, aRetry = null, deviceAudio = false;
+  let muted = false, volume = 0.8, aWin = [], aWinBytes = 0, nextT = 0;
+  const saved = (vscode.getState && vscode.getState()) || {};
+  muted = !!saved.muted; if (typeof saved.volume === 'number') volume = saved.volume;
+  el('vol').value = Math.round(volume * 100);
+
+  function updateAudioUi() {
+    const running = !!(actx && actx.state === 'running');
+    el('audio-ctl').hidden = !deviceAudio;
+    el('a-stat').hidden = !deviceAudio;
+    el('a-hint').hidden = !deviceAudio || running;
+    el('mute').textContent = muted ? '🔇' : '🔊';
+    el('mute').classList.toggle('on', muted);
+    el('mute').title = muted ? 'Unmute audio on this computer' : 'Mute audio on this computer (the device keeps playing)';
+  }
+  function applyVolume() {
+    if (again) again.gain.value = muted ? 0 : volume;
+    if (vscode.setState) vscode.setState({ ...((vscode.getState && vscode.getState()) || {}), muted, volume });
+    updateAudioUi();
+  }
+  el('mute').onclick = () => { muted = !muted; applyVolume(); };
+  el('vol').oninput = () => { volume = el('vol').value / 100; if (muted && volume > 0) muted = false; applyVolume(); };
+
+  // Browsers keep an AudioContext suspended until a user gesture, so the first click or key press resumes it.
+  let creating = false;
+  async function ensureAudio() {
+    if (actx) { if (actx.state === 'suspended') actx.resume().then(updateAudioUi); return; }
+    if (creating || !window.AudioContext) return;
+    creating = true;
+    try {
+      let ctx;
+      try { ctx = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' }); } catch (e) { ctx = new AudioContext({ latencyHint: 'interactive' }); }
+      again = ctx.createGain();
+      again.connect(ctx.destination);
+      // AudioWorklet only exists in secure contexts (https, localhost, webviews); plain http on the
+      // LAN falls back to scheduling one AudioBufferSource per chunk.
+      if (ctx.audioWorklet) {
+        const url = URL.createObjectURL(new Blob([WORKLET], { type: 'application/javascript' }));
+        try { await ctx.audioWorklet.addModule(url); } finally { URL.revokeObjectURL(url); }
+        anode = new AudioWorkletNode(ctx, 'pcm-player', { numberOfInputs: 0, outputChannelCount: [2] });
+        anode.connect(again);
+      }
+      actx = ctx;
+      ctx.onstatechange = updateAudioUi;
+      applyVolume();
+      if (ctx.state === 'suspended') ctx.resume().then(updateAudioUi, () => {});
+    } catch (e) {
+      console.warn('audio:', e);
+      el('a-hint').textContent = 'Audio playback failed: ' + e.message;
+    }
+    creating = false;
+    updateAudioUi();
+  }
+  window.addEventListener('pointerdown', () => { if (deviceAudio) ensureAudio(); }, true);
+  window.addEventListener('keydown', () => { if (deviceAudio) ensureAudio(); }, true);
+  updateAudioUi();
+
+  // Same budget as the worklet: start 120 ms ahead, re-anchor after an underrun or past 300 ms.
+  function schedule(data) {
+    const s = new Int16Array(data), n = s.length >> 1;
+    const buf = actx.createBuffer(2, n, 48000), L = buf.getChannelData(0), R = buf.getChannelData(1);
+    for (let i = 0; i < n; i++) { L[i] = s[i * 2] / 32768; R[i] = s[i * 2 + 1] / 32768; }
+    const now = actx.currentTime;
+    if (nextT < now + 0.01 || nextT > now + 0.3) nextT = now + 0.12;
+    const src = actx.createBufferSource();
+    src.buffer = buf; src.connect(again); src.start(nextT);
+    nextT += n / 48000;
+  }
+  function audioStats(bytes) {
+    const now = performance.now();
+    aWin.push([now, bytes]); aWinBytes += bytes;
+    while (aWin.length && now - aWin[0][0] > 2000) aWinBytes -= aWin.shift()[1];
+    if (aWin.length % 25 === 0) el('akbps').textContent = Math.round(aWinBytes * 8 / 2 / 1000);
+  }
+  function connectAudio() {
+    if (aws || !deviceAudio || !visible) return;
+    clearTimeout(aRetry);
+    const sock = aws = new WebSocket(base.replace(/^http/, 'ws') + '/audio');
+    sock.binaryType = 'arraybuffer';
+    sock.onmessage = ev => {
+      if (typeof ev.data === 'string') return; // {"type":"format"}: always 48 kHz s16le stereo
+      audioStats(ev.data.byteLength);
+      if (!actx || actx.state !== 'running') return;
+      if (anode) anode.port.postMessage(ev.data, [ev.data]); else schedule(ev.data);
+    };
+    sock.onclose = ev => {
+      if (aws !== sock) return;
+      aws = null; el('akbps').textContent = '–';
+      // 4003: switched off device-wide; the next settings update from the extension turns it back on.
+      if (ev.code === 4003) { setDeviceAudio(false); return; }
+      if (deviceAudio) aRetry = setTimeout(connectAudio, 2000);
+    };
+  }
+  function closeAudio() { clearTimeout(aRetry); if (aws) { const s = aws; aws = null; s.close(); } el('akbps').textContent = '–'; }
+  // The extension re-sends the device-wide flag with every stats tick, so a 4003 recovers by itself.
+  function setDeviceAudio(on) {
+    deviceAudio = on;
+    if (on) { connectAudio(); ensureAudio(); } else closeAudio();
+    updateAudioUi();
+  }
 
   vscode.postMessage({ type: 'ready' });
   run();
