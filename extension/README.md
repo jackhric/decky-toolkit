@@ -333,7 +333,7 @@ All of these are also in the command palette under the `Decky:` category.
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `decky-toolkit.openScreenOnConnect` | `true` | Open the screen panel after the first successful connect of a session |
-| `decky-toolkit.host` | `10.0.70.18` | Device IP or hostname. Seeds the first saved device; used when the device list is empty |
+| `decky-toolkit.host` | (empty) | Device IP or hostname. When set, seeds the first saved device; used when the device list is empty |
 | `decky-toolkit.port` | `8765` | Decky Toolkit server port (same rules as `host`) |
 | `decky-toolkit.pluginDirName` | (empty) | Target dir under `~/homebrew/plugins` for deploy; empty means the plugin folder's name |
 | `decky-toolkit.deploy.build` | `auto` | `auto`: build only when `src/` is newer than `dist/index.js`; `always`; `never` |
