@@ -72,7 +72,7 @@ I: Bus=0006 Vendor=045e Product=0b12 Version=050d
 N: Name="Microsoft Xbox Controller"
 P: Phys=gip0.0/input0
 S: Sysfs=/devices/pci0000:00/0000:00:10.0/usb6/6-1/6-1.3/6-1.3:1.0/gip0/gip0.0/input/input37
-U: Uniq=09710300495139
+U: Uniq=0000000000000
 H: Handlers=kbd event7 js0 
 B: PROP=0
 B: EV=20000b
