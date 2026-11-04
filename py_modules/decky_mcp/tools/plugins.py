@@ -11,7 +11,7 @@ from typing import Any
 from .. import cdp
 from ..install import install_plugin_zip
 from . import ToolRegistry
-from .system import plugins_dir, run
+from .system import plugins_dir, require_confirm, run
 
 RESTART_MODES = ("loader", "plugin", "none")
 log = logging.getLogger("decky_mcp.plugins")
@@ -88,18 +88,23 @@ def register(reg: ToolRegistry) -> None:
         "or 'zip_base64'. restart: 'loader' (default; 1s after the reply the loader is stopped, the new files are "
         "swapped in and it starts again), 'plugin' (re-import just this plugin, backend and frontend, without a "
         "loader restart; it must already be loaded) or 'none' (a plugin with the 'debug' flag is then re-imported "
-        "by the loader's file watcher within a few seconds).",
+        "by the loader's file watcher within a few seconds). restart 'loader' requires confirm: true.",
         {
             "properties": {
                 "path": {"type": "string", "description": "Absolute path of a zip on the device"},
                 "zip_base64": {"type": "string", "description": "The zip file, base64-encoded"},
                 "restart": {"type": "string", "enum": list(RESTART_MODES), "default": "loader"},
+                "confirm": {"type": "boolean", "description": "must be true when restart is 'loader'"},
             },
         },
     )
-    async def install_plugin(path: str | None = None, zip_base64: str | None = None, restart: str = "loader") -> dict[str, Any]:
+    async def install_plugin(path: str | None = None, zip_base64: str | None = None, restart: str = "loader",
+                             confirm: bool = False) -> dict[str, Any]:
         if (path is None) == (zip_base64 is None):
             raise ValueError("give exactly one of 'path' or 'zip_base64'")
+        if restart == "loader":
+            require_confirm(confirm, "restart 'loader' restarts every plugin and drops this connection for a few "
+                                     "seconds (use restart 'plugin' to reload just this one)")
         if path is not None:
             if not os.path.isabs(path):
                 raise ValueError("path must be absolute")

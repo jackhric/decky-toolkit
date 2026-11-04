@@ -13,8 +13,10 @@ See README.md for the tool list and architecture.
   DevTools client for Steam CEF on 127.0.0.1:8080), `settings.py`, `input/` (remote input: `ei.py`
   libei over ctypes, `uinput.py`, `keymap.py`, `service.py` owning state and the virtual pad registry; tools
   in `tools/input.py`), `controllers.py` (Steam Input controller list + evdev merge, virtual pad
-  creation confirmed by Steam; tools in `tools/controllers.py`), `ui.py` (Steam UI navigation; tools
-  in `tools/ui.py`).
+  creation confirmed by Steam; tools in `tools/controllers.py`), `ui.py` (Steam UI navigation and
+  element queries; tools in `tools/ui.py`), `console.py` (background Steam UI console capture; tools in
+  `tools/cef.py`), `audit.py` (request origin context variable, audit middleware), `tools/guard.py`
+  (sensitive-path deny list), `tools/plugin_api.py` (plugin backend methods, calls, frontend call check).
 - `src/index.tsx` — Quick Access panel (React, `@decky/ui`, `@decky/api`). Built by `pnpm run build`
   into `dist/index.js`.
 - `scripts/deploy.sh`, `scripts/smoke.sh`, `scripts/logs.sh` — read `deploy.env` (gitignored).
@@ -205,6 +207,35 @@ See README.md for the tool list and architecture.
   Opening a plugin panel = `DeckyPluginLoader.deckyState.setActivePlugin(name)` (decky-loader
   `frontend/src/components/DeckyState.tsx`) then `OpenQuickAccessMenu(999)`.
 
+## Developer diagnostics facts (verified 2026-11-04, Steam client 1792618285)
+- Console capture keeps one DevTools websocket per watched tab (SharedJSContext, "Steam Big Picture Mode")
+  with `Runtime.enable` + `Log.enable`. Decky's injector also holds a socket to SharedJSContext; CEF allows
+  several clients and domain enables are per session. With the collector attached, toasts, the Decky
+  panel, Decky settings and `DeckyBackend.call` kept working, and the journal shows the injector's "socket
+  has been disconnected" warning only ~2 s after each loader start (Decky reloading the Steam UI), exactly
+  as before the collector existed.
+- `Runtime.enable` replays the console messages V8 still holds (the Steam UI's startup log since its last
+  reload, ~250 entries) as `Runtime.consoleAPICalled` with their original timestamps (ms since epoch).
+  Decky's WSRouter logs every backend call with `console.debug('%c Decky %c WSRouter %c', css, css, css,
+  ...)`; a plugin polling every 0.5 s (Tender) adds ~4 debug entries/s, hence the separate debug ring and
+  the default level `info`. Steam logs at `log`/`warn`. The Big Picture tab reports failed resource loads
+  as `Log.entryAdded` source `network`, level `error` (`customimages/*.jpg` 404s at startup).
+- Console object args arrive with `preview` (nested objects only as `Array(2)`/`Object`). An exception from
+  `setTimeout(() => { throw new Error('x') })` arrives as `Runtime.exceptionThrown` with text `Uncaught` and
+  `exception.description` `Error: x\n    at <anonymous>:1:26` (no url for evaluated code); an unhandled
+  rejection as `Uncaught (in promise)`.
+- Gamepad focus: the focused element has classes `Panel Focusable gpfocus gpfocuswithin`, its ancestors
+  `gpfocuswithin` (14 on the library home). In the Big Picture tab `document.activeElement` is the same
+  element; on a game page with no gamepad focus there is no `.gpfocus` and activeElement is `BODY`.
+- Quick Access and the main menu are child browser views of the Big Picture window, each its own CEF
+  target (`QuickAccess_uid2`, `MainMenu_uid2`) with its own `.gpfocus`. QuickAccess is 855x682 CSS px at
+  dpr 1.42, placed at x 1005.5, y 40 of the 1353x761 main window (it extends off screen; the visible panel
+  starts at display x 1427). Its `screenX`/`screenY` read 1005/40 once and 0/0 after a Steam UI reload;
+  `g_PopupManager`'s main popup `m_rgChildBrowserViews[i].GetBounds()` is reliable (hidden views report 0x0).
+  Checked by matching element rects against a stream frame.
+- `DeckyBackend.call('loader/call_plugin_method', ...)` rejects with a `PyError`: `name` "Python Exception",
+  empty `message`, `pythonTraceback` ending in the exception line. An undefined method fails the same way.
+
 ## Pairing
 A client files `POST /pair/request` and long-polls `GET /pair/request/{id}?wait=25`; the device owner
 approves or denies it in the panel, which shows only an "Approve pairing request?" prompt while one is
@@ -218,7 +249,7 @@ rule below. `/mcp` always requires the bearer token. Events: `decky_mcp_pair_req
 and code), `decky_mcp_pair_requests` (list changed), `decky_mcp_paired` (remote IP, client name). To
 drive frontend methods from a test, evaluate
 `window.DeckyBackend.call('loader/call_plugin_method', 'Decky-MCP', '<method>', ...args)` in
-SharedJSContext via the `cef_evaluate` tool.
+SharedJSContext via the `cef_evaluate` tool, or use `call_plugin_method` (`plugin: "Decky-MCP"`).
 
 ## Conventions
 - Every setting is configurable remotely (approving a pairing request is not a setting): through an MCP tool, the HTTP API (for the extension) and
@@ -228,3 +259,8 @@ SharedJSContext via the `cef_evaluate` tool.
 - Tools return str/dict (serialised to text) or a list of MCP content blocks. Raise `ValueError`
   for bad input; other exceptions become `isError` results with a traceback.
 - Comments only for non-obvious *why*; match the sparse style.
+- Any tool or route that reads or writes a caller-supplied device path must call `tools.guard.check_read` /
+  `check_write` (Steam credential/session files, library folder lists, SSH keys); the server runs as root.
+- Tools that restart the loader, delete things or are otherwise hard to undo take `confirm: true`
+  (`tools.system.require_confirm`) and say so in their description. Add risky new tools to
+  `audit.AUDITED_TOOLS` so their calls are logged (argument names only, never values).

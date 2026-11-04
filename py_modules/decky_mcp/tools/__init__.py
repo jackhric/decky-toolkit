@@ -1,21 +1,23 @@
 """Tool registry and the result envelope shared by every MCP tool."""
 import json
+import logging
 import traceback
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
-from .. import cdp
+from .. import audit, cdp
 from ..capture import CaptureUnavailable, ScreenCapturer
 from ..input.service import InputDisabled, InputService, InputUnavailable
 
 if TYPE_CHECKING:
+    from ..console import ConsoleCollector
     from ..controllers import ControllerService
     from ..ui import UiNavigator
 
 ToolFn = Callable[..., Awaitable[Any]]
 # Exceptions that are expected, user-facing failures: reported without a traceback.
-EXPECTED_ERRORS: tuple[type[BaseException], ...] = (ValueError, FileNotFoundError, cdp.CdpError, CaptureUnavailable,
-                                                     InputDisabled, InputUnavailable)
+EXPECTED_ERRORS: tuple[type[BaseException], ...] = (ValueError, FileNotFoundError, PermissionError, cdp.CdpError,
+                                                     CaptureUnavailable, InputDisabled, InputUnavailable)
 _CONTENT_TYPES = {"text", "image", "audio", "resource", "resource_link"}
 
 
@@ -30,6 +32,9 @@ class Tool:
 class ToolRegistry:
     def __init__(self) -> None:
         self._tools: dict[str, Tool] = {}
+        # McpServer points this at the plugin logger; audit lines go there.
+        self.log = logging.getLogger("decky_mcp.tools")
+        self.audited: set[str] = set(audit.AUDITED_TOOLS)
 
     def __len__(self) -> int:
         return len(self._tools)
@@ -50,6 +55,8 @@ class ToolRegistry:
         tool = self._tools.get(name)
         if tool is None:
             raise ValueError(f"Unknown tool: {name}")
+        if audit.is_audited(name, self.audited):
+            self.log.info(audit.tool_line(name, arguments, tool.input_schema.get("properties", {})))
         try:
             result = await tool.fn(**arguments)
         except TypeError as e:
@@ -74,8 +81,9 @@ def error_result(text: str) -> dict[str, Any]:
 
 
 def build_registry(capturer: ScreenCapturer | None = None, input_service: InputService | None = None,
-                   controllers: "ControllerService | None" = None, navigator: "UiNavigator | None" = None) -> ToolRegistry:
-    from . import cef, controllers as controller_tools, input, plugins, screen, system, ui
+                   controllers: "ControllerService | None" = None, navigator: "UiNavigator | None" = None,
+                   console: "ConsoleCollector | None" = None) -> ToolRegistry:
+    from . import cef, controllers as controller_tools, input, plugin_api, plugins, screen, system, ui
 
     if controllers is None and input_service is not None:
         from ..controllers import ControllerService
@@ -84,7 +92,8 @@ def build_registry(capturer: ScreenCapturer | None = None, input_service: InputS
     reg = ToolRegistry()
     system.register(reg)
     plugins.register(reg)
-    cef.register(reg)
+    cef.register(reg, console)
+    plugin_api.register(reg)
     screen.register(reg, capturer)
     input.register(reg, input_service, capturer)
     controller_tools.register(reg, controllers)

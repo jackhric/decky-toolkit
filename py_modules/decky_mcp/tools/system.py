@@ -8,6 +8,7 @@ import sys
 from typing import Any
 
 from . import ToolRegistry
+from .guard import check_read, check_write
 
 
 def _env(name: str, default: str = "") -> str:
@@ -46,6 +47,11 @@ def tail(path: str, lines: int) -> str:
             f.seek(size)
             data = f.read(step) + data
     return b"\n".join(data.splitlines()[-lines:]).decode(errors="replace")
+
+
+def require_confirm(confirm: object, what: str) -> None:
+    if confirm is not True:
+        raise ValueError(f"{what}; call again with confirm: true to go ahead")
 
 
 async def schedule_loader_restart() -> None:
@@ -149,21 +155,26 @@ def register(reg: ToolRegistry) -> None:
     @reg.add(
         "restart_loader",
         "Restart plugin_loader.service (reloads every plugin, including this server). "
-        "The restart is scheduled 1s out so this call can return first; reconnect afterwards.",
+        "The restart is scheduled 1s out so this call can return first; reconnect afterwards. "
+        "Requires confirm: true.",
+        {"properties": {"confirm": {"type": "boolean", "description": "must be true"}}, "required": ["confirm"]},
     )
-    async def restart_loader() -> str:
+    async def restart_loader(confirm: bool = False) -> str:
+        require_confirm(confirm, "restart_loader restarts every plugin and drops this connection for a few seconds")
         await schedule_loader_restart()
         return "plugin_loader restart scheduled in ~1s. The MCP server will drop and come back on the same port."
 
     @reg.add(
         "write_file",
-        "Write a text file on the device (runs as root). Intended for dropping config or test fixtures during development.",
+        "Write a text file on the device (runs as root). Intended for dropping config or test fixtures during development. "
+        "Refuses Steam credential/session files, Steam library folder lists and SSH keys.",
         {"properties": {"path": {"type": "string"}, "content": {"type": "string"}, "mode": {"type": "string", "default": "0644"}},
          "required": ["path", "content"]},
     )
     async def write_file(path: str, content: str, mode: str = "0644") -> str:
         if not os.path.isabs(path):
             raise ValueError("path must be absolute")
+        check_write(path)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
             f.write(content)
@@ -172,12 +183,14 @@ def register(reg: ToolRegistry) -> None:
 
     @reg.add(
         "read_file",
-        "Read a text file on the device (runs as root). Large files are truncated to max_bytes from the start.",
+        "Read a text file on the device (runs as root). Large files are truncated to max_bytes from the start. "
+        "Refuses Steam credential/session files (loginusers.vdf, config.vdf, local.vdf, ssfn*) and SSH keys.",
         {"properties": {"path": {"type": "string"}, "max_bytes": {"type": "integer", "default": 200000}}, "required": ["path"]},
     )
     async def read_file(path: str, max_bytes: int = 200_000) -> dict[str, Any]:
         if not os.path.isabs(path):
             raise ValueError("path must be absolute")
+        check_read(path)
         size = os.path.getsize(path)
         with open(path, "rb") as f:
             data = f.read(max_bytes)
