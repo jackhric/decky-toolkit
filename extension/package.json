@@ -8,7 +8,7 @@
   "license": "BSD-3-Clause",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jackh/decky-toolkit.git"
+    "url": "git+https://github.com/jackhric/decky-toolkit.git"
   },
   "engines": {
     "vscode": "^1.90.0"

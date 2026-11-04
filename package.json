@@ -11,7 +11,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jackh/decky-toolkit.git"
+    "url": "git+https://github.com/jackhric/decky-toolkit.git"
   },
   "keywords": ["decky", "decky-plugin", "mcp", "steam-deck", "bazzite"],
   "author": "jackh",
