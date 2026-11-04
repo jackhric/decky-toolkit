@@ -15,4 +15,6 @@ echo "== initialized (expect 202)"; curl -sS --max-time 10 -o /dev/null -w "%{ht
 echo "== tools/list"; rpc '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | python3 -c 'import sys,json; [print(" -", t["name"]) for t in json.load(sys.stdin)["result"]["tools"]]'
 echo "== decky_status"; rpc '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"decky_status","arguments":{}}}' | head -c 1500; echo
 echo "== cef_evaluate"; rpc '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"cef_evaluate","arguments":{"expression":"({ decky: typeof window.DeckyPluginLoader, plugins: Object.keys(window.DeckyPluginLoader?.plugins ?? {}), href: location.href })"}}}'
-echo; echo "Add to Claude Code:"; echo "  claude mcp add --transport http decky $URL -H \"Authorization: Bearer $TOKEN\""
+# Keep the secret out of logs and agent transcripts; the token itself is in the settings file on the device.
+echo; echo "Add to Claude Code (substitute the token from ~/homebrew/settings/decky-mcp/settings.json on the device):"
+echo "  claude mcp add --transport http decky $URL -H \"Authorization: Bearer <token>\""
