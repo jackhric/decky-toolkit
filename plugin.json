@@ -2,10 +2,5 @@
   "name": "Decky Toolkit",
   "author": "jackh",
   "flags": ["root", "debug"],
-  "api_version": 1,
-  "publish": {
-    "tags": ["developer", "mcp", "tools"],
-    "description": "MCP server that lets AI coding agents inspect and control Decky Loader and the Steam UI during plugin development.",
-    "image": ""
-  }
+  "api_version": 1
 }

@@ -52,7 +52,7 @@ async def _swap_while_stopped(staged: str, target: str) -> None:
     # Swapping a debug-flagged or new plugin into place makes the loader's file watcher import it a
     # few seconds later. If that lands while the loader is stopping, the new backend is started
     # outside the unit and orphaned, and an orphan's socket reader spins on EOF (5.9 GB RSS within
-    # 76 s, 2026-11-04), even with the restart delayed 5 s. So, like scripts/deploy.sh, swap the dir
+    # 76 s, 2026-11-04), even with the restart delayed 5 s. So swap the dir
     # while the loader is down, from a transient unit outside its cgroup.
     old = shlex.quote(staged + ".old")
     script = (
