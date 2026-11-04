@@ -64,6 +64,8 @@ jobs:
         with:
           name: ${{ needs.check.outputs.component }}
           path: release
+      - if: needs.check.outputs.component == 'plugin'
+        run: cp release/decky-toolkit-*.zip release/decky-toolkit.zip
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: release/*
@@ -79,18 +81,30 @@ jobs:
           esac
           prerelease=false
           if [[ "$VERSION" == *-* ]]; then prerelease=true; fi
+          latest=false
+          if [ "$COMPONENT" = plugin ] && [ "$prerelease" = false ]; then latest=true; fi
           if out=$(gh release view "$tag" --json isDraft 2>&1); then
             gh release upload "$tag" release/* --clobber
-            gh release edit "$tag" --title "$title" --prerelease="$prerelease" --draft=false
+            gh release edit "$tag" --title "$title" --prerelease="$prerelease" --latest="$latest" --draft=false
           elif [[ "$out" != *"release not found"* ]]; then
             echo "::error::gh release view $tag failed: $out"
             exit 1
           else
-            args=(--verify-tag --title "$title" --generate-notes --prerelease="$prerelease")
+            args=(--verify-tag --title "$title" --generate-notes --prerelease="$prerelease" --latest="$latest")
             prev=$(git tag --list "$COMPONENT-v*" --sort=-v:refname | grep -vxF "$tag" | head -1 || true)
             if [ -n "$prev" ]; then args+=(--notes-start-tag "$prev"); fi
             gh release create "$tag" release/* "${args[@]}"
           fi
+
+  pages:
+    name: Pages
+    needs: [check, release]
+    if: needs.check.outputs.component == 'plugin' && !contains(needs.check.outputs.version, '-')
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/pages.yml
 
   openvsx:
     name: Publish to Open VSX

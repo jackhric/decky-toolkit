@@ -78,9 +78,16 @@ release and use Extensions view → **…** → **Install from VSIX…**.
 
 ### 2. Install the plugin on the device
 
-Download `decky-toolkit-<version>.zip` from the latest `plugin-v…` release. On the device, enable
-Decky's developer mode (Decky settings → **General** → **Other** → **Developer mode**), then go
-to **Developer** → **Third-Party Plugins** → **Install Plugin from ZIP File** and pick the zip.
+On the device, turn on Decky's developer mode (Decky settings → **General** → **Other** →
+**Developer mode**). Then open **Developer** → **Third-Party Plugins** and either:
+
+- **Install Plugin from URL:** enter `jackhric.github.io/decky-toolkit/decky-toolkit.zip` (always
+  the latest plugin release) and press **Install**, or
+- **Install Plugin from ZIP File:** download `decky-toolkit-<version>.zip` from a `plugin-v…`
+  release (for example in Desktop Mode) and pick it with **Browse**.
+
+Decky warns about third-party plugins (**Continue** unlocks after a few seconds), then asks you to
+confirm the install.
 
 Open Quick Access (…) → **Decky Toolkit** on the device. The panel shows the device's IP address.
 
