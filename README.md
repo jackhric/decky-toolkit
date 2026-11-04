@@ -59,22 +59,12 @@ code --install-extension jackhric.decky-toolkit     # VS Code
 codium --install-extension jackhric.decky-toolkit   # VSCodium
 ```
 
-Offline or a specific version: download `decky-toolkit-<version>.vsix` from an `extension-v…`
-[release](https://github.com/jackhric/decky-toolkit/releases) and use Extensions view → **…** → **Install from VSIX…**.
-
 ### 2. Install the plugin on the device
 
 On the device, turn on Decky's developer mode (Decky settings → **General** → **Other** →
-**Developer mode**). Then open **Developer** → **Third-Party Plugins** and either:
-
-- **Install Plugin from URL:** enter `jackhric.github.io/decky-toolkit/decky-toolkit.zip` (always
-  the latest plugin release) and press **Install**, or
-- **Install Plugin from ZIP File:** pick the plugin zip from a [release](https://github.com/jackhric/decky-toolkit/releases).
-
-Decky warns about third-party plugins (**Continue** unlocks after a few seconds), then asks you to
-confirm the install.
-
-Open Quick Access (…) → **Decky Toolkit** on the device. The panel shows the device's IP address.
+**Developer mode**). Then open **Developer** → **Third-Party Plugins** → **Install Plugin from URL**,
+enter `jackhric.github.io/decky-toolkit/decky-toolkit.zip` (always the latest plugin release) and
+press **Install**.
 
 ### 3. Pair your editor with the device
 
