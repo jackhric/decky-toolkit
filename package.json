@@ -15,7 +15,7 @@
   },
   "keywords": ["decky", "decky-plugin", "mcp", "steam-deck", "bazzite"],
   "author": "jackh",
-  "license": "BSD-3-Clause",
+  "license": "MIT",
   "devDependencies": {
     "@decky/rollup": "^1.0.2",
     "@decky/ui": "^4.11.0",

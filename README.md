@@ -7,11 +7,11 @@
 </p>
 
 <p align="center">
-  <b>Build, deploy and test Decky Loader plugins without leaving your editor.</b>
+  <b>Build, deploy and test Decky Loader plugins with improved DX and speed.</b>
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img alt="License: BSD-3-Clause" src="https://img.shields.io/badge/license-BSD--3--Clause-blue"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
   <img alt="Plugin version 0.2.0" src="https://img.shields.io/badge/plugin-v0.2.0-9C6AEC">
   <a href="extension/README.md"><img alt="VS Code extension version 0.6.0" src="https://img.shields.io/badge/VS%20Code%20extension-v0.6.0-0AA5FF"></a>
   <a href="https://github.com/SteamDeckHomebrew/decky-loader"><img alt="Decky Loader 3.3+" src="https://img.shields.io/badge/Decky%20Loader-3.3%2B-1B1B1B?logo=steam&logoColor=white"></a>
@@ -21,29 +21,23 @@
 <p align="center">
   <a href="#why">Why</a> ·
   <a href="#getting-started">Getting started</a> ·
-  <a href="#screenshots">Screenshots</a> ·
   <a href="extension/README.md">VS Code extension</a> ·
   <a href="docs/reference.md">Reference</a>
 </p>
 
 ## Why
 
-Writing a Decky plugin usually means a slow loop: build, copy the files to the device, fix
-permissions, restart Decky Loader (and wait for the Steam UI to reload), SSH in to read the logs,
-then pick up the Deck to see what changed. Every change costs minutes.
+I've found that working on a Decky plugin with no additional tooling provides a slow development loop. This is a toolkit (VSCode / VSCodium extension + Decky Plugin) designed to speed up deployment and testing for your plugins.
 
-Decky Toolkit is a Decky plugin plus a VS Code extension that cuts that loop down to seconds:
-
-- **One-click deploy.** The extension detects the plugin in your workspace, builds it only when
-  its sources changed and reloads just that plugin in about a second, with no loader restart.
+- **One-click deploy:** The extension detects the plugin in your workspace, builds it only when
+  its sources changed and reloads just that plugin in a few seconds, with no loader restart.
   Turn on deploy-on-change, keep your build in watch mode, and the device follows your edits.
-- **See the device from your desk.** A live view of the Deck's screen, with sound, in an editor
-  tab or any browser.
-- **Drive it from your desk.** Keyboard, mouse and your own gamepad go straight to the device.
+- **See the & drive the target from your desk:** A live view of the Deck's screen, with sound, in an editor
+  tab or any browser. Keyboard, mouse and your own gamepad go straight to the device.
   Add virtual controllers, jump to any Steam page or straight to your plugin's Quick Access panel.
-- **Logs where you work.** Loader and plugin logs stream into VS Code output channels.
-- **Poke the Steam UI.** A JavaScript console for Steam's `SharedJSContext` and on-device toasts.
-- **Scriptable.** Everything is also available over a small HTTP API (and MCP) for your own tools
+- **Easy access logs:** Loader and plugin logs stream into VS Code output channels.
+- **Poke the Steam UI:** A JavaScript console for Steam's `SharedJSContext`.
+- **Scriptable:** Everything is also available over a small HTTP API (and MCP) for your own tools
   and scripts.
 
 ## Getting started
@@ -93,10 +87,14 @@ Prefer a browser? Open `http://<device-ip>:8765/viewer` and pair the same way.
 The [extension guide](extension/README.md) covers every view and setting. The
 [reference](docs/reference.md) covers the plugin itself, its HTTP API and how it works.
 
-## Screenshots
+## AI Disclaimer
 
-Coming soon.
+This project was built with heavy use of [Claude Code](https://claude.com/claude-code). Because of
+this, the Decky Toolkit plugin will not be available in the default Decky Plugin Store, which does not
+accept plugins that contain LLM-generated code (see its
+[submission guidelines](https://wiki.deckbrew.xyz/en/plugin-dev/submitting-plugins#ai-llms-and-so-on)).
+Install it from source as described in [Getting started](#getting-started).
 
 ## License
 
-[BSD-3-Clause](LICENSE)
+[MIT](LICENSE)
