@@ -23,8 +23,11 @@ type Status = {
   pairing_seconds_left: number;
   pairing_count: number;
   stream: { running: boolean; fps: number; subscribers: number; available: boolean; error: string | null } | null;
+  input: InputSettings | null;
   error: string | null;
 };
+
+type InputSettings = { enabled: boolean; backend: "ei" | "uinput" | null; available: boolean; reason: string | null };
 
 const getStatus = callable<[], Status>("get_status");
 const setEnabled = callable<[enabled: boolean], Status>("set_enabled");
@@ -32,6 +35,8 @@ const regenerateToken = callable<[], Status>("regenerate_token");
 const restartServer = callable<[], Status>("restart_server");
 const startPairing = callable<[], Status>("start_pairing");
 const stopPairing = callable<[], Status>("stop_pairing");
+const getInputSettings = callable<[], InputSettings>("get_input_settings");
+const setInputEnabled = callable<[enabled: boolean], InputSettings>("set_input_enabled");
 
 function Content() {
   const [status, setStatus] = useState<Status | null>(null);
@@ -41,6 +46,11 @@ function Content() {
   const refresh = async () => setStatus(await getStatus());
 
   const pairing = (status?.pairing_seconds_left ?? 0) > 0;
+
+  useEffect(() => {
+    const onInput = addEventListener<[enabled: boolean]>("decky_mcp_input_state", () => refresh());
+    return () => removeEventListener("decky_mcp_input_state", onInput);
+  }, []);
 
   useEffect(() => {
     refresh();
@@ -118,6 +128,37 @@ function Content() {
         </PanelSectionRow>
       </PanelSection>
 
+      <PanelSection title="Remote input">
+        <PanelSectionRow>
+          <ToggleField
+            label={status.input?.enabled ? "Input enabled" : "Allow remote input"}
+            description={
+              !status.input
+                ? "Unavailable"
+                : !status.input.available
+                  ? status.input.reason ?? "Unavailable"
+                  : status.input.enabled
+                    ? `Viewer and MCP clients can use keyboard, mouse and gamepad (${status.input.backend}).`
+                    : "Off: remote keyboard, mouse and gamepad input is refused."
+            }
+            checked={!!status.input?.enabled}
+            disabled={busy || !status.input?.available}
+            onChange={async (v) => {
+              setBusy(true);
+              try {
+                await setInputEnabled(v);
+                const input = await getInputSettings();
+                setStatus((s) => (s ? { ...s, input } : s));
+              } catch (e) {
+                toaster.toast({ title: "Decky-MCP error", body: String(e) });
+              } finally {
+                setBusy(false);
+              }
+            }}
+          />
+        </PanelSectionRow>
+      </PanelSection>
+
       <PanelSection title="Pairing">
         <PanelSectionRow>
           <ButtonItem
@@ -170,6 +211,9 @@ export default definePlugin(() => {
   const paired = addEventListener<[remote: string]>("decky_mcp_paired", (remote) => {
     toaster.toast({ title: "Decky-MCP", body: `Browser paired from ${remote}` });
   });
+  const inputSession = addEventListener<[remote: string]>("decky_mcp_input_session", (remote) => {
+    toaster.toast({ title: "Decky-MCP", body: `Remote input from ${remote}` });
+  });
   return {
     name: "Decky-MCP",
     titleView: <div className={staticClasses.Title}>Decky-MCP</div>,
@@ -177,6 +221,7 @@ export default definePlugin(() => {
     icon: <FaPlug />,
     onDismount() {
       removeEventListener("decky_mcp_paired", paired);
+      removeEventListener("decky_mcp_input_session", inputSession);
     },
   };
 });
