@@ -1,0 +1,66 @@
+name: Pages
+
+on:
+  push:
+    branches: [main]
+    paths: ['site/**', '.github/workflows/pages.yml']
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build site
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Placeholder page
+        run: |
+          mkdir -p _site
+          cat > _site/index.html <<'HTML'
+          <!doctype html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>Decky Toolkit</title>
+          </head>
+          <body>
+            <h1>Decky Toolkit</h1>
+            <p>Build, deploy and test Decky Loader plugins from VS Code.</p>
+            <p>Plugin: in Decky Loader's Developer settings, use <b>Install Plugin from URL</b> with
+              <code>jackhric.github.io/decky-toolkit/decky-toolkit.zip</code>.</p>
+            <p><a href="https://github.com/jackhric/decky-toolkit">github.com/jackhric/decky-toolkit</a></p>
+          </body>
+          </html>
+          HTML
+      - name: Add the latest plugin zip
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(gh release list -R "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases --limit 100 \
+            --json tagName --jq '[.[] | select(.tagName | startswith("plugin-v"))][0].tagName')
+          if [ -z "$tag" ]; then echo "::error::no published plugin-v* release"; exit 1; fi
+          gh release download "$tag" -R "$GITHUB_REPOSITORY" -p 'decky-toolkit-*.zip' -O _site/decky-toolkit.zip
+          echo "decky-toolkit.zip is $tag" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: _site
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-26.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}decky-toolkit.zip
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

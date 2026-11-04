@@ -235,6 +235,11 @@ SharedJSContext via the `cef_evaluate` tool.
   releases to Open VSX and the VS Code Marketplace by trusted publishing (OIDC, environments `openvsx` and
   `marketplace`, no token secrets).
 - Node matches Decky Loader's own CI (`node-version: 26` in SteamDeckHomebrew/decky-loader workflows).
+- GitHub Pages (`pages.yml`, source: GitHub Actions) serves the site plus the latest plugin release as
+  `jackhric.github.io/decky-toolkit/decky-toolkit.zip`, the Decky "Install Plugin from URL" link. It deploys on
+  plugin releases (called from `release.yml`), on pushes to `main` touching `site/`, and by hand. A deploy
+  replaces the whole site, so the future Astro landing page (`site/`) must be built in this workflow.
+  Plugin releases also carry a fixed-name `decky-toolkit.zip` and are the repo's "Latest" release.
 - Every third-party action is pinned to a full commit SHA with a `# vX.Y.Z` comment; Dependabot bumps them.
   Keep it that way. The release-please App key lives in the `release` environment (main only).
 - PRs are squash-merged with the PR title as the commit message, so the PR title is what release-please
