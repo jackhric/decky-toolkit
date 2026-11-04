@@ -271,7 +271,7 @@ export class DeckyClient {
       const res = await this.json<unknown>('/loader/restart', { method: 'POST' });
       return typeof res === 'string' ? res : JSON.stringify(res);
     } catch (e) {
-      if (isMissingRoute(e)) return this.callToolText('restart_loader');
+      if (isMissingRoute(e)) return this.callToolText('restart_loader', { confirm: true });
       throw e;
     }
   }

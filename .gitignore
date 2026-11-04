@@ -68,3 +68,6 @@ extension/dist
 
 # Agent worktrees
 .claude/worktrees/
+
+# Test fixtures ship a tiny built bundle
+!tests/fixtures/**/dist/
