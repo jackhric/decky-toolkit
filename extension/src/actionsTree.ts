@@ -9,7 +9,7 @@ export interface PluginSource {
   readonly onDidChange: vscode.Event<void>;
 }
 
-/** Argument the Plugin group passes to reload/logs: resolve the dir from the workspace, not the Deck. */
+/** Argument the Plugin group passes to reload/logs: resolve the dir from the workspace, not the device. */
 export const WORKSPACE_PLUGIN = { workspacePlugin: true } as const;
 
 export class ActionNode extends vscode.TreeItem {
@@ -77,9 +77,9 @@ export class ActionsTreeProvider implements vscode.TreeDataProvider<ActionNode>,
       leaf('snapshot', 'Snapshot to file', 'device-camera', 'decky-mcp.snapshot'),
     ]);
     screen.description = screenDescription(this.conn);
-    screen.tooltip = 'Live Deck display';
+    screen.tooltip = 'Live device display';
     screen.children![1].tooltip = `Opens ${viewerUrl(d)} in your browser. The browser is paired separately: press "Pair a browser" ` +
-      'in the Deck\'s Decky-MCP panel, unless it still has the cookie from an earlier pairing.';
+      'in the device\'s Decky-MCP panel, unless it still has the cookie from an earlier pairing.';
     screen.children![2].tooltip = 'Save the current frame (/frame.jpg) as a JPEG';
 
     return [
@@ -92,7 +92,7 @@ export class ActionsTreeProvider implements vscode.TreeDataProvider<ActionNode>,
       ]),
       group('steam', 'Steam', 'game', false, [
         leaf('evaluate', 'Evaluate JS in Steam UI', 'terminal', 'decky-mcp.evaluate'),
-        leaf('toast', 'Toast on Deck', 'bell', 'decky-mcp.toast'),
+        leaf('toast', 'Toast on device', 'bell', 'decky-mcp.toast'),
       ]),
       group('mcp', 'MCP', 'server-process', false, [
         leaf('mcpConfig', 'Write MCP config for this workspace', 'json', 'decky-mcp.writeMcpConfig'),

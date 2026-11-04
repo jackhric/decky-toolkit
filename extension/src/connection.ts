@@ -353,7 +353,7 @@ export class Connection implements ConnectionState, vscode.Disposable {
       const d = this.activeDevice;
       const connectTo = d ? `Connect to ${d.name}` : undefined;
       const choice = await vscode.window.showWarningMessage(
-        'Decky-MCP: not connected to a Deck.', ...(connectTo ? [connectTo] : []), 'Choose device');
+        'Decky-MCP: not connected to a device.', ...(connectTo ? [connectTo] : []), 'Choose device');
       if (choice && choice === connectTo) await vscode.commands.executeCommand('decky-mcp.connect', d!.id);
       else if (choice === 'Choose device') await vscode.commands.executeCommand('decky-mcp.switchDevice');
     }

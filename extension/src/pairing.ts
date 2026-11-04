@@ -32,7 +32,7 @@ async function tokenAccepted(d: SavedDevice, token: string): Promise<boolean> {
 async function cantReach(c: Connection, d: SavedDevice, retry: () => Promise<unknown>): Promise<void> {
   c.setReachable(d.id, false);
   const choice = await vscode.window.showErrorMessage(
-    `Can't reach ${d.name} at ${d.host}:${d.port}. Is the Deck on and Decky-MCP enabled?`, 'Retry', 'Edit device');
+    `Can't reach ${d.name} at ${d.host}:${d.port}. Is the device on and Decky-MCP enabled?`, 'Retry', 'Edit device');
   if (choice === 'Retry') await retry();
   else if (choice === 'Edit device') await editDevice(c, d.id);
 }
@@ -140,7 +140,7 @@ function pollForGrant(d: SavedDevice): Thenable<PairGrant | 'cancelled' | 'timeo
       const cancelSub = token.onCancellationRequested(() => abort.abort());
       const report = () => {
         const left = Math.max(0, Math.ceil((timeoutMs - (Date.now() - start)) / 1000));
-        progress.report({ message: `on the Deck open Quick Access → Decky-MCP → Pair a browser. Waiting… ${left} s` });
+        progress.report({ message: `on the device, open Quick Access → Decky-MCP → Pair a browser. Waiting… ${left} s` });
       };
       report();
       const ticker = setInterval(report, 1000);

@@ -17,7 +17,7 @@ export class StatusBar implements vscode.Disposable {
     const d = this.conn.connectedDevice;
     if (!d) {
       this.item.text = '$(vm) Decky: not connected';
-      this.item.tooltip = 'Click to connect to a Deck or add one';
+      this.item.tooltip = 'Click to connect to a device or add one';
       return;
     }
     const down = this.conn.health.kind === 'unreachable';
@@ -41,7 +41,7 @@ export class ScreenPanel {
       return;
     }
     const { base, external } = await externalProxyBase(conn);
-    const panel = vscode.window.createWebviewPanel('decky-mcp.screen', `Deck: ${conn.label}`, vscode.ViewColumn.Beside, {
+    const panel = vscode.window.createWebviewPanel('decky-mcp.screen', `Screen: ${conn.label}`, vscode.ViewColumn.Beside, {
       enableScripts: true,
       retainContextWhenHidden: true,
       localResourceRoots: [vscode.Uri.joinPath(ctx.extensionUri, 'media')],
@@ -63,7 +63,7 @@ export class ScreenPanel {
       if (m?.type === 'snapshot') void vscode.env.openExternal(vscode.Uri.parse(`${this.base}/frame.jpg?t=${Date.now()}`));
     }, null, this.disposables);
     conn.onDidChangeTarget(() => {
-      panel.title = `Deck: ${conn.label}`;
+      panel.title = `Screen: ${conn.label}`;
       void panel.webview.postMessage({ type: 'reconnect' });
     }, null, this.disposables);
     this.disposables.push(conn.watchStats());
@@ -89,11 +89,11 @@ export class ScreenPanel {
 <meta http-equiv="Content-Security-Policy" content="${csp}">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="${media('screen.css')}">
-<title>Deck screen</title>
+<title>Device screen</title>
 </head>
 <body data-base="${attr(external)}">
 <header>
-  <b><span class="dot" id="dot"></span>Deck</b>
+  <b><span class="dot" id="dot"></span>Device</b>
   <span class="stat">fps <span id="fps">–</span></span>
   <span class="stat">Mbps <span id="mbps">–</span></span>
   <span class="stat">res <span id="res">–</span></span>
@@ -104,7 +104,7 @@ export class ScreenPanel {
   <button id="snap">Snapshot</button>
 </header>
 <main id="main">
-  <img id="img" alt="Deck display">
+  <img id="img" alt="Device display">
   <div id="msg">Connecting…</div>
 </main>
 <script nonce="${nonce}" src="${media('screen.js')}"></script>

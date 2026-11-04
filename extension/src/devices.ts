@@ -28,7 +28,7 @@ function validateHostPort(v: string): string | undefined {
 
 async function promptAddress(initial: { host: string; port: number }, title: string): Promise<{ host: string; port: number } | undefined> {
   const host = (await vscode.window.showInputBox({
-    title, prompt: 'IP address or hostname of the Steam Deck', value: initial.host, ignoreFocusOut: true, validateInput: validateHost,
+    title, prompt: 'IP address or hostname of the device (any machine running Decky Loader)', value: initial.host, ignoreFocusOut: true, validateInput: validateHost,
   }))?.trim();
   if (!host) return undefined;
   const port = (await vscode.window.showInputBox({
@@ -52,7 +52,7 @@ function duplicateOf(conn: Connection, host: string, port: number, exceptId?: st
 export async function addDevice(conn: Connection): Promise<void> {
   const title = 'Add Decky device';
   const raw = (await vscode.window.showInputBox({
-    title, prompt: 'IP address or hostname of the Steam Deck', placeHolder: 'e.g. 192.168.1.40 or steamdeck.local',
+    title, prompt: 'IP address or hostname of the device (any machine running Decky Loader)', placeHolder: 'e.g. 192.168.1.40 or steamdeck.local',
     ignoreFocusOut: true, validateInput: validateHostPort,
   }))?.trim();
   if (!raw) return;
@@ -159,7 +159,7 @@ export function statusLabel(status: DeviceStatus): string {
   }
 }
 
-/** The status bar / "Switch device" picker: connect to (or switch to) a saved Deck. */
+/** The status bar / "Switch device" picker: connect to (or switch to) a saved device. */
 export async function switchDevice(conn: Connection): Promise<void> {
   const connected = conn.connectedDevice;
   const items: PickItem[] = [];
@@ -181,7 +181,7 @@ export async function switchDevice(conn: Connection): Promise<void> {
     );
   }
   items.push({ label: '$(add) Add device…', run: () => addDevice(conn) });
-  const pick = await vscode.window.showQuickPick(items, { placeHolder: connected ? `Connected to ${connected.name}` : 'Connect to a Deck' });
+  const pick = await vscode.window.showQuickPick(items, { placeHolder: connected ? `Connected to ${connected.name}` : 'Connect to a device' });
   await pick?.run?.();
 }
 
@@ -194,7 +194,7 @@ export async function copyViewerUrl(conn: Connection, arg?: unknown): Promise<vo
   if (!d) return;
   await vscode.env.clipboard.writeText(viewerUrl(d));
   void vscode.window.showInformationMessage(
-    `Decky-MCP: copied ${viewerUrl(d)}. Open it in a browser and press "Pair a browser" on the Deck to watch there.`);
+    `Decky-MCP: copied ${viewerUrl(d)}. Open it in a browser and press "Pair a browser" on the device to watch there.`);
 }
 
 /** The `…` overflow of a device row: everything except the row's primary action. */

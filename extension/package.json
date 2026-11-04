@@ -1,7 +1,7 @@
 {
   "name": "decky-mcp",
   "displayName": "Decky-MCP",
-  "description": "Live screen, deploy, logs and Steam console for Decky plugin development against a Decky-MCP device",
+  "description": "Live screen, one-click deploy, logs and Steam console for Decky plugin development on devices running Decky Loader (Steam Deck, SteamOS, Bazzite)",
   "version": "0.5.0",
   "publisher": "jackhric",
   "icon": "media/icon.png",
@@ -19,6 +19,8 @@
   "keywords": [
     "decky",
     "steam deck",
+    "steamos",
+    "bazzite",
     "mcp"
   ],
   "main": "./dist/extension.js",
@@ -72,7 +74,7 @@
     "viewsWelcome": [
       {
         "view": "decky-mcp.devices",
-        "contents": "No devices yet.\n[Add a Deck](command:decky-mcp.addDevice)"
+        "contents": "No devices yet. Add a Decky device (any machine running Decky Loader: Steam Deck, Bazzite, SteamOS, …).\n[Add device](command:decky-mcp.addDevice)"
       }
     ],
     "commands": [
@@ -155,7 +157,7 @@
       },
       {
         "command": "decky-mcp.toast",
-        "title": "Toast on Deck",
+        "title": "Toast on device",
         "category": "Decky"
       },
       {
@@ -260,7 +262,7 @@
         "decky-mcp.host": {
           "type": "string",
           "default": "10.0.70.18",
-          "description": "IP address or hostname of the Steam Deck running the Decky-MCP plugin."
+          "description": "IP address or hostname of the device running the Decky-MCP plugin."
         },
         "decky-mcp.port": {
           "type": "number",

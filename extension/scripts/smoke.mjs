@@ -320,7 +320,7 @@ const EXPECTED_ACTIONS = {
     ['Show plugin logs', 'decky-mcp.pluginLogs'], ['Auto-deploy on change: Off', 'decky-mcp.toggleAutoDeploy']]],
   Loader: ['server', 2, [
     ['Restart loader', 'decky-mcp.restartLoader'], ['Show loader logs', 'decky-mcp.loaderLogs'], ['Install plugin zip…', 'decky-mcp.installZip']]],
-  Steam: ['game', 1, [['Evaluate JS in Steam UI', 'decky-mcp.evaluate'], ['Toast on Deck', 'decky-mcp.toast']]],
+  Steam: ['game', 1, [['Evaluate JS in Steam UI', 'decky-mcp.evaluate'], ['Toast on device', 'decky-mcp.toast']]],
   MCP: ['server-process', 1, [
     ['Write MCP config for this workspace', 'decky-mcp.writeMcpConfig'], ['Copy MCP URL', 'decky-mcp.copyMcpUrl'], ['Copy token', 'decky-mcp.copyToken']]],
 };
@@ -489,7 +489,7 @@ await check('Connect on an unpaired device pairs (403, then token) and connects'
   assert.ok(!fetched.slice(0, fetched.indexOf('/pair')).includes('/stream/stats'), 'no token, so no token check before pairing');
   const prog = calls.progress.at(-1);
   assert.equal(prog.title, 'Pairing with 10.1.2.3');
-  assert.match(prog.messages[0], /^on the Deck open Quick Access → Decky-MCP → Pair a browser\. Waiting… \d+ s$/);
+  assert.match(prog.messages[0], /^on the device, open Quick Access → Decky-MCP → Pair a browser\. Waiting… \d+ s$/);
   assert.equal(rowDuringPairing.description, 'pairing…');
   assert.equal(rowDuringPairing.contextValue, 'deck.busy');
   assert.equal(secrets.get(tokenKey), 'fake-token');
@@ -775,11 +775,11 @@ await check('Screen and MCP leaves: viewer, snapshot, MCP URL, token', async () 
   ui.saveDialog = opts => opts.defaultUri;
   await run('decky-mcp.snapshot');
   const dlg = calls.saveDialogs.at(-1);
-  assert.match(dlg.defaultUri.toString(), /\/deck-\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d\.jpg$/);
+  assert.match(dlg.defaultUri.toString(), /\/screen-\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d\.jpg$/);
   const w = calls.written.at(-1);
   assert.equal(w.uri, dlg.defaultUri.toString());
   assert.deepEqual([...w.data], [...frameJpeg]);
-  assert.match(lastMessage('info').m, /saved .*deck-.*\.jpg/);
+  assert.match(lastMessage('info').m, /saved .*screen-.*\.jpg/);
   await run('decky-mcp.copyMcpUrl');
   assert.equal(calls.clipboard.at(-1), 'http://10.1.2.3:8765/mcp');
   await run('decky-mcp.copyToken');
@@ -870,7 +870,7 @@ await check('a command while disconnected offers to connect instead of running',
   ui.warning = (m, buttons) => { offered = { m, buttons }; return undefined; };
   const copied = calls.clipboard.length;
   await run('decky-mcp.copyToken');
-  assert.equal(offered.m, 'Decky-MCP: not connected to a Deck.');
+  assert.equal(offered.m, 'Decky-MCP: not connected to a device.');
   assert.deepEqual(offered.buttons, ['Connect to 10.1.2.3', 'Choose device']);
   assert.equal(calls.clipboard.length, copied, 'nothing copied');
   return `"${offered.m}" [${offered.buttons.join(', ')}]`;
@@ -888,13 +888,13 @@ await check('reachability error: one message with Retry / Edit device, no pairin
   };
   await run('decky-mcp.connect', seedId());
   await settle();
-  assert.equal(calls.lastError.m, "Can't reach 10.1.2.3 at 10.1.2.3:8765. Is the Deck on and Decky-MCP enabled?");
+  assert.equal(calls.lastError.m, "Can't reach 10.1.2.3 at 10.1.2.3:8765. Is the device on and Decky-MCP enabled?");
   assert.deepEqual(calls.lastError.buttons, ['Retry', 'Edit device']);
   assert.equal(row.description, 'unreachable');
   assert.equal(row.iconPath.id, 'warning');
   assert.equal(row.iconPath.color.id, 'problemsWarningIcon.foreground');
   assert.ok(!fetched.includes('/pair'));
-  assert.equal(calls.context.get('decky-mcp.connected'), true, 'Retry connected once the Deck answered');
+  assert.equal(calls.context.get('decky-mcp.connected'), true, 'Retry connected once the device answered');
   await run('decky-mcp.disconnectDevice');
   return `"${calls.lastError.m}" [${calls.lastError.buttons.join(', ')}], row was "${row.description}"`;
 });

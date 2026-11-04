@@ -180,7 +180,7 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   command('decky-mcp.toast', async () => {
     const client = await c.client();
     if (!client) return;
-    const body = await vscode.window.showInputBox({ prompt: 'Toast text to show on the Deck', value: 'Hello from VS Code' });
+    const body = await vscode.window.showInputBox({ prompt: 'Toast text to show on the device', value: 'Hello from VS Code' });
     if (!body) return;
     await client.callToolText('toast', { title: 'VS Code', body });
   });
@@ -196,7 +196,7 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     if (!token) return;
     await vscode.env.clipboard.writeText(token);
     void vscode.window.showWarningMessage(
-      `Decky-MCP: copied the bearer token for ${c.label}. It is a secret: anyone with it can control the Deck, so keep it out of shared files and chats.`);
+      `Decky-MCP: copied the bearer token for ${c.label}. It is a secret: anyone with it can control the device, so keep it out of shared files and chats.`);
   });
 
   const last = c.lastSessionDevice;
@@ -211,7 +211,7 @@ export function deactivate(): void {
 
 /**
  * Plugins view rows pass themselves, the Actions view's Plugin group passes WORKSPACE_PLUGIN, and the
- * palette passes nothing (then pick from the workspace and the Deck).
+ * palette passes nothing (then pick from the workspace and the device).
  */
 async function resolveDir(client: DeckyClient, ws: PluginWorkspace, arg: unknown, placeHolder: string): Promise<string | undefined> {
   if (arg === WORKSPACE_PLUGIN) return (await ws.pick(placeHolder))?.dir;
@@ -225,7 +225,7 @@ async function snapshot(c: Connection): Promise<void> {
   if (!client) return;
   const jpeg = await client.frame();
   const stamp = new Date().toISOString().replace(/\.\d+Z$/, '').replace(/:/g, '-');
-  const name = `deck-${stamp}.jpg`;
+  const name = `screen-${stamp}.jpg`;
   const folder = vscode.workspace.workspaceFolders?.[0]?.uri;
   const uri = await vscode.window.showSaveDialog({
     defaultUri: folder ? vscode.Uri.joinPath(folder, name) : vscode.Uri.file(path.join(homedir(), name)),
@@ -245,7 +245,7 @@ async function installZip(c: Connection): Promise<void> {
   const [uri] = await vscode.window.showOpenDialog({
     canSelectMany: false,
     filters: { 'Plugin zip': ['zip'] },
-    openLabel: 'Install on Deck',
+    openLabel: 'Install on device',
     title: `Install a Decky plugin zip on ${c.label}`,
   }) ?? [];
   if (!uri) return;
