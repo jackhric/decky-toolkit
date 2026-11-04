@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Decky-MCP · Request access</title>
+<link rel="icon" href="data:,">
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #0b0d10; color: #d7dbe0; font: 13px/1.4 system-ui, sans-serif; }
+  body { display: flex; align-items: center; justify-content: center; padding: 0 16px; }
+  .card { width: 100%; max-width: 380px; background: #15181d; border: 1px solid #262a31; border-radius: 8px; padding: 18px 20px; }
+  h1 { margin: 0 0 4px; font-size: 16px; color: #fff; }
+  p { margin: 8px 0; color: #9aa3ad; }
+  label { display: block; margin: 14px 0 4px; color: #9aa3ad; }
+  input { box-sizing: border-box; width: 100%; background: #262a31; color: #e8ecf0; border: 1px solid #353a43; border-radius: 4px; padding: 6px 8px; font: inherit; }
+  .row { display: flex; gap: 8px; margin-top: 14px; }
+  button { background: #262a31; color: #e8ecf0; border: 1px solid #353a43; border-radius: 4px; padding: 6px 12px; cursor: pointer; font: inherit; }
+  button:hover { background: #30353e; }
+  button.primary { background: #2d6cdf; border-color: #2d6cdf; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .code { font-size: 28px; letter-spacing: .2em; color: #fff; font-variant-numeric: tabular-nums; margin: 6px 0; }
+  .err { color: #f28b82; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Decky-MCP</h1>
+  <form id="ask">
+    <p>This browser is not paired with the device yet. Ask for access, then allow it on the device.</p>
+    <label for="name">Name shown on the device</label>
+    <input id="name" maxlength="64" required autocomplete="off">
+    <div class="row"><button class="primary" id="go" type="submit">Request access</button></div>
+    <p class="err" id="ask-err" hidden></p>
+  </form>
+  <div id="wait" hidden>
+    <p>Waiting for approval on the device · code</p>
+    <div class="code" id="code"></div>
+    <p>On the device: Quick Access (…) → Decky-MCP → Approve.</p>
+    <p id="wait-note"></p>
+    <div class="row"><button id="cancel" type="button">Cancel</button></div>
+  </div>
+  <div id="done" hidden>
+    <p id="done-msg"></p>
+    <div class="row"><button class="primary" id="retry" type="button">Retry</button></div>
+  </div>
+  <p style="margin-top:16px;font-size:12px">Have the token? Open <code>/viewer?token=&lt;token&gt;</code> once instead.</p>
+</div>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const show = which => { for (const id of ['ask', 'wait', 'done']) $(id).hidden = id !== which; };
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+  function guessName() {
+    const ua = navigator.userAgent;
+    const browser = /Edg\//.test(ua) ? 'Edge' : /OPR\//.test(ua) ? 'Opera' : /Firefox\//.test(ua) ? 'Firefox'
+      : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : 'Browser';
+    const os = /Android/.test(ua) ? 'Android' : /iPhone|iPad/.test(ua) ? 'iOS' : /Windows/.test(ua) ? 'Windows'
+      : /Mac OS X/.test(ua) ? 'macOS' : /CrOS/.test(ua) ? 'ChromeOS' : /Linux/.test(ua) ? 'Linux' : '';
+    return os ? `${browser} on ${os}` : browser;
+  }
+  $('name').value = guessName();
+
+  let current = null;
+
+  async function poll(id) {
+    let failures = 0;
+    while (current === id) {
+      let res;
+      try {
+        res = await fetch(`/pair/request/${encodeURIComponent(id)}?wait=25`, { cache: 'no-store' });
+        failures = 0;
+        $('wait-note').textContent = '';
+      } catch {
+        // Device restarting or Wi-Fi blip: keep waiting, the request survives short outages.
+        $('wait-note').textContent = 'Lost contact with the device, retrying…';
+        await sleep(Math.min(10000, 1000 * 2 ** failures++));
+        continue;
+      }
+      if (current !== id) return;
+      if (res.status === 404) {
+        // Pruned or the plugin restarted: ask again rather than wait forever on a dead id.
+        await request();
+        return;
+      }
+      if (!res.ok) { await sleep(2000); continue; }
+      const body = await res.json();
+      if (body.status === 'approved') {
+        current = null;
+        location.href = `/pair/request/${encodeURIComponent(id)}?cookie=1`;
+        return;
+      }
+      if (body.status === 'denied') {
+        current = null;
+        $('done-msg').textContent = 'The request was denied on the device.';
+        show('done');
+        return;
+      }
+    }
+  }
+
+  async function request() {
+    $('go').disabled = true;
+    $('ask-err').hidden = true;
+    try {
+      const res = await fetch('/pair/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client_name: $('name').value.trim() || guessName(), client_kind: 'browser' }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+      current = body.id;
+      $('code').textContent = body.code;
+      show('wait');
+      poll(body.id);
+    } catch (e) {
+      current = null;
+      show('ask');
+      $('ask-err').textContent = `Could not request access: ${e.message}`;
+      $('ask-err').hidden = false;
+    } finally {
+      $('go').disabled = false;
+    }
+  }
+
+  $('ask').addEventListener('submit', e => { e.preventDefault(); request(); });
+  $('retry').addEventListener('click', () => request());
+  $('cancel').addEventListener('click', () => {
+    const id = current;
+    current = null;
+    if (id) fetch(`/pair/request/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {});
+    show('ask');
+  });
+  window.addEventListener('pagehide', () => {
+    if (current) fetch(`/pair/request/${encodeURIComponent(current)}`, { method: 'DELETE', keepalive: true }).catch(() => {});
+  });
+})();
+</script>
+</body>
+</html>
