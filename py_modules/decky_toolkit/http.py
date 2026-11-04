@@ -458,7 +458,7 @@ class Api:
         # State-changing routes refuse the viewer cookie so a browser can never be steered into them.
         if self.auth.has_bearer(request):
             return None
-        return web.Response(status=401, text="Bearer token required", headers={"WWW-Authenticate": 'Bearer realm="decky-mcp"'})
+        return web.Response(status=401, text="Bearer token required", headers={"WWW-Authenticate": 'Bearer realm="decky-toolkit"'})
 
     async def handle_plugins(self, _request: web.Request) -> web.Response:
         return web.json_response(await list_plugins())
@@ -472,7 +472,7 @@ class Api:
         if not request.content_type.startswith("multipart/"):
             return _error(400, "expected multipart/form-data with a 'file' field")
         reader = await request.multipart()
-        with tempfile.NamedTemporaryFile(prefix="decky-mcp-upload-", suffix=".zip") as tmp:
+        with tempfile.NamedTemporaryFile(prefix="decky-toolkit-upload-", suffix=".zip") as tmp:
             found = False
             while (part := await reader.next()) is not None:
                 if getattr(part, "name", None) != "file":

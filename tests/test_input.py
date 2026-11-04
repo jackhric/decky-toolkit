@@ -11,13 +11,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
 from aiohttp import ClientSession, ClientTimeout, WSMsgType, WSServerHandshakeError, web  # noqa: E402
 
-from decky_mcp.auth import TOKEN_COOKIE, TokenAuth  # noqa: E402
-from decky_mcp.http import Api  # noqa: E402
-from decky_mcp.input import keymap, uinput  # noqa: E402
-from decky_mcp.input.service import InputDisabled, InputService, InputUnavailable, pad_values  # noqa: E402
-from decky_mcp.protocol import McpServer  # noqa: E402
-from decky_mcp.settings import Settings  # noqa: E402
-from decky_mcp.tools import ToolRegistry, build_registry  # noqa: E402
+from decky_toolkit.auth import TOKEN_COOKIE, TokenAuth  # noqa: E402
+from decky_toolkit.http import Api  # noqa: E402
+from decky_toolkit.input import keymap, uinput  # noqa: E402
+from decky_toolkit.input.service import InputDisabled, InputService, InputUnavailable, pad_values  # noqa: E402
+from decky_toolkit.protocol import McpServer  # noqa: E402
+from decky_toolkit.settings import Settings  # noqa: E402
+from decky_toolkit.tools import ToolRegistry, build_registry  # noqa: E402
 
 TOKEN = "test-token"
 H = {"Authorization": f"Bearer {TOKEN}"}

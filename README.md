@@ -1,6 +1,7 @@
-# Decky-MCP
+# Decky Toolkit
 
-A [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) plugin that runs a
+A [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) plugin (with a companion VS Code
+extension, a browser screen viewer and an HTTP API) that runs a
 [Model Context Protocol](https://modelcontextprotocol.io) server on the Steam Deck itself, so AI
 coding agents on your dev machine (Claude Code, Cursor, MCP Inspector, …) can inspect and drive the
 device while you develop other Decky plugins.
@@ -47,7 +48,7 @@ From the VS Code extension (see [extension/README.md](extension/README.md#pairin
 2. The editor shows *Waiting for approval on <device> · code 4821* (and the device row says
    *waiting for approval · code 4821*).
 3. On the device a toast says *VS Code on <your-pc> wants to pair · code 4821*. Open Quick Access
-   (…) → Decky-MCP. While a request is pending the panel shows only *Approve pairing request?* with
+   (…) → Decky Toolkit. While a request is pending the panel shows only *Approve pairing request?* with
    *VS Code on <your-pc> (<your-ip>) · code 4821* and **Approve** / **Deny** side by side (several
    requests come one at a time, "1 of 3"). Check the code and press **Approve**.
 4. The extension stores the token and connects. Deny shows *Pairing denied on <device>* with
@@ -61,7 +62,7 @@ From a browser:
 3. Approve it on the device as above. The page sets an HttpOnly cookie and opens the viewer. A denied
    request says so and offers **Retry**.
 
-Alternatively open `/viewer?token=<token>` once (the token is in the Decky-MCP panel); the token
+Alternatively open `/viewer?token=<token>` once (the token is in the Decky Toolkit panel); the token
 moves into the same cookie. Other clients (scripts, CLI agents) use the same routes:
 `POST /pair/request`, then long-poll `GET /pair/request/{id}?wait=25` until it returns the token;
 see [docs/api.md](docs/api.md#pairing). Pending requests expire 60 s after their client stops
@@ -136,7 +137,7 @@ runs while someone listens.
 ## Remote input
 
 The viewer and MCP clients can drive the Deck with keyboard, mouse and gamepad input. It is **off
-by default**. Turn it on with the **Allow remote input** toggle in the Decky-MCP panel, the
+by default**. Turn it on with the **Allow remote input** toggle in the Decky Toolkit panel, the
 **⌨ Input** button in the viewer, `PUT /input/settings` or the `set_input_enabled` tool. The setting
 is stored in `settings.json` and applies to every client.
 
@@ -202,10 +203,10 @@ curl "http://<deck-ip>:8765/pair/request/<id>?wait=25"   # {status: "approved", 
 - `main.py` is the Decky backend. It loads settings, then starts an `aiohttp` server from inside the
   plugin's asyncio loop. `aiohttp` comes from the loader's own PyInstaller bundle, so there are no
   dependencies to vendor.
-- `py_modules/decky_mcp/protocol.py` implements the JSON-RPC methods `initialize`, `ping`,
+- `py_modules/decky_toolkit/protocol.py` implements the JSON-RPC methods `initialize`, `ping`,
   `tools/list`, `tools/call` and the HTTP transport rules (bearer auth, `Origin` check, 202 for
   notifications, 405 for GET).
-- `py_modules/decky_mcp/cdp.py` is a tiny Chrome DevTools Protocol client used to talk to Steam's
+- `py_modules/decky_toolkit/cdp.py` is a tiny Chrome DevTools Protocol client used to talk to Steam's
   CEF debugger. The plugin deliberately does **not** connect to the loader's own websocket on port
   1337: the loader keeps a single client and would kick the Steam UI off.
 - `src/index.tsx` is the Quick Access panel: enable/disable, endpoint, token, restart, regenerate token.
@@ -233,7 +234,7 @@ Connect Claude Code:
 claude mcp add --transport http decky http://<deck-ip>:8765/mcp -H "Authorization: Bearer <token>"
 ```
 
-The token lives in `~/homebrew/settings/decky-mcp/settings.json` on the device (mode 0600, owned by
+The token lives in `~/homebrew/settings/decky-toolkit/settings.json` on the device (mode 0600, owned by
 root) and is shown in the plugin panel.
 
 ## Security notes

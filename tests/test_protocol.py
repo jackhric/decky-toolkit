@@ -9,10 +9,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
 from aiohttp import ClientSession, CookieJar, web  # noqa: E402
 
-from decky_mcp.auth import TokenAuth  # noqa: E402
-from decky_mcp.http import Api  # noqa: E402
-from decky_mcp.protocol import McpServer  # noqa: E402
-from decky_mcp.tools import ToolRegistry  # noqa: E402
+from decky_toolkit.auth import TokenAuth  # noqa: E402
+from decky_toolkit.http import Api  # noqa: E402
+from decky_toolkit.protocol import McpServer  # noqa: E402
+from decky_toolkit.tools import ToolRegistry  # noqa: E402
 
 TOKEN = "test-token"
 H = {"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"}
@@ -108,7 +108,7 @@ def test_viewer_token_and_cookie():
         async with s.get(f"{base}/viewer?token=wrong", allow_redirects=False) as r:
             assert r.status == 401
         async with s.get(f"{base}/viewer?token={TOKEN}", allow_redirects=False) as r:
-            assert r.status == 302 and "decky_mcp_token" in r.headers.get("Set-Cookie", "")
+            assert r.status == 302 and "decky_toolkit_token" in r.headers.get("Set-Cookie", "")
         # cookie now authorises token-protected routes too
         async with s.get(f"{base}/stream/stats") as r:
             assert r.status == 200

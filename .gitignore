@@ -56,7 +56,7 @@ cli/
 cli/*
 cli/decky
 
-# Decky-MCP
+# Decky Toolkit
 deploy.env
 out/
 extension/node_modules

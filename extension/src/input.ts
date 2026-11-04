@@ -17,14 +17,14 @@ export async function toggleInput(c: Connection, enabled?: boolean): Promise<voi
   if (!client) return;
   const current = await c.refreshInput() ?? c.input;
   if (current === 'unsupported') {
-    void vscode.window.showWarningMessage(`Decky-MCP: remote input is ${INPUT_UNSUPPORTED}; update the Decky-MCP plugin on ${c.label}.`);
+    void vscode.window.showWarningMessage(`Decky Toolkit: remote input is ${INPUT_UNSUPPORTED}; update the Decky Toolkit plugin on ${c.label}.`);
     return;
   }
   if (current && !current.available && !current.enabled) {
-    void vscode.window.showWarningMessage(`Decky-MCP: remote input is unavailable on ${c.label}${current.reason ? `: ${current.reason}` : '.'}`);
+    void vscode.window.showWarningMessage(`Decky Toolkit: remote input is unavailable on ${c.label}${current.reason ? `: ${current.reason}` : '.'}`);
     return;
   }
   const next = await c.setInputEnabled(enabled ?? !current?.enabled);
   vscode.window.setStatusBarMessage(
-    `Decky-MCP: remote input ${next.enabled ? `on (${inputBackendLabel(next.backend)})` : 'off'} for ${c.label}`, 4000);
+    `Decky Toolkit: remote input ${next.enabled ? `on (${inputBackendLabel(next.backend)})` : 'off'} for ${c.label}`, 4000);
 }

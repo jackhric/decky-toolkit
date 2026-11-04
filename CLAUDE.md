@@ -1,4 +1,4 @@
-# Decky-MCP — notes for agents working in this repo
+# Decky Toolkit — notes for agents working in this repo
 
 ## What this is
 A Decky Loader plugin whose Python backend hosts an MCP Streamable-HTTP server (port 8765, bearer
@@ -7,7 +7,7 @@ See README.md for the tool list and architecture.
 
 ## Layout
 - `main.py` — Decky `Plugin` class: settings, aiohttp server lifecycle, frontend-callable methods.
-- `py_modules/decky_mcp/` — `protocol.py` (JSON-RPC + HTTP transport), `http.py` (REST routes, see
+- `py_modules/decky_toolkit/` — `protocol.py` (JSON-RPC + HTTP transport), `http.py` (REST routes, see
   `docs/api.md`), `auth.py`, `tools/` (tool registry and tools), `install.py` (plugin zip
   validation + atomic install), `logs.py` (journal / plugin log tail and follow), `cdp.py` (Chrome
   DevTools client for Steam CEF on 127.0.0.1:8080), `settings.py`, `input/` (remote input: `ei.py`
@@ -140,7 +140,7 @@ See README.md for the tool list and architecture.
   is silently ignored and every capture stream fails with "target not found"/"no target node
   available". `pulsesrc` as root fails too (pipewire-pulse refuses a root client on uid 1000's dir).
 - Pipeline (as root with `XDG_RUNTIME_DIR=/run/user/1000`): `gst-launch-1.0 -q pipewiresrc
-  stream-properties=props,stream.capture.sink=true,node.name=decky-mcp-audio ! audioconvert !
+  stream-properties=props,stream.capture.sink=true,node.name=decky-toolkit-audio ! audioconvert !
   audioresample ! audio/x-raw,format=S16LE,rate=48000,channels=2,layout=interleaved ! fdsink fd=1
   sync=false`. Without `target-object` it follows the default sink. audioconvert downmixes the 5.1
   monitor: a stereo 440 Hz test tone at amplitude 3000 arrives at -23.8 dBFS (rms 2121, unchanged).
@@ -210,14 +210,14 @@ A client files `POST /pair/request` and long-polls `GET /pair/request/{id}?wait=
 approves or denies it in the panel, which shows only an "Approve pairing request?" prompt while one is
 pending (frontend methods `list_pair_requests`,
 `approve_pair_request`, `deny_pair_request`). No time limit. Requests live in memory
-(`py_modules/decky_mcp/pairing.py`): a pending one expires 60 s after its last poll, a decided one 5 min
+(`py_modules/decky_toolkit/pairing.py`): a pending one expires 60 s after its last poll, a decided one 5 min
 after the decision, and a plugin restart forgets them all, so clients re-request (new code) on a 404.
 The token goes out once per approval; the browser flow gets the cookie via `?cookie=1` instead.
 Approval is deliberately device-only (no HTTP/MCP route), the one exception to the remote-configurable
-rule below. `/mcp` always requires the bearer token. Events: `decky_mcp_pair_request` (toast with name
-and code), `decky_mcp_pair_requests` (list changed), `decky_mcp_paired` (remote IP, client name). To
+rule below. `/mcp` always requires the bearer token. Events: `decky_toolkit_pair_request` (toast with name
+and code), `decky_toolkit_pair_requests` (list changed), `decky_toolkit_paired` (remote IP, client name). To
 drive frontend methods from a test, evaluate
-`window.DeckyBackend.call('loader/call_plugin_method', 'Decky-MCP', '<method>', ...args)` in
+`window.DeckyBackend.call('loader/call_plugin_method', 'Decky Toolkit', '<method>', ...args)` in
 SharedJSContext via the `cef_evaluate` tool.
 
 ## Conventions

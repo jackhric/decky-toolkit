@@ -7,7 +7,7 @@ import type { Connection, ConnectionState } from './connection';
 export const controllerTimings = { pollMs: 5000 };
 
 export const MAX_VIRTUAL_PADS = 4;
-export const CONTROLLERS_UNSUPPORTED = 'update Decky-MCP on the device';
+export const CONTROLLERS_UNSUPPORTED = 'update Decky Toolkit on the device';
 
 /** `unsupported`: the device answers 404 to `/controllers`. */
 export type ControllersState = ControllersList | 'unsupported' | { error: string };
@@ -181,7 +181,7 @@ export function controllerItems(state: ControllersState | undefined): vscode.Tre
   if (state === 'unsupported') {
     const n = new ControllerNode('Controllers');
     n.description = CONTROLLERS_UNSUPPORTED;
-    n.tooltip = 'The Decky-MCP plugin on this device predates controller management (GET /controllers answers 404).';
+    n.tooltip = 'The Decky Toolkit plugin on this device predates controller management (GET /controllers answers 404).';
     n.iconPath = new vscode.ThemeIcon('game', new vscode.ThemeColor('disabledForeground'));
     n.contextValue = 'controller.unsupported';
     return [n];
@@ -190,7 +190,7 @@ export function controllerItems(state: ControllersState | undefined): vscode.Tre
     const n = new ControllerNode(`Could not load controllers: ${state.error}`);
     n.iconPath = new vscode.ThemeIcon('warning');
     n.tooltip = 'Click to retry';
-    n.command = { command: 'decky-mcp.refreshControllers', title: 'Retry' };
+    n.command = { command: 'decky-toolkit.refreshControllers', title: 'Retry' };
     n.contextValue = 'placeholder';
     return [n];
   }
@@ -249,7 +249,7 @@ export async function addVirtualController(conn: Connection, watcher: Controller
   if (!client) return undefined;
   const state = watcher.state ?? await watcher.refresh();
   if (state === 'unsupported') {
-    void vscode.window.showWarningMessage(`Decky-MCP: controller management needs a newer Decky-MCP; ${CONTROLLERS_UNSUPPORTED} (${conn.label}).`);
+    void vscode.window.showWarningMessage(`Decky Toolkit: controller management needs a newer Decky Toolkit; ${CONTROLLERS_UNSUPPORTED} (${conn.label}).`);
     return undefined;
   }
   const fallback = nextPadName(state);
@@ -264,15 +264,15 @@ export async function addVirtualController(conn: Connection, watcher: Controller
       { location: vscode.ProgressLocation.Notification, title: `Adding ${name.trim() || fallback} on ${conn.label}…` },
       () => client.addVirtualController(name.trim() || fallback));
     void watcher.refresh();
-    void vscode.window.showInformationMessage(`Decky-MCP: Virtual controller added and recognised by Steam Input (${pad.name}).`);
+    void vscode.window.showInformationMessage(`Decky Toolkit: Virtual controller added and recognised by Steam Input (${pad.name}).`);
     return pad.id;
   } catch (e) {
     if (isOldDevice(e)) {
-      void vscode.window.showWarningMessage(`Decky-MCP: controller management needs a newer Decky-MCP; ${CONTROLLERS_UNSUPPORTED} (${conn.label}).`);
+      void vscode.window.showWarningMessage(`Decky Toolkit: controller management needs a newer Decky Toolkit; ${CONTROLLERS_UNSUPPORTED} (${conn.label}).`);
       return undefined;
     }
     // 409 (all slots taken) and pads Steam Input did not pick up: the server's text says why.
-    void vscode.window.showWarningMessage(`Decky-MCP: ${serverError(e)}`);
+    void vscode.window.showWarningMessage(`Decky Toolkit: ${serverError(e)}`);
     return undefined;
   }
 }
@@ -285,12 +285,12 @@ export async function removeVirtualController(conn: Connection, watcher: Control
   if (!id) {
     const state = await watcher.refresh();
     if (state === 'unsupported') {
-      void vscode.window.showWarningMessage(`Decky-MCP: controller management needs a newer Decky-MCP; ${CONTROLLERS_UNSUPPORTED} (${conn.label}).`);
+      void vscode.window.showWarningMessage(`Decky Toolkit: controller management needs a newer Decky Toolkit; ${CONTROLLERS_UNSUPPORTED} (${conn.label}).`);
       return;
     }
     const pads = isList(state) ? state.virtual : [];
     if (pads.length === 0) {
-      void vscode.window.showInformationMessage(`Decky-MCP: ${conn.label} has no virtual controllers.`);
+      void vscode.window.showInformationMessage(`Decky Toolkit: ${conn.label} has no virtual controllers.`);
       return;
     }
     const pick = await vscode.window.showQuickPick(
@@ -304,11 +304,11 @@ export async function removeVirtualController(conn: Connection, watcher: Control
     await client.removeVirtualController(id);
   } catch (e) {
     if (isMissingRoute(e)) {
-      void vscode.window.showWarningMessage(`Decky-MCP: controller management needs a newer Decky-MCP; ${CONTROLLERS_UNSUPPORTED} (${conn.label}).`);
+      void vscode.window.showWarningMessage(`Decky Toolkit: controller management needs a newer Decky Toolkit; ${CONTROLLERS_UNSUPPORTED} (${conn.label}).`);
       return;
     }
     throw new Error(serverError(e));
   }
-  vscode.window.setStatusBarMessage(`Decky-MCP: removed ${label}`, 4000);
+  vscode.window.setStatusBarMessage(`Decky Toolkit: removed ${label}`, 4000);
   await watcher.refresh();
 }

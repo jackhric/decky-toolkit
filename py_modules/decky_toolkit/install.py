@@ -103,7 +103,7 @@ def install_plugin_zip(src: str | os.PathLike[str] | bytes, plugins_dir: str, *,
         os.makedirs(plugins_dir, exist_ok=True)
         # Stage next to (not inside) plugins_dir so the loader never sees a half-extracted plugin,
         # while staying on the same filesystem so the final rename is atomic.
-        tmp = tempfile.mkdtemp(prefix=".decky-mcp-install-", dir=os.path.dirname(os.path.abspath(plugins_dir)))
+        tmp = tempfile.mkdtemp(prefix=".decky-toolkit-install-", dir=os.path.dirname(os.path.abspath(plugins_dir)))
         target = os.path.join(plugins_dir, dirname)
         try:
             staged = os.path.join(tmp, "new")

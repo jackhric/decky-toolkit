@@ -29,7 +29,7 @@ export class PluginWorkspace implements vscode.Disposable {
     this.subs = [
       watcher, watcher.onDidCreate(onFile), watcher.onDidDelete(onFile), watcher.onDidChange(onFile),
       vscode.workspace.onDidChangeWorkspaceFolders(() => this.rescanSoon()),
-      vscode.workspace.onDidChangeConfiguration(e => { if (e.affectsConfiguration('decky-mcp.pluginDirName')) this.rescanSoon(); }),
+      vscode.workspace.onDidChangeConfiguration(e => { if (e.affectsConfiguration('decky-toolkit.pluginDirName')) this.rescanSoon(); }),
     ];
     this.scan = this.refresh();
   }
@@ -49,7 +49,7 @@ export class PluginWorkspace implements vscode.Disposable {
   }
 
   refresh(): Promise<WorkspacePlugin[]> {
-    const override = vscode.workspace.getConfiguration('decky-mcp').get<string>('pluginDirName', '');
+    const override = vscode.workspace.getConfiguration('decky-toolkit').get<string>('pluginDirName', '');
     this.scan = (async () => {
       const found: WorkspacePlugin[] = [];
       for (const folder of vscode.workspace.workspaceFolders ?? []) {
@@ -73,7 +73,7 @@ export class PluginWorkspace implements vscode.Disposable {
     const plugins = await this.ready();
     if (plugins.length === 0) {
       void vscode.window.showWarningMessage(
-        'Decky-MCP: no workspace folder contains a plugin.json. Open your Decky plugin folder (File → Open Folder) to deploy, reload or tail it.');
+        'Decky Toolkit: no workspace folder contains a plugin.json. Open your Decky plugin folder (File → Open Folder) to deploy, reload or tail it.');
       return undefined;
     }
     if (plugins.length === 1) return plugins[0];
@@ -125,14 +125,14 @@ export class DeployController implements vscode.Disposable {
     this.subs = [
       conn.onDidChange(() => { this.render(); this.maybePrompt(); }),
       ws.onDidChange(() => { this.render(); this.maybePrompt(); this.armAutoDeploy(); }),
-      vscode.workspace.onDidChangeConfiguration(e => { if (e.affectsConfiguration('decky-mcp.deploy.onChange')) this.armAutoDeploy(); }),
+      vscode.workspace.onDidChangeConfiguration(e => { if (e.affectsConfiguration('decky-toolkit.deploy.onChange')) this.armAutoDeploy(); }),
     ];
     this.render();
     this.armAutoDeploy();
   }
 
   static get autoDeployEnabled(): boolean {
-    return vscode.workspace.getConfiguration('decky-mcp').get<boolean>('deploy.onChange', false);
+    return vscode.workspace.getConfiguration('decky-toolkit').get<boolean>('deploy.onChange', false);
   }
 
   /** The plugin the status bar button deploys: the last one deployed, else the first found. */
@@ -160,7 +160,7 @@ export class DeployController implements vscode.Disposable {
       this.item.text = `$(rocket) Deploy ${p.name}`;
       this.item.tooltip = `Decky: build if needed, install ${pluginSummary(p)} as ~/homebrew/plugins/${p.dir} on ${device.name} and reload it` +
         `${DeployController.autoDeployEnabled ? '. Auto-deploy on change is on' : ''}`;
-      this.item.command = 'decky-mcp.deploy';
+      this.item.command = 'decky-toolkit.deploy';
     }
     this.item.show();
   }
@@ -175,7 +175,7 @@ export class DeployController implements vscode.Disposable {
   }
 
   async toggleAutoDeploy(): Promise<void> {
-    const cfg = vscode.workspace.getConfiguration('decky-mcp');
+    const cfg = vscode.workspace.getConfiguration('decky-toolkit');
     const target = vscode.workspace.workspaceFolders?.length ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
     const on = !DeployController.autoDeployEnabled;
     await cfg.update('deploy.onChange', on, target);
@@ -216,7 +216,7 @@ export class DeployController implements vscode.Disposable {
   async deploy(req: DeployRequest = {}): Promise<DeployStep | undefined> {
     if (this.running) {
       if (req.auto) this.queued = req.plugin;
-      else void vscode.window.showInformationMessage(`Decky-MCP: already deploying ${this.running.plugin.name}.`);
+      else void vscode.window.showInformationMessage(`Decky Toolkit: already deploying ${this.running.plugin.name}.`);
       return undefined;
     }
     const client = req.auto ? (this.conn.connectedDevice && this.conn.authedClient()) : await this.conn.client();
@@ -225,7 +225,7 @@ export class DeployController implements vscode.Disposable {
     if (!p) return undefined;
     this.lastRoot = p.root;
     const device = this.conn.connectedDevice?.name ?? client.address.host;
-    const build: BuildMode = req.auto ? 'never' : vscode.workspace.getConfiguration('decky-mcp').get<BuildMode>('deploy.build', 'auto');
+    const build: BuildMode = req.auto ? 'never' : vscode.workspace.getConfiguration('decky-toolkit').get<BuildMode>('deploy.build', 'auto');
     const restart = req.full ? 'loader' : 'fast';
     this.running = { plugin: p, auto: !!req.auto };
     this.render();
@@ -261,7 +261,7 @@ export class DeployController implements vscode.Disposable {
       }
       const why = e instanceof BuildError ? `build failed: ${e.message}` : describeError(e);
       this.out.appendLine(`Deploy failed: ${why}`);
-      void vscode.window.showErrorMessage(`Decky-MCP deploy failed: ${why}`, 'Show output')
+      void vscode.window.showErrorMessage(`Decky Toolkit deploy failed: ${why}`, 'Show output')
         .then(c => { if (c) this.out.show(true); });
       return undefined;
     } finally {
@@ -280,7 +280,7 @@ export class DeployController implements vscode.Disposable {
     this.out.appendLine(`Deployed ${p.name} in ${secs} s${how}`);
     if (step.confirm && !step.confirm.confirmed) {
       void vscode.window.showWarningMessage(
-        `Decky-MCP: installed ${p.name}, but could not confirm the reload: ${step.confirm.detail}.`, 'Show output', 'Deploy (full restart)')
+        `Decky Toolkit: installed ${p.name}, but could not confirm the reload: ${step.confirm.detail}.`, 'Show output', 'Deploy (full restart)')
         .then(c => {
           if (c === 'Show output') this.out.show(true);
           else if (c) void this.deploy({ full: true, plugin: p });
@@ -289,7 +289,7 @@ export class DeployController implements vscode.Disposable {
     }
     const msg = `Deployed ${p.name} in ${secs} s${how}`;
     if (auto) vscode.window.setStatusBarMessage(`$(check) ${msg}`, 5000);
-    else void vscode.window.showInformationMessage(`Decky-MCP: ${msg}.`);
+    else void vscode.window.showInformationMessage(`Decky Toolkit: ${msg}.`);
   }
 
   dispose(): void {

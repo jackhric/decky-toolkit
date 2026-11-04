@@ -110,7 +110,7 @@ class EiSender:
         ei = lib.ei_new_sender(None)
         if not ei:
             raise EiError("ei_new_sender failed")
-        lib.ei_configure_name(ei, b"decky-mcp")
+        lib.ei_configure_name(ei, b"decky-toolkit")
         rc = lib.ei_setup_backend_socket(ei, self.path.encode())
         if rc != 0:
             lib.ei_unref(ei)

@@ -21,7 +21,7 @@ def loc():
     return r.stdout.split(" screen")[0]
 
 ei = ei_lib.ei_new_sender(None)
-ei_lib.ei_configure_name(ei, b"decky-mcp")
+ei_lib.ei_configure_name(ei, b"decky-toolkit")
 assert ei_lib.ei_setup_backend_socket(ei, b"/run/user/1000/gamescope-0-ei") == 0
 fd = ei_lib.ei_get_fd(ei)
 dev = None

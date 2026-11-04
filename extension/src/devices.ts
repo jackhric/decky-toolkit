@@ -32,7 +32,7 @@ async function promptAddress(initial: { host: string; port: number }, title: str
   }))?.trim();
   if (!host) return undefined;
   const port = (await vscode.window.showInputBox({
-    title, prompt: 'Decky-MCP port', value: String(initial.port), ignoreFocusOut: true, validateInput: validatePort,
+    title, prompt: 'Decky Toolkit port', value: String(initial.port), ignoreFocusOut: true, validateInput: validatePort,
   }))?.trim();
   if (!port) return undefined;
   return { host, port: Number(port) };
@@ -74,12 +74,12 @@ export async function addDevice(conn: Connection): Promise<void> {
     ];
     const pick = await vscode.window.showQuickPick(items, { title: `Added ${device.name}`, placeHolder: `${host}:${port}`, ignoreFocusOut: true });
     if (pick?.id === 'connect') {
-      await vscode.commands.executeCommand('decky-mcp.connect', device.id);
+      await vscode.commands.executeCommand('decky-toolkit.connect', device.id);
       return;
     }
     if (pick?.id !== 'port') return;
     const p = (await vscode.window.showInputBox({
-      title, prompt: 'Decky-MCP port', value: String(port), ignoreFocusOut: true, validateInput: validatePort,
+      title, prompt: 'Decky Toolkit port', value: String(port), ignoreFocusOut: true, validateInput: validatePort,
     }))?.trim();
     if (!p) continue;
     const other = duplicateOf(conn, host, Number(p), device.id);
@@ -114,7 +114,7 @@ export async function changeHost(conn: Connection): Promise<void> {
     const dup = duplicateOf(conn, addr.host, addr.port, d.id);
     if (dup) throw new Error(`${addr.host}:${addr.port} is already saved as "${dup.name}"; switch to it instead.`);
   }
-  const cfg = vscode.workspace.getConfiguration('decky-mcp');
+  const cfg = vscode.workspace.getConfiguration('decky-toolkit');
   const target = (key: string) =>
     cfg.inspect(key)?.workspaceValue !== undefined ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
   await cfg.update('host', addr.host, target('host'));
@@ -170,14 +170,14 @@ export async function switchDevice(conn: Connection): Promise<void> {
       label: `$(${STATUS_ICON[status]}) ${d.name}`,
       description: `${d.host}:${d.port}`,
       detail: isConnected ? statusLabel(status) : `${statusLabel(status)} · select to ${connected ? 'switch to it' : 'connect'}`,
-      run: isConnected ? undefined : () => vscode.commands.executeCommand('decky-mcp.connect', d.id),
+      run: isConnected ? undefined : () => vscode.commands.executeCommand('decky-toolkit.connect', d.id),
     });
   }
   items.push({ label: '', kind: vscode.QuickPickItemKind.Separator });
   if (connected) {
     items.push(
-      { label: `$(debug-disconnect) Disconnect from ${connected.name}`, run: () => vscode.commands.executeCommand('decky-mcp.disconnectDevice') },
-      { label: '$(device-desktop) Open screen', run: () => vscode.commands.executeCommand('decky-mcp.openScreen') },
+      { label: `$(debug-disconnect) Disconnect from ${connected.name}`, run: () => vscode.commands.executeCommand('decky-toolkit.disconnectDevice') },
+      { label: '$(device-desktop) Open screen', run: () => vscode.commands.executeCommand('decky-toolkit.openScreen') },
     );
   }
   items.push({ label: '$(add) Add device…', run: () => addDevice(conn) });
@@ -194,7 +194,7 @@ export async function copyViewerUrl(conn: Connection, arg?: unknown): Promise<vo
   if (!d) return;
   await vscode.env.clipboard.writeText(viewerUrl(d));
   void vscode.window.showInformationMessage(
-    `Decky-MCP: copied ${viewerUrl(d)}. Open it in a browser, press "Request access" and allow it on the device to watch there.`);
+    `Decky Toolkit: copied ${viewerUrl(d)}. Open it in a browser, press "Request access" and allow it on the device to watch there.`);
 }
 
 /** The `…` overflow of a device row: everything except the row's primary action. */
@@ -204,12 +204,12 @@ export async function deviceActions(conn: Connection, arg?: unknown): Promise<vo
   const status = conn.statusOf(d);
   const run = (cmd: string) => () => vscode.commands.executeCommand(cmd, d.id);
   const items: PickItem[] = [];
-  if (status !== 'unpaired') items.push({ label: '$(key) Re-pair', run: run('decky-mcp.pairAgain') });
+  if (status !== 'unpaired') items.push({ label: '$(key) Re-pair', run: run('decky-toolkit.pairAgain') });
   items.push(
-    { label: '$(edit) Enter token manually', run: run('decky-mcp.enterToken') },
-    { label: '$(pencil) Edit', run: run('decky-mcp.editDevice') },
-    { label: '$(copy) Copy viewer URL', description: viewerUrl(d), run: run('decky-mcp.copyViewerUrl') },
-    { label: '$(trash) Remove', run: run('decky-mcp.removeDevice') },
+    { label: '$(edit) Enter token manually', run: run('decky-toolkit.enterToken') },
+    { label: '$(pencil) Edit', run: run('decky-toolkit.editDevice') },
+    { label: '$(copy) Copy viewer URL', description: viewerUrl(d), run: run('decky-toolkit.copyViewerUrl') },
+    { label: '$(trash) Remove', run: run('decky-toolkit.removeDevice') },
   );
   const pick = await vscode.window.showQuickPick(items, { placeHolder: `${d.name} · ${statusLabel(status)}` });
   await pick?.run?.();

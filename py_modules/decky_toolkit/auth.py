@@ -4,7 +4,7 @@ from urllib.parse import urlparse
 
 from aiohttp import web
 
-TOKEN_COOKIE = "decky_mcp_token"
+TOKEN_COOKIE = "decky_toolkit_token"
 COOKIE_MAX_AGE = 30 * 86400
 # Routes that are public or do their own token handling (viewer accepts ?token=). The removed
 # timed-window `/pair` stays listed so old clients get a plain 404 instead of a 401.
@@ -40,7 +40,7 @@ class TokenAuth:
             return web.Response(status=403, text="Origin not allowed")
         if self.has_bearer(request) or self.has_cookie(request):
             return None
-        return web.Response(status=401, text="Unauthorized", headers={"WWW-Authenticate": 'Bearer realm="decky-mcp"'})
+        return web.Response(status=401, text="Unauthorized", headers={"WWW-Authenticate": 'Bearer realm="decky-toolkit"'})
 
     def grant_cookie(self, response: web.StreamResponse) -> None:
         response.set_cookie(TOKEN_COOKIE, self.token, httponly=True, samesite="Strict", path="/", max_age=COOKIE_MAX_AGE)

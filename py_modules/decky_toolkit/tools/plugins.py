@@ -14,7 +14,7 @@ from . import ToolRegistry
 from .system import plugins_dir, run
 
 RESTART_MODES = ("loader", "plugin", "none")
-log = logging.getLogger("decky_mcp.plugins")
+log = logging.getLogger("decky_toolkit.plugins")
 
 
 def plugin_name(dirname: str) -> str:
@@ -74,7 +74,7 @@ async def install(src: str | bytes, restart: str = "loader", logger: logging.Log
             await reload_plugin(installed["dir"])
         return {"installed": installed, "restarted": restart}
     # Same filesystem as plugins/, so the final mv is a rename.
-    pending = os.path.join(os.path.dirname(plugins_dir()), ".decky-mcp-pending")
+    pending = os.path.join(os.path.dirname(plugins_dir()), ".decky-toolkit-pending")
     installed = await asyncio.to_thread(install_plugin_zip, src, pending, logger=logger)
     await _swap_while_stopped(os.path.join(pending, installed["dir"]), os.path.join(plugins_dir(), installed["dir"]))
     return {"installed": installed, "restarted": restart}

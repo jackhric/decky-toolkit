@@ -13,7 +13,7 @@ from aiohttp import web
 from .tools import ToolRegistry
 
 SUPPORTED_PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26")
-SERVER_INFO = {"name": "decky-mcp", "version": "0.2.0"}
+SERVER_INFO = {"name": "decky-toolkit", "version": "0.2.0"}
 
 PARSE_ERROR = -32700
 INVALID_REQUEST = -32600
@@ -104,7 +104,7 @@ class McpServer:
             "capabilities": {"tools": {"listChanged": False}},
             "serverInfo": SERVER_INFO,
             "instructions": (
-                "Decky-MCP runs inside Decky Loader on a Steam Deck / Bazzite device. "
+                "Decky Toolkit runs inside Decky Loader on a Steam Deck / Bazzite device. "
                 "Use cef_evaluate to run JS in the Steam UI (SharedJSContext), screen_capture to see the "
                 "whole display, the log tools to debug plugin backends, and restart_loader after deploying."
             ),

@@ -23,7 +23,7 @@ def register(reg: ToolRegistry, service: InputService | None, capturer: ScreenCa
     async def run(fn, summary_fn, capture: bool) -> Any:
         s = svc()
         if not s.enabled:
-            raise InputDisabled("remote input is disabled; call set_input_enabled(true) or use the Decky-MCP panel")
+            raise InputDisabled("remote input is disabled; call set_input_enabled(true) or use the Decky Toolkit panel")
         session = s.open_session("MCP client", kind="mcp")
         try:
             result = await fn(s, session)
