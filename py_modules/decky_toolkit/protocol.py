@@ -4,6 +4,7 @@ No sessions, no SSE: a POST always gets a plain application/json reply (allowed 
 revision from 2025-03-26 on), GET returns 405. Authentication is applied by the app middleware.
 """
 import json
+import os
 import logging
 import traceback
 from typing import Any, Awaitable, Callable
@@ -13,7 +14,7 @@ from aiohttp import web
 from .tools import ToolRegistry
 
 SUPPORTED_PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26")
-SERVER_INFO = {"name": "decky-toolkit", "version": "0.2.0"}
+SERVER_INFO = {"name": "decky-toolkit", "version": os.environ.get("DECKY_PLUGIN_VERSION") or "dev"}
 
 PARSE_ERROR = -32700
 INVALID_REQUEST = -32600

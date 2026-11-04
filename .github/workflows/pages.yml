@@ -43,6 +43,15 @@ jobs:
             --json tagName --jq '[.[] | select(.tagName | startswith("plugin-v"))][0].tagName')
           if [ -z "$tag" ]; then echo "::error::no published plugin-v* release"; exit 1; fi
           gh release download "$tag" -R "$GITHUB_REPOSITORY" -p 'decky-toolkit-*.zip' -O _site/decky-toolkit.zip
+          version="${tag#plugin-v}"
+          asset=$(gh release view "$tag" -R "$GITHUB_REPOSITORY" --json assets \
+            --jq '[.assets[] | select(.name | test("^decky-toolkit-.*\\.zip$"))][0].url')
+          published=$(gh release view "$tag" -R "$GITHUB_REPOSITORY" --json publishedAt --jq .publishedAt)
+          # The plugin's self-update reads this: it compares `version`, downloads `url` and checks the digest.
+          jq -n --arg v "$version" --arg sha "$(sha256sum _site/decky-toolkit.zip | cut -d' ' -f1)" \
+            --argjson size "$(stat -c %s _site/decky-toolkit.zip)" --arg url "$asset" --arg at "$published" \
+            '{plugin: {version: $v, sha256: $sha, size: $size, url: $url, published_at: $at}}' > _site/update.json
+          cat _site/update.json
           echo "decky-toolkit.zip is $tag" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:

@@ -19,6 +19,7 @@ import type {
   ToolsListResult,
   UiRoutes,
   VirtualPadCreated,
+  UpdateStatus,
 } from './api';
 
 export interface DeviceAddress {
@@ -263,6 +264,27 @@ export class DeckyClient {
 
   async reloadPlugin(dir: string): Promise<unknown> {
     return this.json<unknown>(`/plugins/${encodeURIComponent(dir)}/reload`, { method: 'POST', timeoutMs: 30000 });
+  }
+
+  updateStatus(): Promise<UpdateStatus> {
+    return this.json<UpdateStatus>('/update');
+  }
+
+  checkUpdate(): Promise<UpdateStatus> {
+    return this.json<UpdateStatus>('/update/check', { method: 'POST', timeoutMs: 45000 });
+  }
+
+  applyUpdate(): Promise<UpdateStatus> {
+    return this.json<UpdateStatus>('/update/apply', { method: 'POST', timeoutMs: 600000 });
+  }
+
+  setAutoUpdate(enabled: boolean): Promise<UpdateStatus> {
+    return this.json<UpdateStatus>('/update/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ auto_update: enabled }),
+      timeoutMs: 10000,
+    });
   }
 
   /** Falls back to the `restart_loader` tool on devices without the REST route. */

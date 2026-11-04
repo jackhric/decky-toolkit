@@ -205,6 +205,12 @@
         "icon": "$(debug-restart)"
       },
       {
+        "command": "decky-toolkit.updateToolkit",
+        "title": "Update Decky Toolkit on device",
+        "category": "Decky",
+        "icon": "$(cloud-download)"
+      },
+      {
         "command": "decky-toolkit.reloadPlugin",
         "title": "Reload plugin",
         "category": "Decky",

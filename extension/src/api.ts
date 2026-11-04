@@ -75,6 +75,18 @@ export interface InputSettings {
 
 export type RestartMode = 'loader' | 'plugin' | 'none';
 
+export interface UpdateStatus {
+  current: string;
+  latest: { version: string; url: string; size: number; published_at: string | null } | null;
+  available: boolean;
+  auto_update: boolean;
+  checked_at: string | null;
+  checking: boolean;
+  applying: string | null;
+  busy: string | null;
+  error: string | null;
+}
+
 export interface InstallResult {
   installed: { dir: string; name: string; version: string };
   restarted: RestartMode;

@@ -19,6 +19,7 @@ class Settings:
     stream_width: int = 0  # 0 = native resolution
     input_enabled: bool = False
     audio_enabled: bool = True
+    auto_update: bool = True
 
     @classmethod
     def load(cls, settings_dir: str) -> "Settings":

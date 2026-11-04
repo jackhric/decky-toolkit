@@ -21,7 +21,8 @@ from decky_toolkit.input.service import InputService  # noqa: E402
 from decky_toolkit.pairing import PairingRequest, PairingRequests  # noqa: E402
 from decky_toolkit.protocol import McpServer  # noqa: E402
 from decky_toolkit.settings import Settings  # noqa: E402
-from decky_toolkit.tools import build_registry  # noqa: E402
+from decky_toolkit.tools import build_registry, plugins  # noqa: E402
+from decky_toolkit.update import Updater  # noqa: E402
 from decky_toolkit.ui import UiNavigator  # noqa: E402
 
 
@@ -78,6 +79,7 @@ class Plugin:
     input: InputService | None = None
     controllers: ControllerService | None = None
     ui: UiNavigator | None = None
+    updater: Updater | None = None
     pairing: PairingRequests
     pruner: asyncio.Task | None = None
     last_error: str | None = None
@@ -88,7 +90,7 @@ class Plugin:
             return
         api = Api(
             auth=TokenAuth(self.settings.token),
-            mcp=McpServer(build_registry(self.capturer, self.input, self.controllers, self.ui), decky.logger),
+            mcp=McpServer(build_registry(self.capturer, self.input, self.controllers, self.ui, self.updater), decky.logger),
             capturer=self.capturer,
             static_dir=os.path.join(decky.DECKY_PLUGIN_DIR, "static"),
             logger=decky.logger,
@@ -98,6 +100,7 @@ class Plugin:
             audio=self.audio,
             controllers=self.controllers,
             ui=self.ui,
+            updater=self.updater,
         )
         # The loader SIGKILLs a plugin 5s after SIGTERM, so never wait long for in-flight requests.
         runner = web.AppRunner(api.build_app(), access_log=None, shutdown_timeout=2)
@@ -162,6 +165,31 @@ class Plugin:
         decky.logger.info("input session toast: remote input from %s", remote)
         await decky.emit("decky_toolkit_input_session", remote)
 
+    # ---- self-update ----
+
+    def _update_busy(self) -> str | None:
+        if self.capturer is not None and self.capturer.stats().get("subscribers"):
+            return "the screen stream has viewers"
+        if self.audio is not None and self.audio.stats().get("subscribers"):
+            return "the audio stream has listeners"
+        return None
+
+    async def get_update_status(self) -> dict[str, Any]:
+        assert self.updater is not None  # created in _main
+        return self.updater.status()
+
+    async def check_for_update(self) -> dict[str, Any]:
+        assert self.updater is not None
+        return await self.updater.check()
+
+    async def apply_update(self) -> dict[str, Any]:
+        assert self.updater is not None
+        return await self.updater.apply()
+
+    async def set_auto_update(self, enabled: bool) -> dict[str, Any]:
+        assert self.updater is not None
+        return await self.updater.set_auto_update(bool(enabled))
+
     # ---- methods callable from the frontend ----
 
     async def get_input_settings(self) -> dict[str, Any]:
@@ -187,6 +215,7 @@ class Plugin:
             "pair_requests": len(self.pairing.pending()),
             "stream": self.capturer.stats() if self.capturer else None,
             "input": self.input.status() if self.input else None,
+            "update": self.updater.status() if self.updater else None,
             "error": self.last_error,
         }
 
@@ -238,11 +267,21 @@ class Plugin:
         self.input.add_listener(lambda st: asyncio.ensure_future(decky.emit("decky_toolkit_input_state", st["enabled"])))
         self.controllers = ControllerService(self.input, decky.logger)
         self.ui = UiNavigator()
+        self.updater = Updater(
+            lambda: self.settings, save, decky.logger,
+            current_version=getattr(decky, "DECKY_PLUGIN_VERSION", None) or os.environ.get("DECKY_PLUGIN_VERSION") or "0.0.0",
+            install=lambda data, restart: plugins.install(data, restart, decky.logger),
+            busy=self._update_busy,
+            on_change=lambda st: asyncio.ensure_future(decky.emit("decky_toolkit_update", st)),
+        )
         await self._start_server()
+        self.updater.start()
 
     async def _unload(self) -> None:
         if self.pruner is not None:
             self.pruner.cancel()
+        if self.updater is not None:
+            self.updater.stop()
         await self._stop_server()
         decky.logger.info("Decky Toolkit stopped")
 

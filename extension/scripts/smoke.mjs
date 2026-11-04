@@ -206,7 +206,7 @@ let plugins = [
   { dir: 'decky-toolkit', name: 'Decky Toolkit', author: 'jackh', flags: ['root', 'debug'], api_version: 1, version: '0.1.0', has_backend: true },
   { dir: 'romm-tender', name: 'Tender', author: 'x', flags: [], api_version: 1, version: '0.33.0', has_backend: true },
 ];
-const device = { up: true, pairQueue: [], pairRequests: [], pairCancelled: [], pairUnsupported: false, installs: [], journal: ['boot'], pluginLog: {}, installMeta: { name: 'My Plugin', version: '1.2.3' }, downFor: 0, inputSupported: true, input: { enabled: false, backend: 'ei', available: true, reason: null } };
+const device = { up: true, pairQueue: [], pairRequests: [], pairCancelled: [], pairUnsupported: false, installs: [], journal: ['boot'], pluginLog: {}, installMeta: { name: 'My Plugin', version: '1.2.3' }, downFor: 0, inputSupported: true, updateMissing: false, update: { current: '0.2.0', latest: null, available: false, auto_update: true, checked_at: '2026-11-04T00:00:00+00:00', checking: false, applying: null, busy: null, error: null }, input: { enabled: false, backend: 'ei', available: true, reason: null } };
 const frameJpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 0xff, 0xd9]);
 // Controllers and Steam UI routes as in the API contract; `streams` are open /controllers/events bodies.
 const steamDeck = { id: 'evdev:deck', name: 'Steam Deck', kind: 'physical', virtual_id: null, vendor: '28de', product: '1205', device: '/dev/input/event5', steam: { type: 'steamdeck', slot: 0, name: 'Steam Deck' } };
@@ -276,6 +276,16 @@ globalThis.fetch = async (url, init = {}) => {
     return json({ ...stats.settings, limits: streamLimits });
   }
   if (u.pathname === '/plugins') return json(plugins);
+  if (u.pathname === '/update/check' && init.method === 'POST') {
+    if (device.updateMissing) return new Response('404: Not Found', { status: 404 });
+    return json(device.update);
+  }
+  if (u.pathname === '/update/apply' && init.method === 'POST') {
+    device.updateApplies = (device.updateApplies ?? 0) + 1;
+    device.downFor = 1;
+    health.version = device.update.latest.version;
+    return json({ ...device.update, applying: device.update.latest.version });
+  }
   if (u.pathname === '/plugins/install' && init.method === 'POST') {
     const file = init.body.get('file');
     const dir = file.name.replace(/\.zip$/, '');
@@ -418,7 +428,8 @@ const EXPECTED_ACTIONS = {
     ['Deploy', 'decky-toolkit.deploy'], ['Deploy (full restart)', 'decky-toolkit.deployFull'], ['Reload backend', 'decky-toolkit.reloadPlugin'],
     ['Show plugin logs', 'decky-toolkit.pluginLogs'], ['Auto-deploy on change: Off', 'decky-toolkit.toggleAutoDeploy']]],
   Loader: ['server', 2, [
-    ['Restart loader', 'decky-toolkit.restartLoader'], ['Show loader logs', 'decky-toolkit.loaderLogs'], ['Install plugin zip…', 'decky-toolkit.installZip']]],
+    ['Restart loader', 'decky-toolkit.restartLoader'], ['Show loader logs', 'decky-toolkit.loaderLogs'], ['Install plugin zip…', 'decky-toolkit.installZip'],
+    ['Update Decky Toolkit on device', 'decky-toolkit.updateToolkit']]],
   Steam: ['game', 1, [
     ['Navigate to…', 'decky-toolkit.navigate'], ['Open plugin panel…', 'decky-toolkit.openPluginPanel'], ['Back', 'decky-toolkit.uiBack'],
     ['Quick Access', 'decky-toolkit.uiQuickAccess'], ['Close menus', 'decky-toolkit.uiCloseMenus'],
@@ -780,6 +791,33 @@ await check('detected plugin: Plugin group "<name> v<version>", dir in tooltip, 
   await openWorkspace(path.join(scratch, 'ws'));
   assert.equal(prompts().length, 1, 'the prompt shows once per session');
   return `Plugin (${roots[1].description}); prompt "${prompts()[0].m}" [${prompts()[0].buttons.join(', ')}]; status bar "${b.text}"`;
+});
+
+await check('Update Decky Toolkit on device: missing route, up to date, available → confirm → apply → waits for the restart', async () => {
+  const errors = [];
+  ui.error = m => errors.push(m);
+  device.updateMissing = true;
+  await run('decky-toolkit.updateToolkit');
+  assert.match(errors[0] ?? '', /cannot update itself yet/);
+  device.updateMissing = false;
+  calls.messages.length = 0;
+  await run('decky-toolkit.updateToolkit');
+  assert.match(lastMessage('info').m, /Decky Toolkit 0\.2\.0 on .* is up to date/);
+  const before = device.update;
+  device.update = { ...before, latest: { version: '0.3.0', url: 'https://example.invalid/decky-toolkit.zip', size: 10, published_at: null }, available: true, busy: 'the screen stream has viewers' };
+  ui.info = (m, buttons) => (buttons.includes('Update now') ? undefined : undefined);
+  await run('decky-toolkit.updateToolkit');
+  assert.equal(device.updateApplies ?? 0, 0, 'dismissing the prompt applies nothing');
+  ui.info = (m, buttons) => (buttons.includes('Update now') ? 'Update now' : undefined);
+  await run('decky-toolkit.updateToolkit');
+  assert.equal(device.updateApplies, 1);
+  const msgs = calls.messages.filter(m => m.kind === 'info').map(m => m.m);
+  assert.ok(msgs.some(m => /0\.3\.0 is available on .*installed: 0\.2\.0.*the screen stream has viewers/.test(m)), msgs.join(' | '));
+  assert.ok(msgs.some(m => /now runs 0\.3\.0/.test(m)), msgs.join(' | '));
+  assert.ok(fetched.includes('/update/check') && fetched.includes('/update/apply'));
+  device.update = before;
+  health.version = '0.2.0';
+  return `${errors.length} refusal, then ${msgs.at(-1)}`;
 });
 
 await check('Deploy: first install restarts the loader, then fast deploys reload only the plugin', async () => {

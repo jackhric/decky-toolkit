@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { homedir } from 'os';
 import * as path from 'path';
 import { ActionsTreeProvider, WORKSPACE_PLUGIN } from './actionsTree';
+import type { UpdateStatus } from './api';
 import { DeckyClient, describeError, isMissingRoute } from './client';
 import { Connection } from './connection';
 import { ControllerWatcher, ControllersTreeProvider, addVirtualController, removeVirtualController } from './controllers';
@@ -176,6 +177,40 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
         progress.report({ message: 'waiting for it to come back…' });
         const h = await client.waitForRestart();
         void vscode.window.showInformationMessage(`Decky Toolkit: loader restarted (${h.name} ${h.version}).`);
+      });
+    } finally {
+      await afterDeviceChange();
+    }
+  });
+  command('decky-toolkit.updateToolkit', async () => {
+    const client = await c.client();
+    if (!client) return;
+    let st: UpdateStatus;
+    try {
+      st = await client.checkUpdate();
+    } catch (e) {
+      if (isMissingRoute(e)) {
+        throw new Error('the Decky Toolkit plugin on the device cannot update itself yet. Install the current release once ' +
+          '(Decky → Developer → Install Plugin from URL).');
+      }
+      throw e;
+    }
+    if (st.error) throw new Error(st.error);
+    if (!st.available || !st.latest) {
+      void vscode.window.showInformationMessage(`Decky Toolkit ${st.current} on ${c.label} is up to date.`);
+      return;
+    }
+    const target = st.latest.version;
+    const warning = st.busy ? ` Note: ${st.busy}; the update restarts Decky Loader and interrupts it.` : '';
+    const choice = await vscode.window.showInformationMessage(
+      `Decky Toolkit ${target} is available on ${c.label} (installed: ${st.current}).${warning}`, 'Update now');
+    if (choice !== 'Update now') return;
+    try {
+      await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Updating Decky Toolkit to ${target}` }, async progress => {
+        await client.applyUpdate();
+        progress.report({ message: 'waiting for Decky Loader to come back…' });
+        const h = await client.waitForRestart();
+        void vscode.window.showInformationMessage(`Decky Toolkit: ${c.label} now runs ${h.version}.`);
       });
     } finally {
       await afterDeviceChange();

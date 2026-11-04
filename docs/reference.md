@@ -197,6 +197,20 @@ curl -X POST -H "Content-Type: application/json" -d '{"client_name":"my script",
 curl "http://<deck-ip>:8765/pair/request/<id>?wait=25"   # {status: "approved", token, ...} once
 ```
 
+## Updates
+
+The plugin updates itself. It reads `https://jackhric.github.io/decky-toolkit/update.json` (version, sha256,
+size and download URL of the latest release, published by the Pages workflow) 30 s after it starts and every
+6 h. **Update automatically** is on by default: a newer release is downloaded, verified and installed with a
+loader restart as soon as no screen or audio stream is live, so an open viewer or a VS Code session is not cut
+off. The panel shows the installed version, **Check for updates** or **Update to X**, and the toggle under
+**Advanced**; when automatic updates are off, a toast announces a new version instead. The same actions are
+`check_toolkit_update`, `apply_toolkit_update` and `set_toolkit_auto_update` over MCP, `/update/...` over
+HTTP (see [api.md](api.md)) and **Decky: Update Decky Toolkit on device** in the extension.
+
+Developers deploying this repo to a device should turn automatic updates off there, or the next release
+replaces the development build.
+
 ## How it works
 
 - `main.py` is the Decky backend. It loads settings, then starts an `aiohttp` server from inside the
@@ -208,8 +222,10 @@ curl "http://<deck-ip>:8765/pair/request/<id>?wait=25"   # {status: "approved", 
 - `py_modules/decky_toolkit/cdp.py` is a tiny Chrome DevTools Protocol client used to talk to Steam's
   CEF debugger. The plugin deliberately does **not** connect to the loader's own websocket on port
   1337: the loader keeps a single client and would kick the Steam UI off.
+- `py_modules/decky_toolkit/update.py` is the self-updater: manifest check, download with size and sha256
+  verification, and the periodic task that applies updates while the device is idle.
 - `src/index.tsx` is the Quick Access panel. It only mirrors state: the endpoint, pairing requests to
-  approve or deny, the stream and input status, a server restart and token regeneration.
+  approve or deny, the stream and input status, updates, a server restart and token regeneration.
 
 The plugin runs with the `root` flag so it can restart the loader, read every plugin's logs and write
 anywhere. The `debug` flag makes the loader hot-reload the plugin when its files change, which is how

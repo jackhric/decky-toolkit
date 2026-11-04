@@ -89,6 +89,7 @@ export class ActionsTreeProvider implements vscode.TreeDataProvider<ActionNode>,
         leaf('restartLoader', 'Restart loader', 'debug-restart', 'decky-toolkit.restartLoader'),
         leaf('loaderLogs', 'Show loader logs', 'output', 'decky-toolkit.loaderLogs'),
         leaf('installZip', 'Install plugin zip…', 'file-zip', 'decky-toolkit.installZip'),
+        leaf('updateToolkit', 'Update Decky Toolkit on device', 'cloud-download', 'decky-toolkit.updateToolkit'),
       ]),
       group('steam', 'Steam', 'game', false, [
         leaf('navigate', 'Navigate to…', 'compass', 'decky-toolkit.navigate'),

@@ -23,6 +23,7 @@ type Status = {
   pair_requests: number;
   stream: { running: boolean; fps: number; subscribers: number; available: boolean; error: string | null } | null;
   input: InputSettings | null;
+  update: UpdateStatus | null;
   error: string | null;
 };
 
@@ -38,6 +39,18 @@ type PairRequest = {
 
 type InputSettings = { enabled: boolean; backend: "ei" | "uinput" | null; available: boolean; reason: string | null };
 
+type UpdateStatus = {
+  current: string;
+  latest: { version: string; url: string; size: number; published_at: string | null } | null;
+  available: boolean;
+  auto_update: boolean;
+  checked_at: string | null;
+  checking: boolean;
+  applying: string | null;
+  busy: string | null;
+  error: string | null;
+};
+
 const getStatus = callable<[], Status>("get_status");
 const setEnabled = callable<[enabled: boolean], Status>("set_enabled");
 const regenerateToken = callable<[], Status>("regenerate_token");
@@ -47,6 +60,18 @@ const approvePairRequest = callable<[id: string], PairRequest[]>("approve_pair_r
 const denyPairRequest = callable<[id: string], PairRequest[]>("deny_pair_request");
 const getInputSettings = callable<[], InputSettings>("get_input_settings");
 const setInputEnabled = callable<[enabled: boolean], InputSettings>("set_input_enabled");
+const checkForUpdate = callable<[], UpdateStatus>("check_for_update");
+const applyUpdate = callable<[], UpdateStatus>("apply_update");
+const setAutoUpdate = callable<[enabled: boolean], UpdateStatus>("set_auto_update");
+
+function updateSummary(u: UpdateStatus): string {
+  if (u.applying) return `Installing ${u.applying}… Decky Loader restarts in a moment`;
+  if (u.checking) return "Checking for updates…";
+  if (u.error) return u.error;
+  if (u.available && u.latest) return `${u.latest.version} is available${u.busy ? ` · waiting: ${u.busy}` : ""}`;
+  if (u.checked_at) return "Up to date";
+  return "Not checked yet";
+}
 
 function Content() {
   const [status, setStatus] = useState<Status | null>(null);
@@ -63,10 +88,14 @@ function Content() {
 
   useEffect(() => {
     const onInput = addEventListener<[enabled: boolean]>("decky_toolkit_input_state", () => refresh());
+    const onUpdate = addEventListener<[update: UpdateStatus]>("decky_toolkit_update", (update) =>
+      setStatus((s) => (s ? { ...s, update } : s)),
+    );
     const onRequest = addEventListener<[info: unknown]>("decky_toolkit_pair_request", () => refreshRequests());
     const onRequests = addEventListener<[list: PairRequest[]]>("decky_toolkit_pair_requests", (list) => setRequests(list));
     return () => {
       removeEventListener("decky_toolkit_input_state", onInput);
+      removeEventListener("decky_toolkit_update", onUpdate);
       removeEventListener("decky_toolkit_pair_request", onRequest);
       removeEventListener("decky_toolkit_pair_requests", onRequests);
     };
@@ -147,6 +176,19 @@ function Content() {
   }
 
   const serverState = status.error ?? (!status.enabled ? "disabled" : status.running ? "running" : "stopped");
+  const update = status.update;
+  const runUpdate = async (fn: () => Promise<UpdateStatus>, okMsg?: string) => {
+    setBusy(true);
+    try {
+      const u = await fn();
+      setStatus((s) => (s ? { ...s, update: u } : s));
+      if (okMsg) toaster.toast({ title: "Decky Toolkit", body: okMsg });
+    } catch (e) {
+      toaster.toast({ title: "Decky Toolkit error", body: String(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <>
@@ -157,6 +199,26 @@ function Content() {
         <PanelSectionRow>
           <Field label="Server" focusable>{serverState}</Field>
         </PanelSectionRow>
+        {update && (
+          <PanelSectionRow>
+            <Field label={`Version ${update.current}`} description={updateSummary(update)} focusable />
+          </PanelSectionRow>
+        )}
+        {update && (
+          <PanelSectionRow>
+            <ButtonItem
+              layout="below"
+              disabled={busy || update.checking || !!update.applying}
+              onClick={() =>
+                update.available
+                  ? runUpdate(applyUpdate, `Updating to ${update.latest?.version}…`)
+                  : runUpdate(checkForUpdate)
+              }
+            >
+              {update.available && update.latest ? `Update to ${update.latest.version}` : "Check for updates"}
+            </ButtonItem>
+          </PanelSectionRow>
+        )}
         <PanelSectionRow>
           <ButtonItem layout="below" onClick={() => setShowAdvanced((s) => !s)}>
             {showAdvanced ? "Hide advanced" : "Advanced"}
@@ -194,6 +256,17 @@ function Content() {
               }}
             />
           </PanelSectionRow>
+          {update && (
+            <PanelSectionRow>
+              <ToggleField
+                label="Update automatically"
+                description="Installs new releases when no screen or audio stream is live"
+                checked={update.auto_update}
+                disabled={busy}
+                onChange={(v) => runUpdate(() => setAutoUpdate(v), v ? "Automatic updates on" : "Automatic updates off")}
+              />
+            </PanelSectionRow>
+          )}
           <PanelSectionRow>
             <ButtonItem layout="below" disabled={busy} onClick={() => run(restartServer, "Server restarted")}>
               Restart server
@@ -231,6 +304,16 @@ export default definePlugin(() => {
   const inputSession = addEventListener<[remote: string]>("decky_toolkit_input_session", (remote) => {
     toaster.toast({ title: "Decky Toolkit", body: `Remote input from ${remote}` });
   });
+  let announced: string | null = null;
+  const update = addEventListener<[update: UpdateStatus]>("decky_toolkit_update", (u) => {
+    if (u.applying && announced !== `apply:${u.applying}`) {
+      announced = `apply:${u.applying}`;
+      toaster.toast({ title: "Decky Toolkit", body: `Updating to ${u.applying}. Decky Loader restarts in a moment.` });
+    } else if (u.available && u.latest && !u.applying && !u.auto_update && announced !== u.latest.version) {
+      announced = u.latest.version;
+      toaster.toast({ title: "Decky Toolkit", body: `Version ${u.latest.version} is available. Update from Quick Access → Decky Toolkit.` });
+    }
+  });
   return {
     name: "Decky Toolkit",
     content: <Content />,
@@ -239,6 +322,7 @@ export default definePlugin(() => {
       removeEventListener("decky_toolkit_paired", paired);
       removeEventListener("decky_toolkit_pair_request", pairRequest);
       removeEventListener("decky_toolkit_input_session", inputSession);
+      removeEventListener("decky_toolkit_update", update);
     },
   };
 });

@@ -20,6 +20,7 @@ from .protocol import SERVER_INFO, McpServer
 from .tools import plugins
 from .tools.system import list_plugins, schedule_loader_restart
 from .ui import UiNavigator
+from .update import Updater
 
 API_VERSION = 1
 LOG_KEEPALIVE_SECONDS = 15.0
@@ -38,7 +39,8 @@ class Api:
     def __init__(self, *, auth: TokenAuth, mcp: McpServer, capturer: ScreenCapturer | None, static_dir: str | None,
                  logger: logging.Logger, pairing: PairingRequests | None = None, base_url: BaseUrl | None = None, log_keepalive: float = LOG_KEEPALIVE_SECONDS,
                  input_service: InputService | None = None, audio: AudioCapturer | None = None,
-                 controllers: ControllerService | None = None, ui: UiNavigator | None = None):
+                 controllers: ControllerService | None = None, ui: UiNavigator | None = None,
+                 updater: Updater | None = None):
         self.auth = auth
         self.mcp = mcp
         self.capturer = capturer
@@ -51,6 +53,7 @@ class Api:
         self.audio = audio
         self.controllers = controllers
         self.ui = ui
+        self.updater = updater
 
     def build_app(self) -> web.Application:
         app = web.Application(client_max_size=64 * 1024 * 1024, middlewares=[self.auth.middleware()])
@@ -82,6 +85,10 @@ class Api:
             web.post("/plugins/install", self.handle_plugin_install),
             web.post("/plugins/{dir}/reload", self.handle_plugin_reload),
             web.post("/loader/restart", self.handle_loader_restart),
+            web.get("/update", self.handle_update),
+            web.post("/update/check", self.handle_update_check),
+            web.post("/update/apply", self.handle_update_apply),
+            web.put("/update/settings", self.handle_update_settings_put),
             web.get("/logs/tail", self.handle_logs_tail),
             web.get("/logs/stream", self.handle_logs_stream),
             *self.mcp.routes(),
@@ -509,6 +516,45 @@ class Api:
             return denied
         await schedule_loader_restart()
         return web.json_response({"restarting": True, "delay_s": 1})
+
+    # ---- self-update ----
+
+    def _updater(self) -> Updater:
+        if self.updater is None:
+            raise web.HTTPNotFound(text=json.dumps({"error": "self-update not available"}), content_type="application/json")
+        return self.updater
+
+    async def handle_update(self, _request: web.Request) -> web.Response:
+        return web.json_response(self._updater().status())
+
+    async def handle_update_check(self, request: web.Request) -> web.Response:
+        if denied := self._require_bearer(request):
+            return denied
+        return web.json_response(await self._updater().check())
+
+    async def handle_update_apply(self, request: web.Request) -> web.Response:
+        if denied := self._require_bearer(request):
+            return denied
+        try:
+            return web.json_response(await self._updater().apply())
+        except ValueError as e:
+            return _error(409, str(e))
+        except Exception as e:  # noqa: BLE001 - download/install failures are reported, not raised
+            return _error(502, str(e))
+
+    async def handle_update_settings_put(self, request: web.Request) -> web.Response:
+        if denied := self._require_bearer(request):
+            return denied
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            return _error(400, "body must be JSON")
+        if not isinstance(body, dict) or "auto_update" not in body:
+            return _error(400, "body must be an object with 'auto_update'")
+        try:
+            return web.json_response(await self._updater().set_auto_update(body["auto_update"]))
+        except ValueError as e:
+            return _error(400, str(e))
 
     # ---- logs ----
 

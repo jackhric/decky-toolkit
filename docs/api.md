@@ -173,6 +173,24 @@ request: approval needs someone at the device.
 | `POST /plugins/{dir}/reload` | bearer | live | Re-import one plugin via Decky (`loader/reload_plugin`, called through `window.DeckyBackend` in SharedJSContext) without restarting the loader: the loader stops and restarts its backend, logs `Loaded <name> (v<version>)` and tells the frontend to import `dist/index.js` again (cache-busted), so both halves update (verified 2026-11-04, with and without the `debug` flag). `{dir, name, scheduled}`; reloading Decky Toolkit itself is deferred 1 s (`scheduled: true`). `404` if the dir has no `plugin.json`, `502` if the Steam UI is unreachable. |
 | `POST /loader/restart` | bearer | live | Same as the `restart_loader` tool. `{restarting: true, delay_s: 1}`. |
 
+## Self-update
+
+The plugin keeps itself current from the release manifest at
+`https://jackhric.github.io/decky-toolkit/update.json`
+(`{plugin: {version, sha256, size, url, published_at}}`, written by the Pages workflow from the latest
+published `plugin-v*` release). A check runs 30 s after the backend starts and every 6 h; with
+`auto_update` on (the default) a newer release is downloaded, verified and installed with a loader restart as
+soon as no screen or audio stream has a subscriber (a busy device is re-checked every 10 min). Status object:
+`{current, latest: {version, url, size, published_at} | null, available, auto_update, checked_at, checking,
+applying: version | null, busy: reason | null, error}`.
+
+| Route | Auth | Status | Notes |
+| --- | --- | --- | --- |
+| `GET /update` | bearer/cookie | live | The status object; `latest` is `null` until the first check. `404` on a build without self-update. |
+| `POST /update/check` | bearer | live | Fetches the manifest now and returns the status. A failed fetch sets `error` and keeps the last good `latest`. |
+| `POST /update/apply` | bearer | live | Downloads `latest.url`, checks `size` and `sha256`, installs it like `POST /plugins/install?restart=loader` (the loader restarts 1 s after the reply) and returns the status with `applying` set. `409` when already up to date, or while another apply runs; `502` when the download or install fails. Runs a check first if none happened in the last 6 h. |
+| `PUT /update/settings` | bearer | live | Body `{auto_update: bool}`; returns the status. Turning it on applies an available update right away if the device is idle. |
+
 ## Logs
 
 | Route | Auth | Status | Notes |
@@ -193,7 +211,8 @@ request: approval needs someone at the device.
 `sequence`, `pad`: a virtual pad id, default the implicit `auto` pad). Every input tool takes `capture: true` to append a fresh screen frame, and refuses with
 an error while input is disabled. `list_controllers`, `add_virtual_controller` (`name`),
 `remove_virtual_controller` (`id`): as `/controllers`. `ui_routes`, `ui_navigate` (`path` or `action` plus
-`tab`/`plugin`/`appid`, and `capture: true` for a frame 0.7 s later): as `/ui/...`.
+`tab`/`plugin`/`appid`, and `capture: true` for a frame 0.7 s later): as `/ui/...`. `check_toolkit_update`,
+`apply_toolkit_update`, `set_toolkit_auto_update` (`enabled`): as `/update/...`.
 
 ## Events (backend → Decky frontend)
 
@@ -203,6 +222,7 @@ an error while input is disabled. `list_controllers`, `add_virtual_controller` (
 | `decky_toolkit_pair_requests` | the `list_pair_requests` list | requests were filed, decided, cancelled or expired; the panel refreshes |
 | `decky_toolkit_paired` | `remote_ip: string, client_name: string` | a pairing request was allowed on the device |
 | `decky_toolkit_input_session` | `remote_ip: string` | a client started sending input (`"MCP client"` for tool calls); the panel shows a toast |
+| `decky_toolkit_update` | the `/update` status object | Update state changed: a check started or finished, an apply started or failed, or `auto_update` changed. The panel mirrors it and toasts a newly available version (when `auto_update` is off) or an install in progress. |
 
 ## Errors
 

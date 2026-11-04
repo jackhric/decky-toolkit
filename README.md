@@ -78,6 +78,8 @@ Decky warns about third-party plugins (**Continue** unlocks after a few seconds)
 confirm the install.
 
 Open Quick Access (…) → **Decky Toolkit** on the device. The panel shows the device's IP address.
+From here on the plugin updates itself: it checks for new releases and installs them while nothing is
+streaming. The panel has **Check for updates**, and **Update automatically** under **Advanced**.
 
 ### 3. Pair your editor with the device
 

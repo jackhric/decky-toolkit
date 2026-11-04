@@ -11,6 +11,7 @@ from ..input.service import InputDisabled, InputService, InputUnavailable
 if TYPE_CHECKING:
     from ..controllers import ControllerService
     from ..ui import UiNavigator
+    from ..update import Updater
 
 ToolFn = Callable[..., Awaitable[Any]]
 # Exceptions that are expected, user-facing failures: reported without a traceback.
@@ -74,8 +75,9 @@ def error_result(text: str) -> dict[str, Any]:
 
 
 def build_registry(capturer: ScreenCapturer | None = None, input_service: InputService | None = None,
-                   controllers: "ControllerService | None" = None, navigator: "UiNavigator | None" = None) -> ToolRegistry:
-    from . import cef, controllers as controller_tools, input, plugins, screen, system, ui
+                   controllers: "ControllerService | None" = None, navigator: "UiNavigator | None" = None,
+                   updater: "Updater | None" = None) -> ToolRegistry:
+    from . import cef, controllers as controller_tools, input, plugins, screen, system, ui, update
 
     if controllers is None and input_service is not None:
         from ..controllers import ControllerService
@@ -89,4 +91,5 @@ def build_registry(capturer: ScreenCapturer | None = None, input_service: InputS
     input.register(reg, input_service, capturer)
     controller_tools.register(reg, controllers)
     ui.register(reg, navigator, capturer)
+    update.register(reg, updater)
     return reg

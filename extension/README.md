@@ -85,7 +85,8 @@ you expand or collapse.
     asks if there are several). Without one the group says *no plugin.json in workspace*, the
     actions show *needs a plugin folder*, and clicking one tells you to open your plugin folder.
 - **Loader**
-  - **Restart loader**, **Show loader logs**, **Install plugin zip…** (pick any `.zip`).
+  - **Restart loader**, **Show loader logs**, **Install plugin zip…** (pick any `.zip`), **Update Decky
+    Toolkit on device** (checks the published release and offers to install it; the loader restarts).
 - **Steam**
   - **Navigate to…**: a picker built from `GET /ui/routes` with the current page as its
     placeholder. Sections **Official** (Library, Settings, …; the current page is marked),
@@ -318,6 +319,7 @@ All of these are also in the command palette under the `Decky:` category.
 | Decky: Steam UI: Back / Quick Access / Close menus | `POST /ui/navigate` with `back`, `quick_access` or `close_menus` |
 | Decky: Install plugin zip… | Uploads a plugin zip from disk to `/plugins/install?restart=loader` |
 | Decky: Restart loader | `POST /loader/restart` (falls back to the `restart_loader` tool) |
+| Decky: Update Decky Toolkit on device | `POST /update/check`, then `POST /update/apply` on confirmation and waits for the loader to come back |
 | Decky: Reload plugin | `POST /plugins/{dir}/reload` for one plugin backend |
 | Decky: Show loader logs | Streams `journalctl -u plugin_loader` via `/logs/stream` |
 | Decky: Show plugin logs | Streams a plugin's log from `~/homebrew/logs/<dir>/` |

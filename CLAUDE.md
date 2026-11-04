@@ -208,6 +208,17 @@ See README.md for setup and docs/reference.md for the tool list and architecture
   Opening a plugin panel = `DeckyPluginLoader.deckyState.setActivePlugin(name)` (decky-loader
   `frontend/src/components/DeckyState.tsx`) then `OpenQuickAccessMenu(999)`.
 
+## Self-update
+`update.py` reads `https://jackhric.github.io/decky-toolkit/update.json` (written by `pages.yml` from the latest
+published `plugin-v*` release: version, sha256, size, release asset URL) 30 s after start and every 6 h, and
+with `auto_update` (default on) installs a newer release through `tools.plugins.install(..., "loader")` once no
+screen/audio subscriber is attached (busy: retry every 10 min). Surfaces: panel (version row, check/update
+button, toggle under Advanced), `/update`, `/update/check`, `/update/apply`, `PUT /update/settings`, tools
+`check_toolkit_update`/`apply_toolkit_update`/`set_toolkit_auto_update`, extension command
+`decky-toolkit.updateToolkit`, event `decky_toolkit_update`. `SERVER_INFO.version` (`/health`) comes from
+`DECKY_PLUGIN_VERSION`, which the loader sets from `package.json`. A dev device with a from-source deploy should
+have auto-update off or the next release overwrites it.
+
 ## Pairing
 A client files `POST /pair/request` and long-polls `GET /pair/request/{id}?wait=25`; the device owner
 approves or denies it in the panel, which shows only an "Approve pairing request?" prompt while one is
