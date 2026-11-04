@@ -21,6 +21,8 @@ See README.md for setup and docs/reference.md for the tool list and architecture
   a device is done with the extension itself (it detects the root `plugin.json`); there are no ssh scripts.
 - `scripts/install-gif/record.sh` — re-records `docs/images/install/vscode-install.gif` (official VS Code under
   Xvfb driven by Playwright, installing the published extension); needs node, xvfb-run, ffmpeg.
+- `scripts/og-image/capture.sh` — re-captures `site/public/og.jpg` (the link-preview card) from the built homepage
+  hero at 1200x630; re-run after changing the hero.
 - `site/` — landing page and docs (Astro, base `/decky-toolkit`), deployed by `.github/workflows/pages.yml` next to
   `decky-toolkit.zip` and `update.json`. Colours only come from `site/src/styles/theme.css`; UI primitives are
   Starwind UI (`src/components/starwind`, Tailwind v4 without preflight); docs are Starlight pages in
