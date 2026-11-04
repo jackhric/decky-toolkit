@@ -48,6 +48,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
+        with:
+          cache-dependency-glob: scripts/test.sh
       - run: ./scripts/test.sh
 
   extension:
@@ -69,6 +71,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run typecheck
       - run: pnpm run build
+      # The smoke test's failing-build fixture prints a tsc error; without this it shows up as a red annotation.
+      - run: echo "::remove-matcher owner=tsc::"
       - run: pnpm run smoke
       - run: pnpm run package
       - uses: actions/upload-artifact@v7
