@@ -41,10 +41,10 @@ IP, and the window closes after 120 s or when you press **Stop pairing**. Altern
 `/viewer?token=<token>` once; the token moves into the same cookie. Either way the page shows the full display at 30 fps (1080p, roughly 50 Mbit/s at the default JPEG
 quality 70) with fps, bitrate and resolution readouts, pause, fit/actual size, snapshot and
 fullscreen. The **⚙ Stream** button opens frame rate (15/24/30/60 fps), JPEG quality and size
-(native, 1600, 1280, 960, 640 px wide) controls; a change applies within a fraction of a second
-without dropping the connection. Other endpoints, all behind the same token: `/stream.mjpeg`
-(multipart MJPEG), `/frame.jpg` (one current frame), `/stream/stats` (JSON) and `/stream/settings`
-(`GET`/`PUT` JSON).
+(native, 1600, 1280, 960, 640 px wide) controls and the device-wide audio switch; a change applies
+within a fraction of a second without dropping the connection. Sound is on by default (see Audio). Other endpoints, all behind the same token: `/stream.mjpeg`
+(multipart MJPEG), `/frame.jpg` (one current frame), `/stream/stats` (JSON), `/stream/settings`
+(`GET`/`PUT` JSON) and `/audio` (PCM over WebSocket).
 
 Stream settings are device-wide; the last change wins. There is one capture pipeline, and every
 viewer, MCP tool call and editor panel shares it, so changing the frame rate in one browser changes
@@ -64,6 +64,27 @@ at 1080p, JPEG quality 70, with a changing screen: 60 fps costs about 33-40 % of
 30-100 Mbit/s depending on content; 30 fps about 23 % and up to ~50 Mbit/s. On Wi-Fi, lower the
 width or quality.
 
+## Audio
+
+The stream has sound. It is **on by default**: the viewer (and the editor panel) plays what the
+Deck is playing, taken from the default audio output's monitor. Audio goes as raw 16-bit 48 kHz
+stereo PCM over a WebSocket (`/audio`), about 1.5 Mbit/s, which is small next to the video. The
+capture costs well under 1 % of one CPU core (`gst-launch-1.0 pipewiresrc ! audioconvert`) and only
+runs while someone listens.
+
+- **🔊 / 🔇** in the toolbar mutes this browser only; the slider next to it sets the local volume.
+  The Deck itself keeps playing, and other viewers are not affected. Mute and volume are
+  remembered per browser.
+- Browsers start sound only after a user action, so the toolbar says *Click anywhere to enable
+  audio* until you click or press a key on the page.
+- **Audio** in the **⚙ Stream** popover turns the audio stream on or off for every client
+  (device-wide, stored as `audio_enabled` in `settings.json`; also `PUT /stream/settings` with
+  `{"audio": false}` or the `set_stream_settings` tool). Turning it off closes every audio socket.
+- Playback keeps about 120 ms of sound buffered and drops back to that when it falls more than
+  300 ms behind, so sound and picture stay together. Over plain `http://` on the LAN the browser has
+  no AudioWorklet (it needs a secure context), so the viewer schedules short audio buffers instead,
+  with the same buffer budget.
+
 ## Remote input
 
 The viewer and MCP clients can drive the Deck with keyboard, mouse and gamepad input. It is **off
@@ -73,12 +94,10 @@ is stored in `settings.json` and applies to every client.
 
 In the viewer, with input on:
 
-- **UI mode**: click the picture to capture the keyboard (a blue outline shows it). Mouse moves,
-  clicks and the wheel land on the matching spot of the Deck screen, and keys are sent by physical
-  position (`KeyboardEvent.code`). Clicking the toolbar, switching tabs or leaving the window
-  releases every held key.
-- **Game mode**: clicking the picture locks the pointer and sends relative mouse motion, for games
-  that use mouse look. Esc releases the pointer.
+- **Mouse and keyboard**: click the picture to capture the keyboard (a blue outline shows it).
+  Mouse moves, clicks and the wheel land on the matching spot of the Deck screen, and keys are sent
+  by physical position (`KeyboardEvent.code`). Clicking the toolbar, switching tabs or leaving the
+  window releases every held key.
 - **Gamepad**: a controller plugged into the viewer machine is forwarded about 60 times a second
   while the page has focus ("🎮 connected" in the toolbar). It shows up on the Deck as an Xbox 360
   pad, and the pad is removed 60 s after the last input.
