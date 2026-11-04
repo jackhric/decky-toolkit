@@ -8,6 +8,15 @@
   let winFrames = [], winBytes = 0;
 
   const show = t => { msg.textContent = t; msg.hidden = !t; };
+  // A healthy stream never goes quiet (the device resends the last frame); silence means the device is
+  // restarting its capture, e.g. after a game starts or quits. The connection stays open meanwhile.
+  let stallTimer = null, stalled = false;
+  function armStall() {
+    clearTimeout(stallTimer);
+    if (stalled) { stalled = false; show(''); }
+    stallTimer = setTimeout(() => { stalled = true; show('No frames from the device. Stream restarting…'); }, 2500);
+  }
+  function disarmStall() { clearTimeout(stallTimer); stalled = false; }
 
   function stats(bytes) {
     const now = performance.now();
@@ -35,7 +44,7 @@
       const res = await fetch(base + '/stream.mjpeg', { signal: abort.signal, cache: 'no-store' });
       if (res.status === 401) { show('Unauthorized: the stored token was rejected.\nRe-pair the device from the Devices view (… → Re-pair) or run "Decky: Enter token manually".'); return; }
       if (!res.ok || !res.body) throw new Error('HTTP ' + res.status + ' ' + (await res.text()).slice(0, 300));
-      show(''); dot.classList.add('live');
+      show(''); dot.classList.add('live'); armStall();
       const reader = res.body.getReader();
       let buf = new Uint8Array(0);
       const dec = new TextDecoder();
@@ -56,20 +65,22 @@
           if (buf.length < start + len) break;
           const frame = buf.slice(start, start + len);
           buf = buf.subarray(start + len);
-          stats(len);
+          stats(len); armStall();
           if (applying === 'sent') doneApplying('');
           if (!paused) present(frame);
         }
       }
+      disarmStall();
       show(applying ? 'Applying stream settings…' : 'Stream ended. Reconnecting…');
     } catch (e) {
+      disarmStall();
       if (e.name !== 'AbortError') show(applying ? 'Applying stream settings…' : 'Disconnected: ' + e.message + '\nReconnecting…');
     }
     dot.classList.remove('live');
     if (my === gen && visible && !abort.signal.aborted) retry = setTimeout(run, 2000);
   }
 
-  function stop() { gen++; clearTimeout(retry); if (abort) abort.abort(); dot.classList.remove('live'); }
+  function stop() { gen++; clearTimeout(retry); disarmStall(); if (abort) abort.abort(); dot.classList.remove('live'); }
 
   window.addEventListener('message', e => {
     const m = e.data;

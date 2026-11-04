@@ -97,6 +97,41 @@ See README.md for the tool list and architecture.
   with PipeWire always on, libturbojpeg.so.0, libjpeg.so.8 (not .62), libva.so.2, libx264.so.164.
   No GStreamer VA/x264 encoders. `holo-base` Docker image lacks all of these and is not a proxy.
 
+## Games, Steam Game Recording and the shared gamescope stream (verified 2026-11-04)
+- gamescope has **one** PipeWire stream; every consumer shares its port format. Steam's background Game
+  Recording (`CDesktopCapturePipeWire` in `~/.local/share/Steam/logs/streaming_log.txt`, recordings
+  `bg_<appid>_...`) links to it as node `steam` when a game starts and unlinks when it quits. Its format
+  carries gamescope's custom keys 0x70000 `requested_size` (Steam asks 3840x2160) and 0x70001
+  `focus_appid` (`pw-dump`: `id-00070000`/`id-00070001`; `/stream/stats` `node.focus_appid`).
+- `paint_pipewire` (gamescope `src/steamcompmgr.cpp`) composites its own layer set, independent of
+  scanout/`composite_force`: with `focus_appid` 0 it paints the current focus plus the Steam overlay
+  window; with a nonzero appid it paints only that app's windows (`!ulFocusAppId && overlayWindow`), and
+  nothing at all if no window of that app exists (`bAppIdMatches`).
+- A consumer joining an already-negotiated port inherits its format: if our pipeline is running first,
+  Steam's recorder gets appid 0 and the Guide/QAM overlay shows in our stream during games (verified:
+  main menu visible over VVVVVV). But Steam calls `pw_stream_update_params` ("updating capture appid: N")
+  when the game it records differs from its previous capture appid (e.g. a different game than last
+  time); that renegotiates the port for everyone: gamescope logs "Exposing appid N focus-wise on pipewire
+  stream", our stream shows only the game (no overlay; verified with Castle Crashers), and our
+  `pipewiresrc` often wedges: gst-launch stays alive, emits nothing (keepalive too), and gamescope logs
+  `pipewire: warning: out of buffers` ~60/s. Old code: a 56 s freeze (ended only when another consumer
+  left), and a fresh second consumer got zero buffers meanwhile.
+- When the game quits, Steam unlinks but the port keeps `focus_appid` = the dead game, so gamescope paints
+  nothing and the stream froze indefinitely (old code, VVVVVV). Reconnecting with no other consumer
+  linked renegotiates from scratch with appid 0.
+- Fix: `ScreenCapturer._watchdog` treats 1.5 s without a frame (4 s before the first) as wedged and
+  restarts the pipeline with SIGINT and backoff 0.25/1/2/5/10 s, keeping subscribers attached; an
+  unexpected exit restarts the same way. Measured: game quit -> 1.9 s gap, then frames with appid 0;
+  launch with renegotiation -> 8 s + 3.7 s gaps (3 restarts) while gamescope had no window for the new
+  appid yet, later 1.9 s; launches without renegotiation -> no gap. No gamescope coredumps.
+- Not fixable from our side: while Steam's recorder holds a nonzero appid the overlay is not in the
+  stream (`gst-launch` cannot set gamescope's custom format keys). Mitigation: set Steam Game Recording
+  to off or "record manually" so no consumer sets a focus appid.
+- Launching a game while the account plays elsewhere opens a "Launching X here will disconnect the other
+  session" dialog with Continue focused; cancel it (`SteamClient.Apps.CancelGameAction(id)` plus the
+  dialog's Cancel button in "Steam Big Picture Mode"), never press A.
+- Audio is unaffected by game launch/quit (`/audio/stats` chunks continuous, same default sink).
+
 ## Audio streaming facts (verified 2026-11-04)
 - Sinks: only `alsa_output.pci-0000_01_00.1.hdmi-surround` (5.1 HDMI, DENON-AVR), which is
   `default.audio.sink`; no `gamescope` Audio/Sink existed at the time (`audio.py` falls back to
