@@ -229,6 +229,8 @@ SharedJSContext via the `cef_evaluate` tool.
   `extension-vX.Y.Z`. Merging the release PR creates draft releases plus tags; `release.yml` checks the tag
   against package.json, runs CI, attaches the zip / `.vsix`, publishes the draft, and publishes extension
   releases to Open VSX by trusted publishing (OIDC, environment `openvsx`, no token secret).
+- Every third-party action is pinned to a full commit SHA with a `# vX.Y.Z` comment; Dependabot bumps them.
+  Keep it that way. The release-please App key lives in the `release` environment (main only).
 
 ## Conventions
 - Every setting is configurable remotely (approving a pairing request is not a setting): through an MCP tool, the HTTP API (for the extension) and

@@ -48,7 +48,9 @@ I've found that working on a Decky plugin with no additional tooling provides a 
 - On your computer: VS Code 1.90+ (or VSCodium).
 
 Both pieces are published on the [Releases](https://github.com/jackhric/decky-toolkit/releases)
-page: `plugin-v…` releases carry the plugin zip, `extension-v…` releases the `.vsix`.
+page: `plugin-v…` releases carry the plugin zip, `extension-v…` releases the `.vsix`. Both are built
+by this repo's CI and signed with build provenance, so you can check a download with
+`gh attestation verify <file> -R jackhric/decky-toolkit`.
 
 ### 1. Install the plugin on the device
 
