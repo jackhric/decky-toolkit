@@ -17,7 +17,7 @@ See README.md for the tool list and architecture.
   element queries; tools in `tools/ui.py`), `console.py` (background Steam UI console capture; tools in
   `tools/cef.py`), `audit.py` (request origin context variable, audit middleware), `tools/guard.py`
   (sensitive-path deny list), `tools/plugin_api.py` (plugin backend methods, calls, frontend call check), `apps.py` (Steam library/launch via the client JS; tools in `tools/apps.py`), `games.py`
-  (game/prefix/save paths, `fs_*` file browser with its sensitive-path and delete guards, Proton logs; `vdf.py`
+  (game/prefix/save paths, `fs_*` file browser with its sensitive-path and delete guards, `fs_read`/`fs_write`/`fs_mkdir`/`fs_rename` behind `writable` for the `/fs/*` routes, Proton logs; `vdf.py`
   parses KeyValues; tools in `tools/games.py`), `record.py` (screen recording to MKV; tools in `tools/record.py`),
   `tools/perf.py` (Steam performance overlay).
 - `src/index.tsx` — Quick Access panel (React, `@decky/ui`, `@decky/api`). Built by `pnpm run build`

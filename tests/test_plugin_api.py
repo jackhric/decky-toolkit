@@ -100,3 +100,17 @@ def test_call_plugin_method(monkeypatch):
         out = call("call_plugin_method", **{"plugin": "Decky-MCP", **kwargs})
         assert out["isError"] and out["content"][0]["text"].startswith("ValueError")
     assert len(seen) == 2
+
+
+def test_call_plugin_method_redacts_token(monkeypatch):
+    status = {"enabled": True, "token": "secret", "url": "http://h:8765/mcp", "viewer_url": "http://h:8765/viewer?token=secret",
+              "nested": [{"token": "x", "keep": 1}]}
+
+    async def fake_eval(title, js, timeout=15):
+        return {"ok": True, "result": status}
+
+    monkeypatch.setattr(cdp, "evaluate_in", fake_eval)
+    res = asyncio.run(plugin_api.call_plugin_method("Decky-MCP", "get_status"))
+    assert res["result"] == {"enabled": True, "url": "http://h:8765/mcp", "nested": [{"keep": 1}]}
+    assert "secret" not in json.dumps(res)
+    assert plugin_api.redact_secrets({"viewer_url": "http://h/viewer"}) == {"viewer_url": "http://h/viewer"}

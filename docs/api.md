@@ -155,6 +155,24 @@ Errors: `400` bad argument, `403` sensitive path, `404` unknown app/path, `502` 
 | `GET /apps/{appid}/dirs` | bearer/cookie | live | `game_dirs`: `{appid, name, developer, platform: proton\|native, compat_tool, steam_root, library, libraries, install_dir, manifest, compatdata, prefix, prefix_user_dirs: {appdata_roaming, appdata_local, appdata_locallow, documents, saved_games}, account_id, userdata, cloud_remote, remotecache, shader_cache, xdg, match_keys}`. Each dir is `{path, exists, mtime?}`; prefix user dirs add `matches` (subdirs named after the game or developer, two levels deep for Company/Product); `xdg` (native titles only) lists matching entries of `~/.local/share`, `~/.config`, `~/.config/unity3d` and `~`. |
 | `GET /apps/{appid}/saves` | bearer/cookie | live | `game_saves`: `{appid, name, steam_cloud: [{name, root, size, time, local_path, candidates}], candidates: [{path, size, mtime, found_by, rank, score}], notes}`. Rank 0: files in Steam Cloud's `remotecache.vdf` mapped to local paths by their root (0 userdata remote, 2 Documents, 3 AppData/Local, ...; native titles also try the XDG dirs) and the cloud `remote/` dir; 1: files next to a `steam_autocloud.vdf` marker; 2: save-like files under dirs named after the game; 3: save-like names in the install dir. |
 | `GET /fs` | bearer/cookie | live | `fs_list`. Query: `path` (absolute or `~/...`), `depth` 1-5 (default 1), `glob` (on the name, or on the relative path if it has a `/`). `{path, depth, glob, entries: [{path, type: file\|dir\|symlink\|other, size, mtime, target?, sensitive?}], count, truncated}`, at most 2000 entries. Sensitive files (Steam `config/loginusers.vdf`, `config/config.vdf`, `ssfn*`) are flagged in listings and refused (`403`) as the path itself, also through symlinks. |
+| `GET /fs/read` | bearer | live | Query `path`. The file's bytes, `Content-Type: application/octet-stream`. Up to 64 MiB (`413`, code `EFBIG`, above). `403` for sensitive files, `404` missing, `409` `EISDIR` for a directory, `400` for a non-regular file. |
+| `PUT /fs/write` | bearer | live | Query `path`, `create=1` (default; `0`: `404` if missing), `overwrite=1` (default; `0`: `409` `EEXIST` if present); body: the raw bytes (at most 64 MiB). Writes a temp file next to the target and renames it over; an existing file keeps its mode and owner, a new file is `0644` and, like any parent dirs it creates, owned by its parent dir's owner (the server runs as root, the game must still write its saves). `{path, bytes, created}`. Only inside the [write roots](#file-writes); `403` elsewhere and for `tools/guard` write-protected files. |
+| `POST /fs/mkdir` | bearer | live | JSON `{path, parents?}` (or query `path`, `parents=1`). `409` `EEXIST` if it exists, `404` if the parent is missing without `parents`. Write roots apply. `{path, created}`. |
+| `POST /fs/rename` | bearer | live | JSON `{from, to, overwrite?}`. Both paths must be inside the write roots (a symlink is moved, not its target); `409` `EEXIST` unless `overwrite`, `404` if `from` or the parent of `to` is missing; refuses a directory holding sensitive files. `{from, to}`. |
+| `DELETE /fs` | bearer | live | Query `path`, `confirm=1` required (`400` without). Same rules as the `fs_delete` tool (game dir contents, compatdata/shadercache entries, `userdata/<account>/<appid>`, the plugin runtime dir); elsewhere `403`. `{deleted, files, bytes}`. |
+
+`/fs/*` errors are `{"error", "code"}` with `code` one of `ENOENT` (404), `EACCES` (403), `EEXIST`, `EISDIR`, `ENOTDIR`
+(409), `EFBIG` (413). These routes refuse the viewer cookie (`401`) and are audit-logged like every `POST`/`PUT`/`DELETE`.
+
+### File writes
+
+The server runs as root, so writes are limited to (`games.write_roots` / `games.writable`, resolved through symlinks):
+inside `steamapps/common/<game>/` of any library, inside a Proton prefix `steamapps/compatdata/<appid>/`, inside
+`userdata/<account>/<appid>/`, the plugin runtime dir (`~/homebrew/data/decky-mcp`), and `~/.local/share/<dir>/...`,
+`~/.config/<dir>/...` (`~/.config/unity3d/<company>/<product>/...`) where `<dir>` matches an installed title's name or
+install dir as `game_dirs` matches them (not Steam's own dir or desktop config such as `systemd`, `autostart`, `fish`).
+The entries themselves (a game dir, a prefix, a `~/.local/share/<Game>` dir) cannot be replaced. Everything in
+`tools/guard.py` (`is_write_protected`) is refused everywhere.
 
 ## Recordings
 
@@ -267,7 +285,7 @@ MCP tools only.
 | Tool | Notes |
 | --- | --- |
 | `plugin_methods(dir)` | Parses (does not import) `<dir>/main.py` with `ast`: public `async def` methods of the top-level `class Plugin`. `{dir, file, methods: [{name, args: [{name, annotation?, default?}], doc, line}]}`; `*args`/`**kw` appear as `*name`/`**name`, `doc` is the first docstring line. |
-| `call_plugin_method(plugin, method, args=[], timeout=30)` | `plugin` is the `plugin.json` name (e.g. `Decky-MCP`). Runs `window.DeckyBackend.call('loader/call_plugin_method', plugin, method, ...args)` in SharedJSContext, i.e. exactly what the plugin's frontend `callable()` does, over the frontend's existing loader connection. `{ok: true, result}`, or `{ok: false, error, traceback}`: Decky rejects with a `PyError` whose message is empty and whose `pythonTraceback` ends in the exception line (e.g. `Exception: port must be 1024-65535`); an unknown method also fails this way. Methods starting with `_` (lifecycle hooks) are refused before anything is sent. |
+| `call_plugin_method(plugin, method, args=[], timeout=30)` | `plugin` is the `plugin.json` name (e.g. `Decky-MCP`). Keys named `token` (and `viewer_url` values carrying `token=`) are removed from `result` at any depth, so Decky-MCP's own `get_status` does not hand out the bearer token. Runs `window.DeckyBackend.call('loader/call_plugin_method', plugin, method, ...args)` in SharedJSContext, i.e. exactly what the plugin's frontend `callable()` does, over the frontend's existing loader connection. `{ok: true, result}`, or `{ok: false, error, traceback}`: Decky rejects with a `PyError` whose message is empty and whose `pythonTraceback` ends in the exception line (e.g. `Exception: port must be 1024-65535`); an unknown method also fails this way. Methods starting with `_` (lifecycle hooks) are refused before anything is sent. |
 | `plugin_frontend_check(dir)` | Scans `<dir>/src/**/*.ts(x)` when sources are installed, else `dist/index.js`, for `callable("x")` / `call("x", ...)` (also `callable$1` and TS generics), and compares with `plugin_methods`. `{source: "src"\|"dist", files_scanned, frontend_calls: {name: ["file:line"]}, backend_methods, missing_backend, unused_backend}`. `missing_backend` entries fail at runtime. |
 
 ## Security
@@ -294,6 +312,9 @@ MCP tools only.
   `POST`/`PUT`/`DELETE` REST request except `/mcp` logs `audit route=POST /plugins/install origin=<ip>
   via=http`. The origin comes from the `audit.request_origin` context variable, set per request by an
   app middleware (`via=mcp` for `/mcp`, `http` otherwise).
+- **Remote files.** `GET /fs/read`, `PUT /fs/write`, `POST /fs/mkdir`, `POST /fs/rename` and `DELETE /fs` need the
+  bearer token (never the viewer cookie), apply the sensitive-path guard, and write only inside the
+  [write roots](#file-writes); `DELETE /fs` needs `confirm=1`.
 - **Planned: per-token access levels.** Not implemented. A pairing could grant `observe` (screen, logs,
   console, routes, status), `standard` (plus input and navigation) or `full` (plus `cef_evaluate`,
   file writes, installs, plugin calls), checked in the tool registry and the REST routes, with the

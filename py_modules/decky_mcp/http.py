@@ -97,6 +97,11 @@ class Api:
             web.get("/apps/{appid}/dirs", self.handle_app_dirs),
             web.get("/apps/{appid}/saves", self.handle_app_saves),
             web.get("/fs", self.handle_fs),
+            web.delete("/fs", self.handle_fs_delete),
+            web.get("/fs/read", self.handle_fs_read),
+            web.put("/fs/write", self.handle_fs_write),
+            web.post("/fs/mkdir", self.handle_fs_mkdir),
+            web.post("/fs/rename", self.handle_fs_rename),
             web.get("/recordings", self.handle_recordings),
             web.get("/recordings/{name}", self.handle_recording_download),
             *self.mcp.routes(),
@@ -693,6 +698,131 @@ class Api:
         async def listing() -> dict:
             return await asyncio.to_thread(games.fs_list, path, depth, request.query.get("glob") or None)
         return await self._library_call(listing)
+
+    # Bearer-only: these read raw bytes or change files, so the viewer cookie never reaches them.
+    @staticmethod
+    def _fs_roots() -> tuple[list[tuple[str, int]], list[tuple[str, int]], list[str]]:
+        root = games.steam_root()
+        libs = games.library_folders(root)
+        runtime = os.environ.get("DECKY_PLUGIN_RUNTIME_DIR")
+        return games.write_roots(root, libs, runtime), games.delete_roots(root, libs, runtime), games.installed_name_keys(libs)
+
+    async def _fs_call(self, request: web.Request, fn) -> web.Response:
+        if denied := self._require_bearer(request):
+            return denied
+        try:
+            result = await asyncio.to_thread(fn)
+        except (games.SensitivePath, PermissionError) as e:
+            return web.json_response({"error": str(e), "code": "EACCES"}, status=403)
+        except FileExistsError as e:
+            return web.json_response({"error": str(e), "code": "EEXIST"}, status=409)
+        except IsADirectoryError as e:
+            return web.json_response({"error": str(e), "code": "EISDIR"}, status=409)
+        except NotADirectoryError as e:
+            return web.json_response({"error": str(e), "code": "ENOTDIR"}, status=409)
+        except FileNotFoundError as e:
+            return web.json_response({"error": str(e), "code": "ENOENT"}, status=404)
+        except games.TooLarge as e:
+            return web.json_response({"error": str(e), "code": "EFBIG"}, status=413)
+        except ValueError as e:
+            return _error(400, str(e))
+        except OSError as e:
+            return _error(500, str(e))
+        if isinstance(result, bytes):
+            return web.Response(body=result, content_type="application/octet-stream")
+        return web.json_response(result)
+
+    @staticmethod
+    def _flag(request: web.Request, name: str, default: bool) -> bool:
+        raw = request.query.get(name)
+        return default if raw is None else raw not in ("0", "false", "")
+
+    async def handle_fs_read(self, request: web.Request) -> web.Response:
+        if denied := self._require_bearer(request):
+            return denied
+        path = request.query.get("path")
+        if not path:
+            return _error(400, "path is required")
+        return await self._fs_call(request, lambda: games.fs_read(path))
+
+    async def handle_fs_write(self, request: web.Request) -> web.Response:
+        if denied := self._require_bearer(request):
+            return denied
+        path = request.query.get("path")
+        if not path:
+            return _error(400, "path is required")
+        data = await request.read()
+        create, overwrite = self._flag(request, "create", True), self._flag(request, "overwrite", True)
+
+        def write() -> dict:
+            roots, _, keys = self._fs_roots()
+            return games.fs_write(path, data, roots, keys, create=create, overwrite=overwrite)
+        return await self._fs_call(request, write)
+
+    async def _fs_body(self, request: web.Request) -> dict:
+        if not request.can_read_body:
+            return {}
+        try:
+            body = await request.json()
+        except (ValueError, UnicodeDecodeError):
+            raise ValueError("expected a JSON object")
+        if not isinstance(body, dict):
+            raise ValueError("expected a JSON object")
+        return body
+
+    async def handle_fs_mkdir(self, request: web.Request) -> web.Response:
+        if denied := self._require_bearer(request):
+            return denied
+        try:
+            body = await self._fs_body(request)
+        except ValueError as e:
+            return _error(400, str(e))
+        path = body.get("path") or request.query.get("path")
+        if not isinstance(path, str) or not path:
+            return _error(400, "path is required")
+        parents = body.get("parents") is True or self._flag(request, "parents", False)
+
+        def mkdir() -> dict:
+            roots, _, keys = self._fs_roots()
+            return games.fs_mkdir(path, roots, keys, parents=parents)
+        return await self._fs_call(request, mkdir)
+
+    async def handle_fs_rename(self, request: web.Request) -> web.Response:
+        if denied := self._require_bearer(request):
+            return denied
+        try:
+            body = await self._fs_body(request)
+        except ValueError as e:
+            return _error(400, str(e))
+        src, dst = body.get("from"), body.get("to")
+        if not isinstance(src, str) or not src or not isinstance(dst, str) or not dst:
+            return _error(400, "from and to are required")
+        overwrite = body.get("overwrite") is True
+
+        def rename() -> dict:
+            roots, _, keys = self._fs_roots()
+            return games.fs_rename(src, dst, roots, keys, overwrite=overwrite)
+        return await self._fs_call(request, rename)
+
+    async def handle_fs_delete(self, request: web.Request) -> web.Response:
+        if denied := self._require_bearer(request):
+            return denied
+        path = request.query.get("path")
+        if not path:
+            return _error(400, "path is required")
+        if request.query.get("confirm") != "1":
+            return _error(400, "deleting is destructive: add confirm=1")
+
+        def delete() -> dict:
+            _, roots, _ = self._fs_roots()
+            p = games.expand(path)
+            games.check_sensitive(p)
+            if os.path.lexists(p) and not games.deletable(p, roots):
+                raise games.OutsideRoots(f"refused: {p} is not inside a game dir (steamapps/common/<game>/...), a "
+                                         "compatdata or shadercache entry, userdata/<account>/<appid> or the plugin "
+                                         "runtime dir")
+            return games.fs_delete(p, True, roots)
+        return await self._fs_call(request, delete)
 
     async def handle_recordings(self, _request: web.Request) -> web.Response:
         if self.capturer is None:

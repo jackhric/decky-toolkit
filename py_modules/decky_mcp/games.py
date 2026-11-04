@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from typing import Any, Iterable
 
 from . import vdf
-from .tools.guard import is_sensitive
+from .tools.guard import check_write, is_sensitive
 
 STEAMID64_BASE = 76561197960265728
 MAX_LIST_ENTRIES = 2000
@@ -577,6 +577,215 @@ def fs_delete(path: str, confirm: bool, roots: list[tuple[str, int]], home: str 
         files, size = 1, os.lstat(path).st_size
         os.unlink(path)
     return {"deleted": path, "files": files, "bytes": size}
+
+
+# ---- remote filesystem (read / write / mkdir / rename) ----
+
+MAX_READ_BYTES = 64 * 1024 * 1024
+
+
+# Desktop/system config that a loose game-name match could hit (a game called "Fish", "Systemd"...).
+_NOT_GAME_XDG = {"systemd", "autostart", "fish", "git", "pulse", "pipewire", "wireplumber", "dconf", "flatpak", "applications",
+                 "keyrings", "mime", "environment.d", "containers", "gnupg", "nautilus", "dolphin", "konsole", "kwin",
+                 "plasma", "kde", "gtk-3.0", "gtk-4.0", "fontconfig", "fonts", "icons", "themes", "trash", "recently-used.xbel",
+                 "steam", "decky", "homebrew", "sddm", "xdg-desktop-portal", "user-dirs.dirs", "mimeapps.list"}
+
+
+class OutsideRoots(PermissionError):
+    pass
+
+
+class TooLarge(ValueError):
+    pass
+
+
+def write_roots(root: str, libraries: Iterable[str], runtime_dir: str | None) -> list[tuple[str, int]]:
+    """(base, min_depth) pairs a written path must lie under: inside a game's install dir, a Proton prefix,
+    userdata/<account>/<appid> or the plugin runtime dir. Never the entries themselves."""
+    out = []
+    for lib in libraries:
+        sa = os.path.realpath(os.path.join(lib, "steamapps"))
+        out += [(os.path.join(sa, "common"), 2), (os.path.join(sa, "compatdata"), 2)]
+    out.append((os.path.realpath(os.path.join(root, "userdata")), 3))
+    if runtime_dir:
+        out.append((os.path.realpath(runtime_dir), 1))
+    return out
+
+
+def installed_name_keys(libraries: Iterable[str]) -> list[str]:
+    """Name keys of every installed title (appmanifest name and installdir), for matching XDG game dirs."""
+    keys: list[str] = []
+    for lib in libraries:
+        try:
+            names = os.listdir(os.path.join(lib, "steamapps"))
+        except OSError:
+            continue
+        for n in names:
+            if not (n.startswith("appmanifest_") and n.endswith(".acf")):
+                continue
+            try:
+                state = vdf.load(os.path.join(lib, "steamapps", n)).get("AppState", {})
+            except (OSError, ValueError):
+                continue
+            keys += name_keys(state.get("name"), state.get("installdir"))
+    return list(dict.fromkeys(keys))
+
+
+def _resolved(path: str, follow: bool) -> str:
+    if follow:
+        return os.path.realpath(path)
+    return os.path.join(os.path.realpath(os.path.dirname(path)), os.path.basename(path))
+
+
+def writable(path: str, roots: list[tuple[str, int]], home: str, keys: Iterable[str], follow: bool = True) -> bool:
+    """Inside write_roots, or inside a ~/.local/share or ~/.config dir named after an installed game (what
+    game_dirs resolves for native titles). With follow, a final symlink must point inside as well."""
+    real = _resolved(path, follow)
+    for base, min_depth in roots:
+        if real.startswith(base + "/"):
+            parts = os.path.relpath(real, base).split("/")
+            if len(parts) < min_depth:
+                continue
+            if base.endswith("/userdata") and not (parts[0].isdigit() and parts[1].isdigit()):
+                continue
+            return True
+    steam = os.path.realpath(steam_root(home))
+    if real == steam or real.startswith(steam + "/"):
+        return False
+    keys = list(keys)
+    for base in (os.path.join(home, ".local/share"), os.path.join(home, ".config")):
+        rb = os.path.realpath(base)
+        if not real.startswith(rb + "/"):
+            continue
+        parts = os.path.relpath(real, rb).split("/")
+        if parts[0] == "unity3d":
+            parts = parts[1:]
+            # Company/Product: either level may carry the game's name.
+            if len(parts) >= 3 and (name_matches(parts[0], keys) or name_matches(parts[1], keys)):
+                return True
+            continue
+        if (len(parts) >= 2 and not parts[0].startswith(".") and parts[0].lower() not in _NOT_GAME_XDG
+                and name_matches(parts[0], keys)):
+            return True
+    return False
+
+
+def _check_writable(path: str, roots: list[tuple[str, int]], home: str, keys: Iterable[str], follow: bool = True) -> None:
+    check_sensitive(path)
+    check_write(path)
+    if not writable(path, roots, home, keys, follow):
+        raise OutsideRoots(f"refused: {path} is not inside a game install dir (steamapps/common/<game>/...), a Proton "
+                           "prefix (compatdata/<appid>/...), userdata/<account>/<appid>/..., the plugin runtime dir or a "
+                           "~/.local/share or ~/.config dir named after an installed game")
+
+
+def _chown_like(path: str, ref: str) -> None:
+    # The server runs as root; files it creates in the user's dirs must stay writable by the game.
+    try:
+        st = os.stat(ref)
+        os.chown(path, st.st_uid, st.st_gid, follow_symlinks=False)
+    except OSError:
+        pass
+
+
+def _makedirs_owned(d: str) -> None:
+    missing = []
+    while not os.path.isdir(d):
+        if os.path.lexists(d):
+            raise NotADirectoryError(f"not a directory: {d}")
+        missing.append(d)
+        parent = os.path.dirname(d)
+        if parent == d:
+            break
+        d = parent
+    for m in reversed(missing):
+        os.mkdir(m, 0o755)
+        _chown_like(m, os.path.dirname(m))
+
+
+def fs_read(path: str, home: str | None = None, max_bytes: int = MAX_READ_BYTES) -> bytes:
+    path = expand(path, home)
+    check_sensitive(path)
+    st = os.stat(path)
+    if stat.S_ISDIR(st.st_mode):
+        raise IsADirectoryError(f"is a directory: {path}")
+    if not stat.S_ISREG(st.st_mode):
+        raise ValueError(f"not a regular file: {path}")
+    if st.st_size > max_bytes:
+        raise TooLarge(f"{path} is {st.st_size} bytes; the limit is {max_bytes}")
+    with open(path, "rb") as f:
+        return f.read(max_bytes + 1)[:max_bytes]
+
+
+def fs_write(path: str, data: bytes, roots: list[tuple[str, int]], keys: Iterable[str], home: str | None = None,
+             create: bool = True, overwrite: bool = True) -> dict[str, Any]:
+    home = home or user_home()
+    path = expand(path, home)
+    _check_writable(path, roots, home, keys)
+    exists = os.path.exists(path)
+    if os.path.isdir(path):
+        raise IsADirectoryError(f"is a directory: {path}")
+    if exists and not overwrite:
+        raise FileExistsError(f"exists: {path}")
+    if not exists and not create:
+        raise FileNotFoundError(path)
+    target = os.path.realpath(path)
+    parent = os.path.dirname(target)
+    _makedirs_owned(parent)
+    tmp = os.path.join(parent, f".{os.path.basename(target)}.decky-mcp-{os.getpid()}.tmp")
+    try:
+        with open(tmp, "wb") as f:
+            f.write(data)
+        if exists:
+            st = os.stat(target)
+            os.chmod(tmp, stat.S_IMODE(st.st_mode))
+            _chown_like(tmp, target)
+        else:
+            os.chmod(tmp, 0o644)
+            _chown_like(tmp, parent)
+        os.replace(tmp, target)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    return {"path": path, "bytes": len(data), "created": not exists}
+
+
+def fs_mkdir(path: str, roots: list[tuple[str, int]], keys: Iterable[str], home: str | None = None,
+             parents: bool = False) -> dict[str, Any]:
+    home = home or user_home()
+    path = expand(path, home)
+    _check_writable(path, roots, home, keys)
+    if os.path.lexists(path):
+        raise FileExistsError(f"exists: {path}")
+    parent = os.path.dirname(path)
+    if not parents and not os.path.isdir(parent):
+        raise FileNotFoundError(f"parent directory does not exist: {parent}")
+    _makedirs_owned(path)
+    return {"path": path, "created": True}
+
+
+def fs_rename(src: str, dst: str, roots: list[tuple[str, int]], keys: Iterable[str], home: str | None = None,
+              overwrite: bool = False) -> dict[str, Any]:
+    home = home or user_home()
+    src, dst = expand(src, home), expand(dst, home)
+    # Renaming a symlink moves the link, never its target.
+    _check_writable(src, roots, home, keys, follow=False)
+    _check_writable(dst, roots, home, keys, follow=False)
+    if not os.path.lexists(src):
+        raise FileNotFoundError(src)
+    if os.path.lexists(dst) and not overwrite:
+        raise FileExistsError(f"exists: {dst}")
+    if not os.path.isdir(os.path.dirname(dst)):
+        raise FileNotFoundError(f"parent directory does not exist: {os.path.dirname(dst)}")
+    if os.path.isdir(src) and not os.path.islink(src):
+        for e in _walk_files(src, max_depth=64, budget=[10 ** 6]):
+            if is_sensitive(e.path):
+                raise SensitivePath(f"refused: {e.path} holds Steam login credentials")
+    os.replace(src, dst)
+    return {"from": src, "to": dst}
 
 
 # ---- logs ----
