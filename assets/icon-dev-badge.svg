@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 671 671" width="671" height="671">
+  <defs>
+    <linearGradient id="cupFill" gradientUnits="userSpaceOnUse" x1="155" y1="0" x2="457" y2="0">
+      <stop offset="0" stop-color="#333333"/>
+      <stop offset="1" stop-color="#1B1B1B"/>
+    </linearGradient>
+    <linearGradient id="dotFill" gradientUnits="userSpaceOnUse" x1="228" y1="297.6" x2="327" y2="345.4">
+      <stop offset="0" stop-color="#9C6AEC"/>
+      <stop offset="1" stop-color="#0AA5FF"/>
+    </linearGradient>
+    <linearGradient id="badgeFill" gradientUnits="userSpaceOnUse" x1="386.5" y1="463.1" x2="605.5" y2="568.9">
+      <stop offset="0" stop-color="#9C6AEC"/>
+      <stop offset="1" stop-color="#0AA5FF"/>
+    </linearGradient>
+    <!-- transparent gap around the badge -->
+    <mask id="badgeGap" maskUnits="userSpaceOnUse" x="0" y="0" width="671" height="671">
+      <rect width="671" height="671" fill="#fff"/>
+      <rect x="387" y="428" width="218" height="176" rx="47" fill="#000"/>
+    </mask>
+  </defs>
+
+  <g mask="url(#badgeGap)">
+    <!-- handle -->
+    <path fill="#1B1B1B" fill-rule="evenodd"
+      d="M440 175H497A66 66 0 0 1 563 241V368.5A66 66 0 0 1 497 434.5H440Z
+         M440 229.5H499A10 10 0 0 1 509 239.5V369.5A10 10 0 0 1 499 379.5H440Z"/>
+    <!-- cup body -->
+    <path fill="url(#cupFill)" d="M155 153H457V442A75 75 0 0 1 382 517H230A75 75 0 0 1 155 442Z"/>
+    <!-- Decky crescent and dot -->
+    <path fill="#FFFFFF" d="M278.5 212.5A109.5 109.5 0 0 1 278.5 431.5V392.5A70.5 70.5 0 0 0 278.5 251.5Z"/>
+    <circle cx="277.5" cy="321.5" r="55" fill="url(#dotFill)"/>
+  </g>
+
+  <!-- dev badge -->
+  <rect x="398" y="439" width="196" height="154" rx="36" fill="url(#badgeFill)"/>
+  <path fill="none" stroke="#FFFFFF" stroke-width="17.8" stroke-linecap="round" stroke-linejoin="round"
+    d="M431.2 478.7L471.7 516L431.2 553.3M502.5 553.3H560.8"/>
+</svg>

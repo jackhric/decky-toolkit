@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <b>Build, deploy and test Decky Loader plugins with improved DX and speed.</b>
+  <b>Build, deploy and test Decky Loader plugins with improved DX and speed straight from your IDE (VSCode / VSCodium)</b>
 </p>
 
 <p align="center">
