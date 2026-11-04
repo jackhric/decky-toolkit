@@ -45,7 +45,7 @@ I've found that working on a Decky plugin with no additional tooling provides a 
 ### Requirements
 
 - A Steam Deck, SteamOS or Bazzite device running [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) 3.3 or newer.
-- On your computer: VS Code 1.90+ (or VSCodium), Node 18+, pnpm 9, rsync, and SSH key access to
+- On your computer: VS Code 1.90+ (or VSCodium), Node 18+, pnpm 9+, rsync, and SSH key access to
   the device with passwordless `sudo`.
 
 ### 1. Install the plugin on the device

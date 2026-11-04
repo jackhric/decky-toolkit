@@ -216,7 +216,7 @@ change (changes under `py_modules/` still need a loader restart).
 
 ## Development
 
-Requirements on the dev machine: Node 18+, pnpm 9, rsync, ssh key access to the device with
+Requirements on the dev machine: Node 18+, pnpm 9+, rsync, ssh key access to the device with
 passwordless sudo.
 
 ```sh
