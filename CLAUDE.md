@@ -229,6 +229,7 @@ SharedJSContext via the `cef_evaluate` tool.
   `extension-vX.Y.Z`. Merging the release PR creates draft releases plus tags; `release.yml` checks the tag
   against package.json, runs CI, attaches the zip / `.vsix`, publishes the draft, and publishes extension
   releases to Open VSX by trusted publishing (OIDC, environment `openvsx`, no token secret).
+- Node matches Decky Loader's own CI (`node-version: 26` in SteamDeckHomebrew/decky-loader workflows).
 - Every third-party action is pinned to a full commit SHA with a `# vX.Y.Z` comment; Dependabot bumps them.
   Keep it that way. The release-please App key lives in the `release` environment (main only).
 - PRs are squash-merged with the PR title as the commit message, so the PR title is what release-please
