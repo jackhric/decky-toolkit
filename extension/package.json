@@ -2,7 +2,7 @@
   "name": "decky-toolkit",
   "displayName": "Decky Toolkit",
   "description": "Live screen, one-click deploy, logs and Steam console for Decky plugin development on devices running Decky Loader (Steam Deck, SteamOS, Bazzite)",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "publisher": "jackhric",
   "icon": "media/icon.png",
   "license": "MIT",
@@ -88,7 +88,7 @@
     "viewsWelcome": [
       {
         "view": "decky-toolkit.devices",
-        "contents": "No devices yet. Add a Decky device (any machine running Decky Loader: Steam Deck, Bazzite, SteamOS, \u2026).\n[Add device](command:decky-toolkit.addDevice)"
+        "contents": "No devices yet. Add a Decky device (any machine running Decky Loader: Steam Deck, Bazzite, SteamOS, …).\n[Add device](command:decky-toolkit.addDevice)"
       },
       {
         "view": "decky-toolkit.controllers",
@@ -152,13 +152,13 @@
       },
       {
         "command": "decky-toolkit.navigate",
-        "title": "Navigate Steam UI to\u2026",
+        "title": "Navigate Steam UI to…",
         "category": "Decky",
         "icon": "$(compass)"
       },
       {
         "command": "decky-toolkit.openPluginPanel",
-        "title": "Open plugin panel\u2026",
+        "title": "Open plugin panel…",
         "category": "Decky",
         "icon": "$(extensions)"
       },
@@ -263,7 +263,7 @@
       },
       {
         "command": "decky-toolkit.installZip",
-        "title": "Install plugin zip\u2026",
+        "title": "Install plugin zip…",
         "category": "Decky",
         "icon": "$(package)"
       },
@@ -275,7 +275,7 @@
       },
       {
         "command": "decky-toolkit.addDevice",
-        "title": "Add device\u2026",
+        "title": "Add device…",
         "category": "Decky",
         "icon": "$(add)"
       },
@@ -323,7 +323,7 @@
       },
       {
         "command": "decky-toolkit.deviceActions",
-        "title": "More actions\u2026",
+        "title": "More actions…",
         "category": "Decky",
         "icon": "$(ellipsis)"
       }
