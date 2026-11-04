@@ -21,90 +21,39 @@
 </p>
 
 <p align="center">
-  <a href="#why">Why</a> ·
-  <a href="#getting-started">Getting started</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#install">Install</a> ·
   <a href="extension/README.md">VS Code extension</a> ·
   <a href="docs/reference.md">Reference</a>
 </p>
 
-## Why
+## Features
 
-I've found that working on a Decky plugin with no additional tooling provides a slow development loop. This is a toolkit (VSCode / VSCodium extension + Decky Plugin) designed to speed up deployment and testing for your plugins.
+- One-click deploy from VS Code / VSCodium that reloads just your plugin in seconds.
+- Deploy on change, so the device follows your edits.
+- Live view of the Deck's screen, with sound, in an editor tab or any browser.
+- Keyboard, mouse and gamepad input sent straight to the device.
+- Virtual controllers and one-step jumps to any Steam page or your plugin's Quick Access panel.
+- Loader and plugin logs streamed into VS Code output channels.
+- JavaScript console for Steam's `SharedJSContext`.
+- HTTP API and MCP server for your own tools and agents.
+- Pairing approved on the device, with bearer-token auth.
 
-- **One-click deploy:** The extension detects the plugin in your workspace, builds it only when
-  its sources changed and reloads just that plugin in a few seconds, with no loader restart.
-  Turn on deploy-on-change, keep your build in watch mode, and the device follows your edits.
-- **See the & drive the target from your desk:** A live view of the Deck's screen, with sound, in an editor
-  tab or any browser. Keyboard, mouse and your own gamepad go straight to the device.
-  Add virtual controllers, jump to any Steam page or straight to your plugin's Quick Access panel.
-- **Easy access logs:** Loader and plugin logs stream into VS Code output channels.
-- **Poke the Steam UI:** A JavaScript console for Steam's `SharedJSContext`.
-- **Scriptable:** Everything is also available over a small HTTP API (and MCP) for your own tools
-  and scripts.
+## Install
 
-## Getting started
+- Extension: `code --install-extension jackhric.decky-toolkit` (or `codium`).
+- Plugin: in Decky developer mode, use **Install Plugin from URL** with `jackhric.github.io/decky-toolkit/decky-toolkit.zip`.
+- Pair: add the device's IP in the Decky view and approve the code in Quick Access → **Decky Toolkit**.
+- Deploy: open your plugin folder and press <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd>.
 
-### Requirements
+## Docs
 
-- A Steam Deck, SteamOS or Bazzite device running [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) 3.3 or newer.
-- On your computer: VS Code 1.90+ (or VSCodium).
-
-### 1. Install the extension in your IDE
-
-<p align="center">
-  <img alt="Installing Decky Toolkit from the Extensions view in VS Code" src="docs/images/install/vscode-install.gif" width="800">
-</p>
-
-Or if you fancy a terminal:
-
-```sh
-code --install-extension jackhric.decky-toolkit     # VS Code
-codium --install-extension jackhric.decky-toolkit   # VSCodium
-```
-
-Offline or a specific version: download `decky-toolkit-<version>.vsix` from an `extension-v…`
-[release](https://github.com/jackhric/decky-toolkit/releases) and use Extensions view → **…** → **Install from VSIX…**.
-
-### 2. Install the plugin on the device
-
-On the device, turn on Decky's developer mode (Decky settings → **General** → **Other** →
-**Developer mode**). Then open **Developer** → **Third-Party Plugins** and either:
-
-- **Install Plugin from URL:** enter `jackhric.github.io/decky-toolkit/decky-toolkit.zip` (always
-  the latest plugin release) and press **Install**, or
-- **Install Plugin from ZIP File:** pick the plugin zip from a [release](https://github.com/jackhric/decky-toolkit/releases).
-
-Decky warns about third-party plugins (**Continue** unlocks after a few seconds), then asks you to
-confirm the install.
-
-Open Quick Access (…) → **Decky Toolkit** on the device. The panel shows the device's IP address.
-
-### 3. Pair your editor with the device
-
-1. Click the **Decky** icon in the Activity Bar, then **Add device** (or **+**) and enter the
-   device's IP address.
-2. Click the device. VS Code shows a four-digit code.
-3. The device shows a toast with the same code. In Quick Access → **Decky Toolkit**, check the
-   code and press **Approve**.
-
-### 4. Deploy your plugin
-
-Open your plugin's folder in VS Code and press <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd>
-(<kbd>Cmd</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd> on macOS), or use the **Deploy** button in the status
-bar. The screen view opens on the first connect, so you see the result straight away.
-
-Prefer a browser? Open `http://<device-ip>:8765/viewer` and pair the same way.
-
-The [extension guide](extension/README.md) covers every view and setting. The
-[reference](docs/reference.md) covers the plugin itself, its HTTP API and how it works.
+- [VS Code extension guide](extension/README.md)
+- [Plugin reference and HTTP API](docs/reference.md)
 
 ## AI Disclaimer
 
-This project was built with heavy use of [Claude Code](https://claude.com/claude-code). Because of
-this, the Decky Toolkit plugin will not be available in the default Decky Plugin Store, which does not
-accept plugins that contain LLM-generated code (see its
-[submission guidelines](https://wiki.deckbrew.xyz/en/plugin-dev/submitting-plugins#ai-llms-and-so-on)).
-Install it from source as described in [Getting started](#getting-started).
+Built with heavy use of [Claude Code](https://claude.com/claude-code), so it is not in the default Decky Plugin Store, which [does not accept LLM-generated code](https://wiki.deckbrew.xyz/en/plugin-dev/submitting-plugins#ai-llms-and-so-on).
 
 ## License
 
