@@ -12,7 +12,9 @@ from aiohttp import web
 
 sys.path.append(decky.DECKY_PLUGIN_DIR + "/py_modules")  # the loader does this too; kept for IDE/type tooling parity
 
+from decky_mcp.auth import TokenAuth  # noqa: E402
 from decky_mcp.capture import ScreenCapturer  # noqa: E402
+from decky_mcp.http import Api  # noqa: E402
 from decky_mcp.protocol import McpServer  # noqa: E402
 from decky_mcp.settings import Settings  # noqa: E402
 from decky_mcp.tools import build_registry  # noqa: E402
@@ -80,11 +82,17 @@ class Plugin:
             return
         if self.capturer is None:
             self.capturer = ScreenCapturer(lambda: self.settings, decky.logger)
-        server = McpServer(build_registry(self.capturer), self.settings.token, decky.logger,
-                           capturer=self.capturer, static_dir=os.path.join(decky.DECKY_PLUGIN_DIR, "static"),
-                           pairing_open=self._pairing_open, on_paired=self._on_paired)
+        api = Api(
+            auth=TokenAuth(self.settings.token),
+            mcp=McpServer(build_registry(self.capturer), decky.logger),
+            capturer=self.capturer,
+            static_dir=os.path.join(decky.DECKY_PLUGIN_DIR, "static"),
+            logger=decky.logger,
+            pairing_open=self._pairing_open,
+            on_paired=self._on_paired,
+        )
         # The loader SIGKILLs a plugin 5s after SIGTERM, so never wait long for in-flight requests.
-        runner = web.AppRunner(server.build_app(), access_log=None, shutdown_timeout=2)
+        runner = web.AppRunner(api.build_app(), access_log=None, shutdown_timeout=2)
         await runner.setup()
         # A previous instance may still be releasing the port (loader restart races, orphaned
         # backends on their way out), so retry for a while before giving up.
