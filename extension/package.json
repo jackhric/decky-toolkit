@@ -1,8 +1,8 @@
 {
   "name": "decky-mcp",
   "displayName": "Decky-MCP",
-  "description": "Live screen, one-click deploy, logs and Steam console for Decky plugin development on devices running Decky Loader (Steam Deck, SteamOS, Bazzite)",
-  "version": "0.6.0",
+  "description": "Live screen, one-click deploy, logs, Steam console and a game / Proton save file browser for devices running Decky Loader (Steam Deck, SteamOS, Bazzite)",
+  "version": "0.7.0",
   "publisher": "jackhric",
   "icon": "media/icon.png",
   "license": "BSD-3-Clause",
@@ -31,8 +31,10 @@
     "onView:decky-mcp.devices",
     "onView:decky-mcp.actions",
     "onView:decky-mcp.plugins",
+    "onView:decky-mcp.games",
     "onView:decky-mcp.controllers",
-    "onView:decky-mcp.preview"
+    "onView:decky-mcp.preview",
+    "onFileSystem:decky"
   ],
   "contributes": {
     "viewsContainers": {
@@ -66,6 +68,14 @@
           "when": "decky-mcp.connected",
           "visibility": "collapsed",
           "initialSize": 2
+        },
+        {
+          "id": "decky-mcp.games",
+          "name": "Games",
+          "icon": "media/decky.svg",
+          "when": "decky-mcp.connected",
+          "visibility": "collapsed",
+          "initialSize": 3
         },
         {
           "id": "decky-mcp.controllers",
@@ -326,6 +336,60 @@
         "title": "More actions\u2026",
         "category": "Decky",
         "icon": "$(ellipsis)"
+      },
+      {
+        "command": "decky-mcp.findGame",
+        "title": "Find game\u2026",
+        "category": "Decky",
+        "icon": "$(search)"
+      },
+      {
+        "command": "decky-mcp.refreshGames",
+        "title": "Refresh games",
+        "category": "Decky",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "decky-mcp.openGameSaves",
+        "title": "Open save data\u2026",
+        "category": "Decky",
+        "icon": "$(save)"
+      },
+      {
+        "command": "decky-mcp.openDeckyPath",
+        "title": "Open device path\u2026",
+        "category": "Decky",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "decky-mcp.gameLaunch",
+        "title": "Launch game",
+        "category": "Decky",
+        "icon": "$(play)"
+      },
+      {
+        "command": "decky-mcp.gameTerminate",
+        "title": "Terminate game",
+        "category": "Decky",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "decky-mcp.gameProtonLog",
+        "title": "Show Proton log",
+        "category": "Decky",
+        "icon": "$(output)"
+      },
+      {
+        "command": "decky-mcp.openInExplorer",
+        "title": "Open in Explorer",
+        "category": "Decky",
+        "icon": "$(root-folder-opened)"
+      },
+      {
+        "command": "decky-mcp.copyDeckyPath",
+        "title": "Copy path",
+        "category": "Decky",
+        "icon": "$(copy)"
       }
     ],
     "configuration": {
@@ -411,6 +475,21 @@
           "command": "decky-mcp.refreshPlugins",
           "when": "view == decky-mcp.plugins",
           "group": "navigation@2"
+        },
+        {
+          "command": "decky-mcp.findGame",
+          "when": "view == decky-mcp.games",
+          "group": "navigation@1"
+        },
+        {
+          "command": "decky-mcp.openDeckyPath",
+          "when": "view == decky-mcp.games",
+          "group": "navigation@2"
+        },
+        {
+          "command": "decky-mcp.refreshGames",
+          "when": "view == decky-mcp.games",
+          "group": "navigation@3"
         },
         {
           "command": "decky-mcp.addVirtualController",
@@ -513,11 +592,74 @@
           "command": "decky-mcp.removeDevice",
           "when": "view == decky-mcp.devices && viewItem =~ /^deck\\.(unpaired|paired|session)$/",
           "group": "3_device@3"
+        },
+        {
+          "command": "decky-mcp.gameLaunch",
+          "when": "view == decky-mcp.games && viewItem == game",
+          "group": "inline@1"
+        },
+        {
+          "command": "decky-mcp.gameTerminate",
+          "when": "view == decky-mcp.games && viewItem == game.running",
+          "group": "inline@1"
+        },
+        {
+          "command": "decky-mcp.openGameSaves",
+          "when": "view == decky-mcp.games && viewItem =~ /^game(\\.running)?$/",
+          "group": "inline@2"
+        },
+        {
+          "command": "decky-mcp.openGameSaves",
+          "when": "view == decky-mcp.games && viewItem =~ /^game(\\.running)?$/",
+          "group": "1_game@1"
+        },
+        {
+          "command": "decky-mcp.gameLaunch",
+          "when": "view == decky-mcp.games && viewItem == game",
+          "group": "1_game@2"
+        },
+        {
+          "command": "decky-mcp.gameTerminate",
+          "when": "view == decky-mcp.games && viewItem == game.running",
+          "group": "1_game@2"
+        },
+        {
+          "command": "decky-mcp.gameProtonLog",
+          "when": "view == decky-mcp.games && viewItem =~ /^game(\\.running)?$/",
+          "group": "1_game@3"
+        },
+        {
+          "command": "decky-mcp.copyDeckyPath",
+          "when": "view == decky-mcp.games && viewItem =~ /^game(\\.running)?$/",
+          "group": "2_path@1"
+        },
+        {
+          "command": "decky-mcp.openInExplorer",
+          "when": "view == decky-mcp.games && viewItem == deckyDir",
+          "group": "inline@1"
+        },
+        {
+          "command": "decky-mcp.openInExplorer",
+          "when": "view == decky-mcp.games && viewItem =~ /^decky(Dir|File)$/",
+          "group": "1_path@1"
+        },
+        {
+          "command": "decky-mcp.copyDeckyPath",
+          "when": "view == decky-mcp.games && viewItem =~ /^decky(Dir|File)$/",
+          "group": "1_path@2"
         }
       ],
       "commandPalette": [
         {
           "command": "decky-mcp.deviceActions",
+          "when": "false"
+        },
+        {
+          "command": "decky-mcp.openInExplorer",
+          "when": "false"
+        },
+        {
+          "command": "decky-mcp.copyDeckyPath",
           "when": "false"
         }
       ]
