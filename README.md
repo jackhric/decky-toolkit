@@ -49,24 +49,13 @@ I've found that working on a Decky plugin with no additional tooling provides a 
 - A Steam Deck, SteamOS or Bazzite device running [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) 3.3 or newer.
 - On your computer: VS Code 1.90+ (or VSCodium).
 
-The extension is on the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=jackhric.decky-toolkit)
-and [Open VSX](https://open-vsx.org/extension/jackhric/decky-toolkit). Both pieces are also on the
-[Releases](https://github.com/jackhric/decky-toolkit/releases) page: `plugin-v…` releases carry the
-plugin zip, `extension-v…` releases the `.vsix`. Both are built by this repo's CI and signed with
-build provenance, so you can check a download with
-`gh attestation verify <file> -R jackhric/decky-toolkit`.
-
-### 1. Install the VS Code extension
+### 1. Install the extension in your IDE
 
 <p align="center">
   <img alt="Installing Decky Toolkit from the Extensions view in VS Code" src="docs/images/install/vscode-install.gif" width="800">
 </p>
 
-It works the same in **VSCodium** and other editors that install from Open VSX. Store listings:
-[VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=jackhric.decky-toolkit) ·
-[Open VSX](https://open-vsx.org/extension/jackhric/decky-toolkit).
-
-From a terminal:
+Or if you fancy a terminal:
 
 ```sh
 code --install-extension jackhric.decky-toolkit     # VS Code
@@ -74,7 +63,7 @@ codium --install-extension jackhric.decky-toolkit   # VSCodium
 ```
 
 Offline or a specific version: download `decky-toolkit-<version>.vsix` from an `extension-v…`
-release and use Extensions view → **…** → **Install from VSIX…**.
+[release](https://github.com/jackhric/decky-toolkit/releases) and use Extensions view → **…** → **Install from VSIX…**.
 
 ### 2. Install the plugin on the device
 
@@ -84,29 +73,12 @@ On the device, turn on Decky's developer mode (Decky settings → **General** �
 - **Install Plugin from URL:** enter `jackhric.github.io/decky-toolkit/decky-toolkit.zip` (always
   the latest plugin release) and press **Install**, or
 - **Install Plugin from ZIP File:** download `decky-toolkit-<version>.zip` from a `plugin-v…`
-  release (for example in Desktop Mode) and pick it with **Browse**.
+  [release](https://github.com/jackhric/decky-toolkit/releases) (for example in Desktop Mode) and pick it with **Browse**.
 
 Decky warns about third-party plugins (**Continue** unlocks after a few seconds), then asks you to
 confirm the install.
 
 Open Quick Access (…) → **Decky Toolkit** on the device. The panel shows the device's IP address.
-
-### Building from source
-
-Needs Node 18+, pnpm 9+, rsync, and SSH key access to the device with passwordless `sudo`.
-
-```sh
-git clone https://github.com/jackhric/decky-toolkit.git
-cd decky-toolkit
-pnpm install
-cp deploy.env.example deploy.env   # set DECK_HOST and DECK_USER for your device
-pnpm run deploy                    # builds, copies to the device and restarts Decky Loader
-
-cd extension
-pnpm install
-pnpm run package                   # creates decky-toolkit-<version>.vsix
-code --install-extension decky-toolkit-<version>.vsix
-```
 
 ### 3. Pair your editor with the device
 
