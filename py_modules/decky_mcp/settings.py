@@ -4,7 +4,7 @@ import secrets
 from dataclasses import asdict, dataclass, field
 
 DEFAULT_PORT = 8765
-STREAM_LIMITS = {"fps": [1, 60], "quality": [10, 100], "widths": [0, 1600, 1280, 960, 640]}
+STREAM_LIMITS = {"fps": [1, 60], "quality": [10, 100], "widths": [0, 1600, 1280, 960, 640], "audio": [False, True]}
 MAX_STREAM_WIDTH = 3840
 
 
@@ -18,6 +18,7 @@ class Settings:
     stream_quality: int = 70
     stream_width: int = 0  # 0 = native resolution
     input_enabled: bool = False
+    audio_enabled: bool = True
 
     @classmethod
     def load(cls, settings_dir: str) -> "Settings":
@@ -42,7 +43,7 @@ class Settings:
         os.replace(tmp, path)
 
     def stream_settings(self) -> dict:
-        return {"fps": self.stream_fps, "quality": self.stream_quality, "width": self.stream_width}
+        return {"fps": self.stream_fps, "quality": self.stream_quality, "width": self.stream_width, "audio": self.audio_enabled}
 
     def update_stream(self, fps=None, quality=None, width=None) -> bool:
         """Validate and clamp the given stream settings into place; returns whether anything changed."""
@@ -56,6 +57,14 @@ class Settings:
         if width is not None:
             self.stream_width = max(0, min(MAX_STREAM_WIDTH, width))
         return self.stream_settings() != before
+
+    def update_audio(self, enabled) -> bool:
+        """Set audio_enabled (strict bool); returns whether it changed."""
+        if not isinstance(enabled, bool):
+            raise ValueError("audio must be true or false")
+        changed = self.audio_enabled != enabled
+        self.audio_enabled = enabled
+        return changed
 
     def update_input(self, enabled) -> bool:
         """Set input_enabled (strict bool); returns whether it changed."""

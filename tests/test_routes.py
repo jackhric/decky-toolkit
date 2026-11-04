@@ -209,7 +209,7 @@ class FakeCapturer(ScreenCapturer):
         self.restarts += 1
 
 
-LIMITS = {"fps": [1, 60], "quality": [10, 100], "widths": [0, 1600, 1280, 960, 640]}
+LIMITS = {"fps": [1, 60], "quality": [10, 100], "widths": [0, 1600, 1280, 960, 640], "audio": [False, True]}
 
 
 def test_stream_settings_get_put_and_clamp():
@@ -219,20 +219,20 @@ def test_stream_settings_get_put_and_clamp():
         async with s.get(f"{base}/stream/settings") as r:
             assert r.status == 401
         async with s.get(f"{base}/stream/settings", headers=H) as r:
-            assert await r.json() == {"fps": 30, "quality": 70, "width": 0, "limits": LIMITS}
+            assert await r.json() == {"fps": 30, "quality": 70, "width": 0, "audio": True, "limits": LIMITS}
         async with s.put(f"{base}/stream/settings", json={"fps": 60}, headers=H) as r:
             assert r.status == 200 and (await r.json())["fps"] == 60
         assert (cap.saved, cap.restarts) == (1, 1)
         async with s.put(f"{base}/stream/settings", json={"fps": 500, "quality": 3, "width": -5}, headers=H) as r:
-            assert await r.json() == {"fps": 60, "quality": 10, "width": 0, "limits": LIMITS}
+            assert await r.json() == {"fps": 60, "quality": 10, "width": 0, "audio": True, "limits": LIMITS}
         async with s.put(f"{base}/stream/settings", json={"fps": 0, "quality": "95", "width": 1280}, headers=H) as r:
-            assert await r.json() == {"fps": 1, "quality": 95, "width": 1280, "limits": LIMITS}
-        assert cap.settings.stream_settings() == {"fps": 1, "quality": 95, "width": 1280}
+            assert await r.json() == {"fps": 1, "quality": 95, "width": 1280, "audio": True, "limits": LIMITS}
+        assert cap.settings.stream_settings() == {"fps": 1, "quality": 95, "width": 1280, "audio": True}
         restarts = cap.restarts
         async with s.put(f"{base}/stream/settings", json={"fps": 1}, headers=H) as r:
             assert r.status == 200
         assert cap.restarts == restarts, "unchanged settings must not restart the pipeline"
-        for bad in ({"fps": "fast"}, {"fps": True}, {"quality": None, "width": [1]}, {"bitrate": 5}, [1], "x"):
+        for bad in ({"fps": "fast"}, {"fps": True}, {"audio": 1}, {"audio": "false"}, {"quality": None, "width": [1]}, {"bitrate": 5}, [1], "x"):
             async with s.put(f"{base}/stream/settings", json=bad, headers=H) as r:
                 assert r.status == 400, bad
         async with s.put(f"{base}/stream/settings", data=b"{nope", headers=H) as r:
@@ -283,12 +283,12 @@ def test_set_stream_settings_tool_and_status():
     reg = build_registry(cap)
     res = asyncio.run(reg.call("set_stream_settings", {"fps": 45, "quality": 80}))
     assert not res["isError"]
-    assert json.loads(res["content"][0]["text"]) == {"fps": 45, "quality": 80, "width": 0, "limits": LIMITS}
+    assert json.loads(res["content"][0]["text"]) == {"fps": 45, "quality": 80, "width": 0, "audio": True, "limits": LIMITS}
     assert cap.restarts == 1
     bad = asyncio.run(reg.call("set_stream_settings", {"fps": "x"}))
     assert bad["isError"] and "fps must be an integer" in bad["content"][0]["text"]
     status = json.loads(asyncio.run(reg.call("stream_status", {}))["content"][0]["text"])
-    assert status["settings"] == {"fps": 45, "quality": 80, "width": 0} and status["limits"] == LIMITS
+    assert status["settings"] == {"fps": 45, "quality": 80, "width": 0, "audio": True} and status["limits"] == LIMITS
 
 
 def test_restart_keeps_subscribers_attached():

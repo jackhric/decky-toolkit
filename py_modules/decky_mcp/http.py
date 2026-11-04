@@ -9,6 +9,7 @@ from typing import Awaitable, Callable
 from aiohttp import web
 
 from . import cdp, logs
+from .audio import FORMAT as AUDIO_FORMAT, AudioCapturer, AudioDisabled, AudioUnavailable
 from .auth import TokenAuth
 from .capture import BOUNDARY, CaptureUnavailable, ScreenCapturer
 from .input.ei import EiError
@@ -20,6 +21,7 @@ from .tools.system import list_plugins, schedule_loader_restart
 API_VERSION = 1
 LOG_KEEPALIVE_SECONDS = 15.0
 INPUT_REFUSED = 4003
+AUDIO_REFUSED = 4003
 FOCUS_REFRESH_SECONDS = 3.0
 
 PairingOpen = Callable[[], bool]
@@ -35,7 +37,7 @@ class Api:
     def __init__(self, *, auth: TokenAuth, mcp: McpServer, capturer: ScreenCapturer | None, static_dir: str | None,
                  logger: logging.Logger, pairing_open: PairingOpen | None = None, on_paired: OnPaired | None = None,
                  base_url: BaseUrl | None = None, log_keepalive: float = LOG_KEEPALIVE_SECONDS,
-                 input_service: InputService | None = None):
+                 input_service: InputService | None = None, audio: AudioCapturer | None = None):
         self.auth = auth
         self.mcp = mcp
         self.capturer = capturer
@@ -46,6 +48,7 @@ class Api:
         self.base_url = base_url
         self.log_keepalive = log_keepalive
         self.input = input_service
+        self.audio = audio
 
     def build_app(self) -> web.Application:
         app = web.Application(client_max_size=64 * 1024 * 1024, middlewares=[self.auth.middleware()])
@@ -59,6 +62,8 @@ class Api:
             web.get("/stream/stats", self.handle_stream_stats),
             web.get("/stream/settings", self.handle_stream_settings_get),
             web.put("/stream/settings", self.handle_stream_settings_put),
+            web.get("/audio", self.handle_audio_ws),
+            web.get("/audio/stats", self.handle_audio_stats),
             web.get("/input", self.handle_input_ws),
             web.get("/input/settings", self.handle_input_settings_get),
             web.put("/input/settings", self.handle_input_settings_put),
@@ -173,13 +178,58 @@ class Api:
             return _error(400, "expected a JSON object")
         if not isinstance(body, dict):
             return _error(400, "expected a JSON object")
-        unknown = set(body) - {"fps", "quality", "width"}
+        unknown = set(body) - {"fps", "quality", "width", "audio"}
         if unknown:
             return _error(400, f"unknown field(s): {', '.join(sorted(unknown))}")
         try:
             return web.json_response(await self.capturer.update_settings(**body))
         except ValueError as e:
             return _error(400, str(e))
+
+    # ---- audio ----
+
+    async def handle_audio_stats(self, _request: web.Request) -> web.Response:
+        if self.audio is None:
+            return _error(404, "audio not available")
+        return web.json_response(self.audio.stats())
+
+    async def handle_audio_ws(self, request: web.Request) -> web.StreamResponse:
+        if self.audio is None:
+            return _error(404, "audio not available")
+        ws = web.WebSocketResponse(heartbeat=20, max_msg_size=4096)
+        await ws.prepare(request)
+        if not self.audio.enabled:
+            await ws.close(code=AUDIO_REFUSED, message=b"audio is disabled")
+            return ws
+        await ws.send_json(AUDIO_FORMAT)
+
+        async def pump() -> None:
+            try:
+                async for chunk in self.audio.subscribe():
+                    if ws.closed:
+                        break
+                    await ws.send_bytes(chunk)
+            # A separate task: the handler cancels this pump once the receive loop ends, which would
+            # abort a close handshake awaited here (the client then sees 1006 instead of the code).
+            except AudioDisabled as e:
+                asyncio.ensure_future(ws.close(code=AUDIO_REFUSED, message=str(e).encode()))
+            except AudioUnavailable as e:
+                self.log.warning("audio stream ended: %s", e)
+                asyncio.ensure_future(ws.close(code=1011, message=str(e)[:120].encode()))
+            except (ConnectionResetError, RuntimeError):
+                pass
+
+        # The receive loop notices the client leaving (and answers pings); the pump only sends.
+        sender = asyncio.create_task(pump())
+        try:
+            async for _ in ws:
+                pass
+        except (ConnectionResetError, asyncio.CancelledError):
+            pass
+        finally:
+            sender.cancel()
+            await asyncio.gather(sender, return_exceptions=True)
+        return ws
 
     # ---- input ----
 

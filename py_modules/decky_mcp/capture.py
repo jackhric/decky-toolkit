@@ -57,6 +57,8 @@ class ScreenCapturer:
         self._get_settings = get_settings
         self._save_settings = save_settings
         self._restarting = False
+        # The AudioCapturer, if any: audio is part of the stream settings but runs its own pipeline.
+        self.audio = None
         self.log = logger
         self._proc: asyncio.subprocess.Process | None = None
         self._reader_task: asyncio.Task[None] | None = None
@@ -176,11 +178,18 @@ class ScreenCapturer:
     def stream_settings(self) -> dict[str, Any]:
         return {**self._get_settings().stream_settings(), "limits": STREAM_LIMITS}
 
-    async def update_settings(self, fps: Any = None, quality: Any = None, width: Any = None) -> dict[str, Any]:
-        """Validate, persist and apply stream settings. Raises ValueError on non-integer input."""
-        if self._get_settings().update_stream(fps, quality, width):
-            if self._save_settings:
-                self._save_settings()
+    async def update_settings(self, fps: Any = None, quality: Any = None, width: Any = None, audio: Any = None) -> dict[str, Any]:
+        """Validate, persist and apply stream settings. Raises ValueError on bad input, changing nothing."""
+        s = self._get_settings()
+        if audio is not None and not isinstance(audio, bool):
+            raise ValueError("audio must be true or false")
+        video_changed = s.update_stream(fps, quality, width)
+        audio_changed = audio is not None and s.update_audio(audio)
+        if (video_changed or audio_changed) and self._save_settings:
+            self._save_settings()
+        if audio_changed and self.audio is not None:
+            await self.audio.apply_enabled()
+        if video_changed:
             if self.running:
                 try:
                     await self.restart()
@@ -340,5 +349,6 @@ class ScreenCapturer:
             "height": size[1] if size else None,
             "settings": self._get_settings().stream_settings(),
             "limits": STREAM_LIMITS,
+            "audio": self.audio.stats() if self.audio is not None else None,
             "error": self.last_error,
         }

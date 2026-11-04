@@ -12,6 +12,7 @@ from aiohttp import web
 
 sys.path.append(decky.DECKY_PLUGIN_DIR + "/py_modules")  # the loader does this too; kept for IDE/type tooling parity
 
+from decky_mcp.audio import AudioCapturer  # noqa: E402
 from decky_mcp.auth import TokenAuth  # noqa: E402
 from decky_mcp.capture import ScreenCapturer  # noqa: E402
 from decky_mcp.http import Api  # noqa: E402
@@ -73,6 +74,7 @@ class Plugin:
     settings: Settings
     runner: web.AppRunner | None = None
     capturer: ScreenCapturer | None = None
+    audio: AudioCapturer | None = None
     input: InputService | None = None
     last_error: str | None = None
     pairing_until: float = 0.0
@@ -92,6 +94,7 @@ class Plugin:
             on_paired=self._on_paired,
             base_url=self._base_url,
             input_service=self.input,
+            audio=self.audio,
         )
         # The loader SIGKILLs a plugin 5s after SIGTERM, so never wait long for in-flight requests.
         runner = web.AppRunner(api.build_app(), access_log=None, shutdown_timeout=2)
@@ -120,6 +123,8 @@ class Plugin:
             await self.input.shutdown()
         if self.capturer is not None:
             await self.capturer.stop()
+        if self.audio is not None:
+            await self.audio.stop()
         if self.runner is not None:
             await self.runner.cleanup()
             self.runner = None
@@ -184,9 +189,10 @@ class Plugin:
             "error": self.last_error,
         }
 
-    async def set_stream_settings(self, fps: int | None = None, quality: int | None = None, width: int | None = None) -> dict[str, Any]:
+    async def set_stream_settings(self, fps: int | None = None, quality: int | None = None, width: int | None = None,
+                                  audio: bool | None = None) -> dict[str, Any]:
         assert self.capturer is not None  # created in _main
-        await self.capturer.update_settings(fps, quality, width)
+        await self.capturer.update_settings(fps, quality, width, audio)
         return await self.get_status()
 
     async def set_enabled(self, enabled: bool) -> dict[str, Any]:
@@ -222,6 +228,8 @@ class Plugin:
         threading.Thread(target=_loader_watchdog, name="loader-watchdog", daemon=True).start()
         save = lambda: self.settings.save(decky.DECKY_PLUGIN_SETTINGS_DIR)  # noqa: E731
         self.capturer = ScreenCapturer(lambda: self.settings, decky.logger, save_settings=save)
+        self.audio = AudioCapturer(lambda: self.settings, decky.logger)
+        self.capturer.audio = self.audio
         self.input = InputService(lambda: self.settings, save, decky.logger, on_session=self._on_input_session)
         # The panel mirrors a setting that remote clients usually change, so push changes to it.
         self.input.add_listener(lambda st: asyncio.ensure_future(decky.emit("decky_mcp_input_state", st["enabled"])))
