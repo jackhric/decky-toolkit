@@ -16,7 +16,6 @@ type Status = {
   running: boolean;
   bind: string;
   port: number;
-  token: string;
   ip: string;
   url: string;
   pair_requests: number;
@@ -49,7 +48,6 @@ const setInputEnabled = callable<[enabled: boolean], InputSettings>("set_input_e
 
 function Content() {
   const [status, setStatus] = useState<Status | null>(null);
-  const [showToken, setShowToken] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -202,13 +200,6 @@ function Content() {
             <ButtonItem layout="below" disabled={busy} onClick={() => run(regenerateToken, "New token generated")}>
               Regenerate token
             </ButtonItem>
-          </PanelSectionRow>
-          <PanelSectionRow>
-            <Field label="Token" focusable onClick={() => setShowToken((s) => !s)}>
-              <span style={{ fontFamily: "monospace", fontSize: "0.8em", wordBreak: "break-all" }}>
-                {showToken ? status.token : "•••••••• (click to reveal)"}
-              </span>
-            </Field>
           </PanelSectionRow>
         </PanelSection>
       )}

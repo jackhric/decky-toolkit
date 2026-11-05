@@ -193,7 +193,6 @@ class Plugin:
             "running": self.runner is not None,
             "bind": self.settings.bind,
             "port": self.settings.port,
-            "token": self.settings.token,
             "ip": ip,
             "url": f"{base}/mcp",
             "pair_requests": len(self.pairing.pending()),

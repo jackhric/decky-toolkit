@@ -136,7 +136,7 @@
       },
       {
         "view": "decky-toolkit.actions",
-        "contents": "The device rejected the stored token, so nothing can be loaded. Pair again to continue.\n[Re-pair](command:decky-toolkit.reconnect)",
+        "contents": "The device rejected the stored token, so nothing can be loaded. Reconnect, then approve this editor on the device.\n[Reconnect](command:decky-toolkit.reconnect)",
         "when": "decky-toolkit.link == rejected"
       },
       {
@@ -156,7 +156,7 @@
       },
       {
         "view": "decky-toolkit.plugins",
-        "contents": "The device rejected the stored token, so nothing can be loaded. Pair again to continue.\n[Re-pair](command:decky-toolkit.reconnect)",
+        "contents": "The device rejected the stored token, so nothing can be loaded. Reconnect, then approve this editor on the device.\n[Reconnect](command:decky-toolkit.reconnect)",
         "when": "decky-toolkit.link == rejected"
       },
       {
@@ -176,7 +176,7 @@
       },
       {
         "view": "decky-toolkit.games",
-        "contents": "The device rejected the stored token, so nothing can be loaded. Pair again to continue.\n[Re-pair](command:decky-toolkit.reconnect)",
+        "contents": "The device rejected the stored token, so nothing can be loaded. Reconnect, then approve this editor on the device.\n[Reconnect](command:decky-toolkit.reconnect)",
         "when": "decky-toolkit.link == rejected"
       },
       {
@@ -196,7 +196,7 @@
       },
       {
         "view": "decky-toolkit.controllers",
-        "contents": "The device rejected the stored token, so nothing can be loaded. Pair again to continue.\n[Re-pair](command:decky-toolkit.reconnect)",
+        "contents": "The device rejected the stored token, so nothing can be loaded. Reconnect, then approve this editor on the device.\n[Reconnect](command:decky-toolkit.reconnect)",
         "when": "decky-toolkit.link == rejected"
       },
       {
@@ -206,18 +206,6 @@
       }
     ],
     "commands": [
-      {
-        "command": "decky-toolkit.enterToken",
-        "title": "Enter token manually",
-        "category": "Decky",
-        "icon": "$(key)"
-      },
-      {
-        "command": "decky-toolkit.disconnect",
-        "title": "Disconnect and forget token",
-        "category": "Decky",
-        "icon": "$(debug-disconnect)"
-      },
       {
         "command": "decky-toolkit.openScreen",
         "title": "Open screen",
@@ -414,12 +402,6 @@
         "icon": "$(package)"
       },
       {
-        "command": "decky-toolkit.changeHost",
-        "title": "Change host",
-        "category": "Decky",
-        "icon": "$(server)"
-      },
-      {
         "command": "decky-toolkit.addDevice",
         "title": "Add device…",
         "category": "Decky",
@@ -438,14 +420,14 @@
         "icon": "$(plug)"
       },
       {
-        "command": "decky-toolkit.editDevice",
-        "title": "Edit device",
+        "command": "decky-toolkit.renameDevice",
+        "title": "Rename device",
         "category": "Decky",
-        "icon": "$(edit)"
+        "icon": "$(pencil)"
       },
       {
         "command": "decky-toolkit.removeDevice",
-        "title": "Remove device",
+        "title": "Forget device",
         "category": "Decky",
         "icon": "$(trash)"
       },
@@ -472,12 +454,6 @@
         "title": "Reconnect",
         "category": "Decky",
         "icon": "$(plug)"
-      },
-      {
-        "command": "decky-toolkit.pairAgain",
-        "title": "Re-pair",
-        "category": "Decky",
-        "icon": "$(key)"
       },
       {
         "command": "decky-toolkit.deviceActions",
@@ -727,24 +703,14 @@
           "group": "1_connect@1"
         },
         {
-          "command": "decky-toolkit.pairAgain",
-          "when": "view == decky-toolkit.devices && viewItem =~ /^deck\\.(paired|session)$/",
-          "group": "2_pair@1"
-        },
-        {
-          "command": "decky-toolkit.enterToken",
-          "when": "view == decky-toolkit.devices && viewItem =~ /^deck\\.(unpaired|paired|session)$/",
-          "group": "2_pair@2"
-        },
-        {
-          "command": "decky-toolkit.editDevice",
+          "command": "decky-toolkit.renameDevice",
           "when": "view == decky-toolkit.devices && viewItem =~ /^deck\\.(unpaired|paired|session)$/",
           "group": "3_device@1"
         },
         {
           "command": "decky-toolkit.removeDevice",
           "when": "view == decky-toolkit.devices && viewItem =~ /^deck\\.(unpaired|paired|session)$/",
-          "group": "3_device@3"
+          "group": "3_device@2"
         },
         {
           "command": "decky-toolkit.gameLaunch",

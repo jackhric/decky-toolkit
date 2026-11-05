@@ -3,7 +3,6 @@ import { hostname } from 'os';
 import type { PairGrant } from './api';
 import { DeckyClient, HttpError, describeError, sleep } from './client';
 import type { Connection, SavedDevice } from './connection';
-import { editDevice } from './devices';
 
 /** Mutable so tests can shorten them. There is no overall timeout: pairing waits until approved, denied or cancelled. */
 export const pairingTimings = { waitS: 25, retryMs: 2000 };
@@ -18,9 +17,9 @@ function clientName(): string {
 
 let screenOpenedThisSession = false;
 
-async function reachable(d: SavedDevice): Promise<boolean> {
+async function reachable(c: Connection, d: SavedDevice): Promise<boolean> {
   try {
-    await new DeckyClient(d).health();
+    c.noteVersion(d.id, (await new DeckyClient(d).health()).version);
     return true;
   } catch {
     return false;
@@ -41,9 +40,8 @@ async function tokenAccepted(d: SavedDevice, token: string): Promise<boolean> {
 async function cantReach(c: Connection, d: SavedDevice, retry: () => Promise<unknown>): Promise<void> {
   c.setReachable(d.id, false);
   const choice = await vscode.window.showErrorMessage(
-    `Can't reach ${d.name} at ${d.host}:${d.port}. Is the device on and Decky Toolkit enabled?`, 'Retry', 'Edit device');
+    `Can't reach ${d.name} at ${d.host}:${d.port}. Is the device on and Decky Toolkit enabled?`, 'Retry');
   if (choice === 'Retry') await retry();
-  else if (choice === 'Edit device') await editDevice(c, d.id);
 }
 
 function fresh(c: Connection, d: SavedDevice): SavedDevice {
@@ -79,7 +77,7 @@ export async function connect(c: Connection, device: SavedDevice, interactive = 
   try {
     if (c.activeDevice?.id !== d.id) await c.setActive(d.id);
     d = fresh(c, d);
-    if (!(await reachable(d))) {
+    if (!(await reachable(c, d))) {
       outcome = 'unreachable';
     } else {
       const token = await c.tokenFor(d);
@@ -105,7 +103,7 @@ export async function connect(c: Connection, device: SavedDevice, interactive = 
 export async function pair(c: Connection, device: SavedDevice, reachabilityChecked = false): Promise<boolean> {
   if (c.activeDevice?.id !== device.id) await c.setActive(device.id);
   const d = fresh(c, device);
-  if (!reachabilityChecked && !(await reachable(d))) {
+  if (!reachabilityChecked && !(await reachable(c, d))) {
     await cantReach(c, d, () => pair(c, d));
     return false;
   }
@@ -120,10 +118,8 @@ export async function pair(c: Connection, device: SavedDevice, reachabilityCheck
   }
   if (outcome === 'cancelled') return false;
   if (outcome === 'unsupported') {
-    const choice = await vscode.window.showWarningMessage(
-      `Decky Toolkit: Update Decky Toolkit on ${d.name} to pair. Until then, copy the token from its Decky Toolkit panel.`,
-      'Enter token manually');
-    return choice ? enterToken(c, d) : false;
+    void vscode.window.showWarningMessage(`Decky Toolkit: Update Decky Toolkit on ${d.name} to pair with it.`);
+    return false;
   }
   if (outcome === 'denied') {
     const choice = await vscode.window.showWarningMessage(`Decky Toolkit: Pairing denied on ${d.name}.`, 'Try again');
@@ -131,10 +127,8 @@ export async function pair(c: Connection, device: SavedDevice, reachabilityCheck
   }
   if ('error' in outcome) {
     const choice = await vscode.window.showWarningMessage(
-      `Decky Toolkit: Pairing with ${d.name} failed: ${outcome.error}`, 'Try again', 'Enter token manually');
-    if (choice === 'Try again') return pair(c, d);
-    if (choice === 'Enter token manually') return enterToken(c, d);
-    return false;
+      `Decky Toolkit: Pairing with ${d.name} failed: ${outcome.error}`, 'Try again');
+    return choice === 'Try again' ? pair(c, d) : false;
   }
   await c.setTokenFor(d, outcome.token);
   await c.markConnected(d.id);
@@ -199,31 +193,4 @@ function waitForApproval(c: Connection, d: SavedDevice): Thenable<PairOutcome> {
         if (abort.signal.aborted && id) void client.cancelPairing(id).catch(() => undefined);
       }
     });
-}
-
-export async function enterToken(c: Connection, device?: SavedDevice): Promise<boolean> {
-  const d = device ? fresh(c, device) : c.activeDevice;
-  const label = d?.name ?? c.label;
-  const token = (await vscode.window.showInputBox({
-    prompt: `Bearer token for ${label} (shown in the Decky Toolkit Quick Access panel)`,
-    password: true,
-    ignoreFocusOut: true,
-    validateInput: v => (v.trim() ? undefined : 'Token is empty'),
-  }))?.trim();
-  if (!token) return false;
-  try {
-    await new DeckyClient(d ?? c.address, token).listTools();
-  } catch (e) {
-    if (e instanceof HttpError && e.status === 401) throw new Error('the device rejected that token.');
-    void vscode.window.showWarningMessage(`Decky Toolkit: could not verify the token (${describeError(e)}); saved it anyway.`);
-  }
-  if (!d) {
-    await c.setToken(token);
-    return true;
-  }
-  if (c.activeDevice?.id !== d.id) await c.setActive(d.id);
-  await c.setTokenFor(d, token);
-  await c.markConnected(d.id);
-  connected(c, d, 'Connected to');
-  return true;
 }

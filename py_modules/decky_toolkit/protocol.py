@@ -5,7 +5,9 @@ revision from 2025-03-26 on), GET returns 405. Authentication is applied by the 
 """
 import json
 import logging
+import os
 import traceback
+from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from aiohttp import web
@@ -13,7 +15,19 @@ from aiohttp import web
 from .tools import ToolRegistry
 
 SUPPORTED_PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26")
-SERVER_INFO = {"name": "decky-toolkit", "version": "0.2.0"}
+
+
+def _plugin_version() -> str:
+    # release-please bumps package.json; the loader exports that version as DECKY_PLUGIN_VERSION.
+    if v := os.environ.get("DECKY_PLUGIN_VERSION"):
+        return v
+    try:
+        return json.loads((Path(__file__).resolve().parents[2] / "package.json").read_text())["version"]
+    except (OSError, ValueError, KeyError):
+        return "0.0.0"
+
+
+SERVER_INFO = {"name": "decky-toolkit", "version": _plugin_version()}
 
 PARSE_ERROR = -32700
 INVALID_REQUEST = -32600
