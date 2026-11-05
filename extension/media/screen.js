@@ -6,6 +6,8 @@
   const img = el('img'), msg = el('msg'), hint = el('hint'), main = el('main');
   let base = document.body.dataset.base;
   let paused = false, visible = true, abort = null, gen = 0, lastUrl = null, retry = null;
+  // False while the extension says the device is not connected: nothing is fetched, the last frame stays dimmed.
+  let live = document.body.dataset.live !== 'false';
 
   const show = t => { msg.textContent = t; msg.hidden = !t; };
   // Short notes (gamepad connected, input refused) fade on their own; the audio hint stays until audio runs.
@@ -43,7 +45,7 @@
     abort = new AbortController();
     try {
       const res = await fetch(base + '/stream.mjpeg', { signal: abort.signal, cache: 'no-store' });
-      if (res.status === 401) { show('Unauthorized: the stored token was rejected.\nRe-pair the device from the Devices view (… → Re-pair) or run "Decky: Enter token manually".'); return; }
+      if (res.status === 401) { show('Unauthorized: the stored token was rejected.\nRe-pair the device from the Devices view (… → Re-pair) or run "Decky: Enter token manually".'); vscode.postMessage({ type: 'lost' }); return; }
       if (!res.ok || !res.body) throw new Error('HTTP ' + res.status + ' ' + (await res.text()).slice(0, 300));
       show(''); armStall();
       const reader = res.body.getReader();
@@ -72,22 +74,35 @@
         }
       }
       disarmStall();
-      show(applying ? 'Applying stream settings…' : 'Stream ended. Reconnecting…');
+      if (my === gen) { show(applying ? 'Applying stream settings…' : 'Stream ended. Reconnecting…'); vscode.postMessage({ type: 'lost' }); }
     } catch (e) {
       disarmStall();
-      if (e.name !== 'AbortError') show(applying ? 'Applying stream settings…' : 'Disconnected: ' + e.message + '\nReconnecting…');
+      if (e.name !== 'AbortError' && my === gen) { show(applying ? 'Applying stream settings…' : 'Disconnected: ' + e.message + '\nReconnecting…'); vscode.postMessage({ type: 'lost' }); }
     }
-    if (my === gen && visible && !abort.signal.aborted) retry = setTimeout(run, 2000);
+    if (my === gen && visible && live && !abort.signal.aborted) retry = setTimeout(run, 2000);
   }
 
   function stop() { gen++; clearTimeout(retry); disarmStall(); if (abort) abort.abort(); }
 
+  function applyLink(m) {
+    const was = live;
+    live = !!m.live;
+    main.classList.toggle('offline', !live);
+    if (!live) { stop(); closeWs(); closeAudio(); doneApplying(); show(m.text); return; }
+    if (was) return;
+    show('Connecting…');
+    if (visible) run();
+    if (inp && inp.enabled) connectWs();
+    connectAudio();
+  }
+
   window.addEventListener('message', e => {
     const m = e.data;
-    if (m.type === 'reconnect') { if (m.base) base = m.base; stop(); closeWs(); closeAudio(); if (visible) run(); if (inp && inp.enabled) connectWs(); connectAudio(); }
+    if (m.type === 'link') applyLink(m);
+    if (m.type === 'reconnect' && live) { if (m.base) base = m.base; stop(); closeWs(); closeAudio(); if (visible) run(); if (inp && inp.enabled) connectWs(); connectAudio(); }
     // Hidden panels keep their context; stop pulling ~50 Mbit/s nobody is looking at.
     // onDidChangeViewState also fires on focus changes, so only act when visibility really flips.
-    if (m.type === 'visible' && m.visible !== visible) { visible = m.visible; if (visible) { show('Connecting…'); run(); connectAudio(); } else { stop(); releaseAll(); closeAudio(); } }
+    if (m.type === 'visible' && m.visible !== visible) { visible = m.visible; if (!live) return; if (visible) { show('Connecting…'); run(); connectAudio(); } else { stop(); releaseAll(); closeAudio(); } }
     if (m.type === 'input') applyInput(m.state);
     if (m.type === 'paused') paused = !!m.paused;
     if (m.type === 'applying') { applying = true; clearTimeout(applyTimer); applyTimer = setTimeout(doneApplying, 6000); }
@@ -120,7 +135,7 @@
   }
 
   function connectWs() {
-    if (ws) return;
+    if (ws || !live) return;
     clearTimeout(wsRetry);
     const sock = ws = new WebSocket(base.replace(/^http/, 'ws') + '/input');
     sock.onopen = updateCapture;
@@ -134,7 +149,7 @@
       updateCapture();
       // 4003: input was turned off or pairing is open; the extension's next state update says which.
       if (ev.code === 4003) { flash(ev.reason || 'Input refused', 5000); vscode.postMessage({ type: 'refreshInput' }); return; }
-      if (inp && inp.enabled) wsRetry = setTimeout(connectWs, 1500);
+      if (inp && inp.enabled && live) wsRetry = setTimeout(connectWs, 1500);
     };
   }
   function closeWs() {
@@ -336,7 +351,7 @@ registerProcessor('pcm-player', PcmPlayer);`;
     nextT += n / 48000;
   }
   function connectAudio() {
-    if (aws || !deviceAudio || !visible) return;
+    if (aws || !deviceAudio || !visible || !live) return;
     clearTimeout(aRetry);
     const sock = aws = new WebSocket(base.replace(/^http/, 'ws') + '/audio');
     sock.binaryType = 'arraybuffer';
@@ -361,5 +376,5 @@ registerProcessor('pcm-player', PcmPlayer);`;
   }
 
   vscode.postMessage({ type: 'ready' });
-  run();
+  if (live) run();
 })();

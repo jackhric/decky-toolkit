@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
 import type { StreamSettings } from './api';
 import { HttpError, describeError } from './client';
-import { Connection, ConnectionState, InputState, externalProxyBase } from './connection';
+import { Connection, ConnectionState, InputState, externalProxyBase, linkMessage, linkSuffix } from './connection';
 import { ControllerWatcher, addVirtualController, isList } from './controllers';
 import { inputOn } from './input';
 
@@ -19,16 +19,27 @@ export class StatusBar implements vscode.Disposable {
 
   render(): void {
     const d = this.conn.connectedDevice;
+    this.item.command = 'decky-toolkit.switchDevice';
+    this.item.backgroundColor = undefined;
     if (!d) {
       this.item.text = '$(vm) Decky: not connected';
       this.item.tooltip = 'Click to connect to a device or add one';
       return;
     }
-    const down = this.conn.health.kind === 'unreachable';
+    const h = this.conn.health;
+    if (h.kind === 'unreachable' || this.conn.tokenRejected) {
+      const lost = h.kind === 'unreachable';
+      this.item.text = `$(${lost ? 'debug-disconnect' : 'key'}) ${d.name}: ${lost ? 'connection lost' : 'token rejected'}`;
+      this.item.tooltip = lost
+        ? `Decky: lost connection to ${d.name} (${d.host}:${d.port}): ${h.error}. Reconnecting as soon as it answers. Click to reconnect now`
+        : `Decky: ${d.name} (${d.host}:${d.port}) rejected the stored token. Click to pair again`;
+      this.item.backgroundColor = new vscode.ThemeColor(lost ? 'statusBarItem.warningBackground' : 'statusBarItem.errorBackground');
+      this.item.command = 'decky-toolkit.reconnect';
+      return;
+    }
     const input = inputOn(this.conn.input);
-    this.item.text = `$(${down ? 'warning' : 'vm-connect'}) ${d.name}${down ? ' (unreachable)' : ''}${input ? ' $(keyboard)' : ''}`;
-    this.item.tooltip = `Decky: connected to ${d.name} (${d.host}:${d.port})${down ? `, not answering: ${(this.conn.health as { error: string }).error}` : ''}` +
-      `${input ? ', remote input on' : ''}. Click for devices`;
+    this.item.text = `$(vm-connect) ${d.name}${input ? ' $(keyboard)' : ''}`;
+    this.item.tooltip = `Decky: connected to ${d.name} (${d.host}:${d.port})${input ? ', remote input on' : ''}. Click for devices`;
   }
 
   dispose(): void {
@@ -69,7 +80,7 @@ export class ScreenPanel {
       return;
     }
     const { external } = await externalProxyBase(conn);
-    const panel = vscode.window.createWebviewPanel('decky-toolkit.screen', `Screen: ${conn.label}`, vscode.ViewColumn.Beside, {
+    const panel = vscode.window.createWebviewPanel('decky-toolkit.screen', screenTitle(conn), vscode.ViewColumn.Beside, {
       enableScripts: true,
       retainContextWhenHidden: true,
       localResourceRoots: [vscode.Uri.joinPath(ctx.extensionUri, 'media')],
@@ -90,7 +101,7 @@ export class ScreenPanel {
   ) {
     this.muted = ctx.globalState.get<boolean>(MUTED_KEY, false);
     this.volume = ctx.globalState.get<number>(VOLUME_KEY, 0.8);
-    panel.webview.html = this.html(external);
+    panel.webview.html = this.html(external, conn.link === 'connected' ? '' : linkMessage(conn));
     panel.onDidDispose(() => this.dispose(), null, this.disposables);
     panel.onDidChangeViewState(e => void this.post({ type: 'visible', visible: e.webviewPanel.visible }), null, this.disposables);
     let sentInput: string | undefined;
@@ -104,8 +115,24 @@ export class ScreenPanel {
     };
     controllers.onDidChange(() => this.checkPadTarget(), null, this.disposables);
     this.disposables.push(controllers.watch());
+    let sentLive: boolean | undefined, sentText: string | undefined;
+    const sendLink = (force = false) => {
+      const live = conn.link === 'connected';
+      const text = live ? '' : linkMessage(conn);
+      panel.title = screenTitle(conn);
+      if (!force && live === sentLive && text === sentText) return;
+      // Settings may have changed while the device was away.
+      if (live && sentLive === false) void this.loadStream();
+      sentLive = live;
+      sentText = text;
+      void this.post({ type: 'link', live, text });
+      void setContext('live', live);
+    };
     panel.webview.onDidReceiveMessage(m => {
+      // The stream failed: check now instead of waiting for the next /health poll.
+      if (m?.type === 'lost') void conn.checkHealth().then(h => { if (h.kind === 'ok') void conn.refreshInput(); });
       if (m?.type === 'ready') {
+        sendLink(true);
         sendInput(true);
         this.sendAudio();
         void this.post({ type: 'paused', paused: this.paused });
@@ -115,18 +142,20 @@ export class ScreenPanel {
       if (m?.type === 'ready' || m?.type === 'refreshInput') void conn.refreshInput();
     }, null, this.disposables);
     conn.onDidChange(() => {
+      sendLink();
       sendInput();
       // The 5 s stats tick carries the settings, so changes from other clients reach the panel.
       const st = conn.stats?.settings;
       if (st && this.stream) this.setStream({ ...this.stream, ...st });
     }, null, this.disposables);
     conn.onDidChangeTarget(() => {
-      panel.title = `Screen: ${conn.label}`;
+      sendLink();
       void this.post({ type: 'reconnect' });
       this.stream = undefined;
       void this.loadStream();
     }, null, this.disposables);
     this.disposables.push(conn.watchStats());
+    void setContext('live', conn.link === 'connected');
     void setContext('paused', false);
     void setContext('muted', this.muted);
     void setContext('audio', false);
@@ -259,7 +288,7 @@ export class ScreenPanel {
     if (pick.run) await pick.run(); else this.setPadTarget(pick.value ?? '');
   }
 
-  private html(external: string): string {
+  private html(external: string, offline: string): string {
     const webview = this.panel.webview;
     const origin = new URL(external).origin;
     const nonce = randomBytes(16).toString('base64');
@@ -284,10 +313,10 @@ export class ScreenPanel {
 <link rel="stylesheet" href="${media('screen.css')}">
 <title>Device screen</title>
 </head>
-<body data-base="${attr(external)}">
-<main id="main" tabindex="-1">
+<body data-base="${attr(external)}" data-live="${!offline}">
+<main id="main" tabindex="-1"${offline ? ' class="offline"' : ''}>
   <img id="img" alt="Device display">
-  <div id="msg">Connecting…</div>
+  <div id="msg">${esc(offline || 'Connecting…')}</div>
   <div id="hint" hidden></div>
 </main>
 <script nonce="${nonce}" src="${media('screen.js')}"></script>
@@ -299,6 +328,16 @@ export class ScreenPanel {
     ScreenPanel.current = undefined;
     this.disposables.forEach(d => d.dispose());
   }
+}
+
+function esc(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+}
+
+/** The tab title carries the connection state, so a background tab shows it too. */
+function screenTitle(conn: ConnectionState): string {
+  const suffix = linkSuffix(conn.link);
+  return `Screen: ${conn.label}${suffix ? ` (${suffix})` : ''}`;
 }
 
 function setContext(key: string, value: unknown): Thenable<unknown> {

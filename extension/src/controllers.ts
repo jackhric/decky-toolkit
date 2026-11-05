@@ -31,6 +31,7 @@ export class ControllerWatcher implements vscode.Disposable {
   private eventsMissing = false;
   private timer?: NodeJS.Timeout;
   private readonly sub: vscode.Disposable;
+  private readonly linkSub: vscode.Disposable;
 
   constructor(private readonly conn: ConnectionState, private readonly proxyBase: () => Promise<string>) {
     this.sub = conn.onDidChangeTarget(() => {
@@ -41,10 +42,23 @@ export class ControllerWatcher implements vscode.Disposable {
       this.set(undefined);
       if (this.leases > 0) void this.tick();
     });
+    let wasConnected = this.connected;
+    this.linkSub = conn.onDidChange(() => {
+      const now = this.connected;
+      if (now === wasConnected) return;
+      wasConnected = now;
+      if (!now) {
+        this.gen++;
+        this.events?.abort();
+        this.events = undefined;
+      } else if (this.leases > 0) {
+        void this.tick();
+      }
+    });
   }
 
   get connected(): boolean {
-    return !!(this.conn.connectedDevice && this.conn.authedClient());
+    return !!(this.conn.link === 'connected' && this.conn.authedClient());
   }
 
   watch(): vscode.Disposable {
@@ -74,7 +88,7 @@ export class ControllerWatcher implements vscode.Disposable {
   }
 
   async refresh(): Promise<ControllersState | undefined> {
-    const client = this.conn.connectedDevice && this.conn.authedClient();
+    const client = this.connected && this.conn.authedClient();
     if (!client) return undefined;
     const gen = this.gen;
     let next: ControllersState;
@@ -129,6 +143,7 @@ export class ControllerWatcher implements vscode.Disposable {
     clearInterval(this.timer);
     this.events?.abort();
     this.sub.dispose();
+    this.linkSub.dispose();
     this.changed.dispose();
   }
 }
@@ -217,6 +232,10 @@ export class ControllersTreeProvider implements vscode.TreeDataProvider<vscode.T
 
   refresh(): void {
     void this.watcher.refresh();
+  }
+
+  redraw(): void {
+    this.changed.fire(undefined);
   }
 
   getTreeItem(item: vscode.TreeItem): vscode.TreeItem {

@@ -3,7 +3,7 @@ import { homedir } from 'os';
 import * as path from 'path';
 import { ActionsTreeProvider, WORKSPACE_PLUGIN } from './actionsTree';
 import { DeckyClient, describeError, isMissingRoute } from './client';
-import { Connection } from './connection';
+import { Connection, LinkState, linkSuffix } from './connection';
 import { ControllerWatcher, ControllersTreeProvider, addVirtualController, removeVirtualController } from './controllers';
 import { DeployController, PluginWorkspace } from './deploy';
 import {
@@ -21,7 +21,7 @@ import { navigate, openPluginPanel, simpleNavigate } from './navigation';
 import { connect, enterToken, pair } from './pairing';
 import { PluginsTreeProvider } from './pluginsTree';
 import { PreviewViewProvider } from './preview';
-import { DeckyFileSystemProvider, SCHEME } from './remoteFs';
+import { DeckyFileDecorations, DeckyFileSystemProvider, SCHEME } from './remoteFs';
 import { ScreenPanel, StatusBar } from './screenPanel';
 import { WelcomeViewProvider } from './welcome';
 
@@ -83,9 +83,12 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     discovery.onDidChangeState(syncHasDevices),
   );
   syncHasDevices();
+  const decorations = new DeckyFileDecorations(c);
+  ctx.subscriptions.push(decorations, vscode.window.registerFileDecorationProvider(decorations));
   const refreshPlugins = () => pluginsTree.refresh();
 
   let connectedContext: boolean | undefined;
+  let linkContext: LinkState | undefined | null = null;
   let statsLease: vscode.Disposable | undefined;
   let controllersLease: vscode.Disposable | undefined;
   let sessionId: string | undefined;
@@ -95,13 +98,24 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
       connectedContext = !!connected;
       void vscode.commands.executeCommand('setContext', 'decky-toolkit.connected', connectedContext);
     }
+    const link = c.link;
+    if (link !== linkContext) {
+      // The views stay once shown and go empty, so their viewsWelcome for this state takes their place.
+      linkContext = link;
+      void vscode.commands.executeCommand('setContext', 'decky-toolkit.link', link);
+      actionsTree.refresh();
+      controllersTree.redraw();
+      refreshPlugins();
+      gamesTree.refresh();
+    }
     if (connected?.id !== sessionId) {
       sessionId = connected?.id;
       refreshPlugins();
       controllersTree.refresh();
       gamesTree.refresh();
     }
-    const d = connected && (c.health.kind === 'unreachable' ? `${connected.name} · unreachable` : connected.name);
+    const suffix = linkSuffix(link);
+    const d = link && (suffix ? `${c.linkLabel} · ${suffix}` : c.linkLabel);
     actionsView.description = d;
     pluginsView.description = d;
     controllersView.description = d;
@@ -151,6 +165,12 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     else await addDevice(c);
   });
   command('decky-toolkit.disconnectDevice', () => c.disconnect());
+  command('decky-toolkit.reconnect', async () => {
+    const d = c.linkDevice ?? c.activeDevice;
+    if (!d) await addDevice(c);
+    else if (c.link === 'rejected') await pair(c, d);
+    else await connect(c, d);
+  });
   command('decky-toolkit.pairAgain', async arg => {
     const d = deviceFrom(c, arg);
     if (d) await pair(c, d);
@@ -280,6 +300,14 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   if (last) void connect(c, last, false);
   void c.probeAll();
   discoverWhenVisible();
+  // A session that was lost before this window started (or never came up) resumes once the device answers.
+  let lastDown = false;
+  ctx.subscriptions.push(c.onDidChangeStatus(() => {
+    const want = c.connectedDevice ? undefined : c.lastSessionDevice;
+    const status = want && c.statusOf(want);
+    if (lastDown && status === 'disconnected') void connect(c, want!, false);
+    lastDown = status === 'unreachable';
+  }));
 }
 
 export function deactivate(): void {

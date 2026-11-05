@@ -8,6 +8,7 @@ main:focus { outline: none; }
 main.capturing, main.capturing:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
 img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
 img:not([src]) { visibility: hidden; }
+main.offline img { opacity: .4; }
 main.capturing img { cursor: crosshair; }
 #msg, #hint {
   position: absolute; left: 50%; transform: translateX(-50%); max-width: 80%; white-space: pre-wrap;

@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import type { FsEntry } from './api';
 import { DeckyClient, DeviceAddress, HttpError, describeError, isConnectionError, isMissingRoute } from './client';
-import type { SavedDevice } from './connection';
+import type { ConnectionState, SavedDevice } from './connection';
 
 export const SCHEME = 'decky';
 const DEFAULT_PORT = 8765;
@@ -12,6 +12,7 @@ const MAX_SYMLINK_LOOKUPS = 64;
 export interface DeviceSource {
   readonly devices: SavedDevice[];
   tokenFor(address: DeviceAddress): Promise<string | undefined>;
+  noteReachable?(device: SavedDevice, reachable: boolean): void;
 }
 
 export function deviceAuthority(d: DeviceAddress): string {
@@ -71,6 +72,47 @@ export function toFsError(e: unknown, uri: vscode.Uri, device: string): Error {
   return new vscode.FileSystemError(serverMessage(e));
 }
 
+function deviceOf(devices: SavedDevice[], uri: vscode.Uri): SavedDevice | undefined {
+  const [host, port] = uri.authority.split(':');
+  return devices.find(d => d.host === host && d.port === (port ? Number(port) : DEFAULT_PORT));
+}
+
+/**
+ * Marks decky:// editors and Explorer entries of a device that cannot serve them right now. The files
+ * stay open; the badge and colour show in the tab, and the tooltip says why saving would fail.
+ * A user Disconnect does not mark them: decky:// works with the stored token without a session.
+ */
+export class DeckyFileDecorations implements vscode.FileDecorationProvider, vscode.Disposable {
+  private readonly changed = new vscode.EventEmitter<undefined>();
+  readonly onDidChangeFileDecorations = this.changed.event;
+  private readonly sub: vscode.Disposable;
+
+  constructor(private readonly conn: ConnectionState) {
+    this.sub = conn.onDidChangeStatus(() => this.changed.fire(undefined));
+  }
+
+  provideFileDecoration(uri: vscode.Uri): vscode.FileDecoration | undefined {
+    if (uri.scheme !== SCHEME) return undefined;
+    const d = deviceOf(this.conn.devices, uri);
+    if (!d) return decoration('!', `No saved Decky device ${uri.authority}; add it in the Decky view`, 'list.errorForeground');
+    const session = this.conn.connectedDevice?.id === d.id;
+    if (session && this.conn.tokenRejected) return decoration('!', `${d.name} rejected the stored token; re-pair it to open or save files`, 'list.errorForeground');
+    const status = this.conn.statusOf(d);
+    if (status === 'unreachable') return decoration('!', `Lost connection to ${d.name}; files open and save again as soon as it answers`, 'list.warningForeground');
+    if (status === 'unpaired') return decoration('!', `Not paired with ${d.name}; connect to it in the Decky view`, 'list.warningForeground');
+    return undefined;
+  }
+
+  dispose(): void {
+    this.sub.dispose();
+    this.changed.dispose();
+  }
+}
+
+function decoration(badge: string, tooltip: string, color: string): vscode.FileDecoration {
+  return new vscode.FileDecoration(badge, tooltip, new vscode.ThemeColor(color));
+}
+
 function typeOf(e: FsEntry): vscode.FileType {
   if (e.type === 'dir') return vscode.FileType.Directory;
   if (e.type === 'file') return vscode.FileType.File;
@@ -92,9 +134,7 @@ export class DeckyFileSystemProvider implements vscode.FileSystemProvider, vscod
   constructor(private readonly source: DeviceSource) {}
 
   private device(uri: vscode.Uri): SavedDevice {
-    const [host, port] = uri.authority.split(':');
-    const want = { host, port: port ? Number(port) : DEFAULT_PORT };
-    const d = this.source.devices.find(x => x.host === want.host && x.port === want.port);
+    const d = deviceOf(this.source.devices, uri);
     if (!d) throw vscode.FileSystemError.Unavailable(`no saved Decky device ${uri.authority}; add it in the Decky view`);
     return d;
   }
@@ -104,8 +144,11 @@ export class DeckyFileSystemProvider implements vscode.FileSystemProvider, vscod
     const token = await this.source.tokenFor(d);
     if (!token) throw vscode.FileSystemError.Unavailable(`not paired with Decky device ${d.name}; connect to it in the Decky view`);
     try {
-      return await fn(new DeckyClient(d, token));
+      const result = await fn(new DeckyClient(d, token));
+      this.source.noteReachable?.(d, true);
+      return result;
     } catch (e) {
+      if (isConnectionError(e)) this.source.noteReachable?.(d, false);
       throw toFsError(e, uri, d.name);
     }
   }

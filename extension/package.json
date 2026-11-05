@@ -81,14 +81,14 @@
           "id": "decky-toolkit.actions",
           "name": "Actions",
           "icon": "media/decky.svg",
-          "when": "decky-toolkit.connected",
+          "when": "decky-toolkit.link",
           "initialSize": 6
         },
         {
           "id": "decky-toolkit.plugins",
           "name": "Plugins",
           "icon": "media/decky.svg",
-          "when": "decky-toolkit.connected",
+          "when": "decky-toolkit.link",
           "visibility": "collapsed",
           "initialSize": 2
         },
@@ -96,7 +96,7 @@
           "id": "decky-toolkit.games",
           "name": "Games",
           "icon": "media/decky.svg",
-          "when": "decky-toolkit.connected",
+          "when": "decky-toolkit.link",
           "visibility": "collapsed",
           "initialSize": 3
         },
@@ -104,7 +104,7 @@
           "id": "decky-toolkit.controllers",
           "name": "Controllers",
           "icon": "media/decky.svg",
-          "when": "decky-toolkit.connected",
+          "when": "decky-toolkit.link",
           "visibility": "collapsed",
           "initialSize": 2
         },
@@ -113,7 +113,7 @@
           "id": "decky-toolkit.preview",
           "name": "Preview",
           "icon": "media/decky.svg",
-          "when": "decky-toolkit.connected",
+          "when": "decky-toolkit.link",
           "initialSize": 1
         }
       ]
@@ -121,7 +121,88 @@
     "viewsWelcome": [
       {
         "view": "decky-toolkit.controllers",
-        "contents": "No controllers seen by Steam Input.\n[Add virtual controller](command:decky-toolkit.addVirtualController)"
+        "contents": "No controllers seen by Steam Input.\n[Add virtual controller](command:decky-toolkit.addVirtualController)",
+        "when": "decky-toolkit.link == connected"
+      },
+      {
+        "view": "decky-toolkit.actions",
+        "contents": "Connecting to the device…",
+        "when": "decky-toolkit.link == connecting"
+      },
+      {
+        "view": "decky-toolkit.actions",
+        "contents": "Lost connection to the device. It is not answering; this view fills again as soon as it does.\n[Reconnect now](command:decky-toolkit.reconnect)",
+        "when": "decky-toolkit.link == unreachable"
+      },
+      {
+        "view": "decky-toolkit.actions",
+        "contents": "The device rejected the stored token, so nothing can be loaded. Pair again to continue.\n[Re-pair](command:decky-toolkit.reconnect)",
+        "when": "decky-toolkit.link == rejected"
+      },
+      {
+        "view": "decky-toolkit.actions",
+        "contents": "Disconnected from the device.\n[Reconnect](command:decky-toolkit.reconnect)",
+        "when": "decky-toolkit.link == disconnected"
+      },
+      {
+        "view": "decky-toolkit.plugins",
+        "contents": "Connecting to the device…",
+        "when": "decky-toolkit.link == connecting"
+      },
+      {
+        "view": "decky-toolkit.plugins",
+        "contents": "Lost connection to the device. It is not answering; this view fills again as soon as it does.\n[Reconnect now](command:decky-toolkit.reconnect)",
+        "when": "decky-toolkit.link == unreachable"
+      },
+      {
+        "view": "decky-toolkit.plugins",
+        "contents": "The device rejected the stored token, so nothing can be loaded. Pair again to continue.\n[Re-pair](command:decky-toolkit.reconnect)",
+        "when": "decky-toolkit.link == rejected"
+      },
+      {
+        "view": "decky-toolkit.plugins",
+        "contents": "Disconnected from the device.\n[Reconnect](command:decky-toolkit.reconnect)",
+        "when": "decky-toolkit.link == disconnected"
+      },
+      {
+        "view": "decky-toolkit.games",
+        "contents": "Connecting to the device…",
+        "when": "decky-toolkit.link == connecting"
+      },
+      {
+        "view": "decky-toolkit.games",
+        "contents": "Lost connection to the device. It is not answering; this view fills again as soon as it does.\n[Reconnect now](command:decky-toolkit.reconnect)",
+        "when": "decky-toolkit.link == unreachable"
+      },
+      {
+        "view": "decky-toolkit.games",
+        "contents": "The device rejected the stored token, so nothing can be loaded. Pair again to continue.\n[Re-pair](command:decky-toolkit.reconnect)",
+        "when": "decky-toolkit.link == rejected"
+      },
+      {
+        "view": "decky-toolkit.games",
+        "contents": "Disconnected from the device.\n[Reconnect](command:decky-toolkit.reconnect)",
+        "when": "decky-toolkit.link == disconnected"
+      },
+      {
+        "view": "decky-toolkit.controllers",
+        "contents": "Connecting to the device…",
+        "when": "decky-toolkit.link == connecting"
+      },
+      {
+        "view": "decky-toolkit.controllers",
+        "contents": "Lost connection to the device. It is not answering; this view fills again as soon as it does.\n[Reconnect now](command:decky-toolkit.reconnect)",
+        "when": "decky-toolkit.link == unreachable"
+      },
+      {
+        "view": "decky-toolkit.controllers",
+        "contents": "The device rejected the stored token, so nothing can be loaded. Pair again to continue.\n[Re-pair](command:decky-toolkit.reconnect)",
+        "when": "decky-toolkit.link == rejected"
+      },
+      {
+        "view": "decky-toolkit.controllers",
+        "contents": "Disconnected from the device.\n[Reconnect](command:decky-toolkit.reconnect)",
+        "when": "decky-toolkit.link == disconnected"
       }
     ],
     "commands": [
@@ -385,6 +466,12 @@
         "title": "Disconnect",
         "category": "Decky",
         "icon": "$(debug-disconnect)"
+      },
+      {
+        "command": "decky-toolkit.reconnect",
+        "title": "Reconnect",
+        "category": "Decky",
+        "icon": "$(plug)"
       },
       {
         "command": "decky-toolkit.pairAgain",
@@ -782,13 +869,18 @@
       ],
       "editor/title": [
         {
+          "command": "decky-toolkit.reconnect",
+          "when": "activeWebviewPanelId == 'decky-toolkit.screen' && !decky-toolkit.screen.live",
+          "group": "navigation@0"
+        },
+        {
           "command": "decky-toolkit.screen.inputOn",
-          "when": "activeWebviewPanelId == 'decky-toolkit.screen' && decky-toolkit.screen.input != 'on'",
+          "when": "activeWebviewPanelId == 'decky-toolkit.screen' && decky-toolkit.screen.input != 'on' && decky-toolkit.screen.live",
           "group": "navigation@1"
         },
         {
           "command": "decky-toolkit.screen.inputOff",
-          "when": "activeWebviewPanelId == 'decky-toolkit.screen' && decky-toolkit.screen.input == 'on'",
+          "when": "activeWebviewPanelId == 'decky-toolkit.screen' && decky-toolkit.screen.input == 'on' && decky-toolkit.screen.live",
           "group": "navigation@1"
         },
         {
@@ -803,7 +895,7 @@
         },
         {
           "command": "decky-toolkit.screen.settings",
-          "when": "activeWebviewPanelId == 'decky-toolkit.screen'",
+          "when": "activeWebviewPanelId == 'decky-toolkit.screen' && decky-toolkit.screen.live",
           "group": "navigation@3"
         },
         {
@@ -818,7 +910,7 @@
         },
         {
           "command": "decky-toolkit.snapshot",
-          "when": "activeWebviewPanelId == 'decky-toolkit.screen'",
+          "when": "activeWebviewPanelId == 'decky-toolkit.screen' && decky-toolkit.screen.live",
           "group": "navigation@5"
         }
       ]

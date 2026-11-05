@@ -35,7 +35,6 @@ function leaf(id: string, label: string, icon: string, command: string, args?: u
 }
 
 export function screenDescription(conn: ConnectionState): string {
-  if (conn.health.kind === 'unreachable') return 'offline';
   if (conn.statsError) return conn.statsError;
   const s = conn.stats;
   if (!s) return '';
@@ -66,8 +65,8 @@ export class ActionsTreeProvider implements vscode.TreeDataProvider<ActionNode>,
 
   async getChildren(node?: ActionNode): Promise<ActionNode[]> {
     if (node) return node.children ?? [];
-    const d = this.conn.connectedDevice;
-    if (!d) return [];
+    // Empty while not connected, so the view shows its lost-connection welcome instead of dead actions.
+    if (this.conn.link !== 'connected') return [];
     const plugins = this.ws ? await this.ws.ready() : [];
 
     const screen = group('screen', 'Screen', 'device-desktop', true, [
