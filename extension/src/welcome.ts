@@ -16,9 +16,16 @@ const ADD_ICON = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="t
 export class WelcomeViewProvider implements vscode.WebviewViewProvider {
   static readonly viewId = 'decky-toolkit.welcome';
 
-  constructor(private readonly extensionUri: vscode.Uri) {}
+  private view?: vscode.WebviewView;
+
+  constructor(private readonly extensionUri: vscode.Uri, private readonly onVisibility: () => void = () => {}) {}
+
+  get visible(): boolean {
+    return this.view?.visible ?? false;
+  }
 
   resolveWebviewView(view: vscode.WebviewView): void {
+    this.view = view;
     view.webview.options = { enableScripts: true, localResourceRoots: [] };
     view.webview.html = this.html();
     const sub = view.webview.onDidReceiveMessage(m => {
@@ -26,7 +33,14 @@ export class WelcomeViewProvider implements vscode.WebviewViewProvider {
       if (m?.type === 'plugin') void vscode.env.openExternal(vscode.Uri.parse(PLUGIN_REPO));
       if (m?.type === 'pairing') void vscode.commands.executeCommand('workbench.action.openWalkthrough', PAIRING_WALKTHROUGH, false);
     });
-    view.onDidDispose(() => sub.dispose());
+    const vis = view.onDidChangeVisibility(() => this.onVisibility());
+    view.onDidDispose(() => {
+      sub.dispose();
+      vis.dispose();
+      if (this.view === view) this.view = undefined;
+      this.onVisibility();
+    });
+    this.onVisibility();
   }
 
   private html(): string {

@@ -10,6 +10,8 @@ import {
   addDevice, changeHost, deviceActions, deviceFrom, editDevice, removeDevice, switchDevice,
 } from './devices';
 import { DevicesTreeProvider } from './devicesTree';
+import { DeviceDiscovery } from './discovery';
+import { connectFound, searchNetwork } from './discoveryTree';
 import {
   GamesTreeProvider, copyDeckyPath, findGame, gameLaunch, gameProtonLog, gameTerminate, openDeckyPath, openGameSaves, openNodeInExplorer,
 } from './games';
@@ -26,6 +28,7 @@ import { WelcomeViewProvider } from './welcome';
 export { connectionTimings } from './connection';
 export { pairingTimings } from './pairing';
 export { controllerTimings } from './controllers';
+export { discoveryHooks, discoveryTimings } from './discovery';
 
 let conn: Connection | undefined;
 
@@ -41,7 +44,10 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   const logs = new LogManager(c);
   const deployOut = vscode.window.createOutputChannel('Decky');
   const consoleOut = vscode.window.createOutputChannel('Decky Toolkit Console');
-  const devicesTree = new DevicesTreeProvider(c);
+  const discovery = new DeviceDiscovery(() => c.devices);
+  // While nothing is listed the welcome view stands in for the Devices tree, so it also triggers searches.
+  const welcome = new WelcomeViewProvider(ctx.extensionUri, () => discoverWhenVisible());
+  const devicesTree = new DevicesTreeProvider(c, discovery);
   const workspacePlugins = new PluginWorkspace();
   const actionsTree = new ActionsTreeProvider(c, workspacePlugins);
   const pluginsTree = new PluginsTreeProvider(c);
@@ -58,20 +64,32 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     c, status, logs, deployOut, consoleOut, workspacePlugins, devicesTree, actionsTree, pluginsTree, devicesView, actionsView, pluginsView,
     controllers, controllersTree, controllersView, gamesTree, gamesView,
     vscode.window.registerWebviewViewProvider(PreviewViewProvider.viewId, preview),
-    vscode.window.registerWebviewViewProvider(WelcomeViewProvider.viewId, new WelcomeViewProvider(ctx.extensionUri)),
+    vscode.window.registerWebviewViewProvider(WelcomeViewProvider.viewId, welcome),
+    discovery,
   );
+  // Searches only while someone looks at the list: when the Devices view opens, or on request.
+  const discoverWhenVisible = () => (devicesView.visible || welcome.visible ? discovery.start() : discovery.stop());
+  let hasDevicesContext: boolean | undefined;
+  const syncHasDevices = () => {
+    const has = c.devices.length > 0 || discovery.devices.length > 0;
+    if (has === hasDevicesContext) return;
+    hasDevicesContext = has;
+    void vscode.commands.executeCommand('setContext', 'decky-toolkit.hasDevices', has);
+  };
+  ctx.subscriptions.push(
+    devicesView.onDidChangeVisibility(discoverWhenVisible),
+    c.onDidChangeStatus(syncHasDevices),
+    discovery.onDidChange(syncHasDevices),
+    discovery.onDidChangeState(syncHasDevices),
+  );
+  syncHasDevices();
   const refreshPlugins = () => pluginsTree.refresh();
 
   let connectedContext: boolean | undefined;
-  let hasDevicesContext: boolean | undefined;
   let statsLease: vscode.Disposable | undefined;
   let controllersLease: vscode.Disposable | undefined;
   let sessionId: string | undefined;
   const sync = () => {
-    if (hasDevicesContext !== c.devices.length > 0) {
-      hasDevicesContext = c.devices.length > 0;
-      void vscode.commands.executeCommand('setContext', 'decky-toolkit.hasDevices', hasDevicesContext);
-    }
     const connected = c.connectedDevice;
     if (connectedContext !== !!connected) {
       connectedContext = !!connected;
@@ -151,6 +169,8 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   command('decky-toolkit.refreshPlugins', async () => refreshPlugins());
   command('decky-toolkit.changeHost', () => changeHost(c));
   command('decky-toolkit.addDevice', () => addDevice(c));
+  command('decky-toolkit.searchNetwork', () => searchNetwork(discovery));
+  command('decky-toolkit.connectFound', arg => connectFound(c, discovery, arg));
   command('decky-toolkit.editDevice', arg => editDevice(c, arg));
   command('decky-toolkit.removeDevice', arg => removeDevice(c, arg));
   command('decky-toolkit.switchDevice', () => switchDevice(c));
@@ -259,6 +279,7 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   const last = c.lastSessionDevice;
   if (last) void connect(c, last, false);
   void c.probeAll();
+  discoverWhenVisible();
 }
 
 export function deactivate(): void {

@@ -19,7 +19,8 @@ See README.md for setup and docs/reference.md for the tool list and architecture
   (sensitive-path deny list), `tools/plugin_api.py` (plugin backend methods, calls, frontend call check), `apps.py` (Steam library/launch via the client JS; tools in `tools/apps.py`), `games.py`
   (game/prefix/save paths, `fs_*` file browser with its sensitive-path and delete guards, `fs_read`/`fs_write`/`fs_mkdir`/`fs_rename` behind `writable` for the `/fs/*` routes, Proton logs; `vdf.py`
   parses KeyValues; tools in `tools/games.py`), `record.py` (screen recording to MKV; tools in `tools/record.py`),
-  `tools/perf.py` (Steam performance overlay).
+  `tools/perf.py` (Steam performance overlay), `advertise.py` (DNS-SD advertisement via `avahi-publish`) and
+  `identity.py` (non-secret `hostname`/`device_id`/`os` for `/health`).
 - `src/index.tsx` — Quick Access panel (React, `@decky/ui`, `@decky/api`). Built by `pnpm run build`
   into `dist/index.js`.
 - `scripts/test.sh` — Python tests under uv with the loader's Python major (CI runs it). Deploying this repo to
@@ -290,6 +291,18 @@ See README.md for setup and docs/reference.md for the tool list and architecture
   only focus/override/underlay/decoration windows plus the Steam overlay (gamescope `src/steamcompmgr.cpp`).
   `gamescopectl screenshot <path> <type>` (0 all real layers, 1 base plane (default), 2 full composition, 3 screen
   buffer) did not show it either. Check the level with the Quick Access perf tab in a capture instead.
+
+## Network discovery facts (verified 2026-11-04)
+- Bazzite runs avahi-daemon and ships `/usr/bin/avahi-publish` (SteamOS not checked). `avahi-publish -s <host>
+  _decky-toolkit._tcp 8765 api=1 version=… id=…` works as any user; the registration lives as long as the
+  process, so `advertise.Advertiser` keeps it running next to the HTTP server (not when bound to 127.x) with
+  `PR_SET_PDEATHSIG` so an orphaned backend's `os._exit` takes it along. `/etc/avahi/services` is not writable.
+- avahi answers a legacy unicast PTR query (sent from an ephemeral port to 224.0.0.251:5353) with a unicast
+  reply holding PTR, TXT, SRV, AAAA and A in the answer section, TTL 10; the extension relies on that and never
+  binds 5353 (other mDNS responders on the dev box hold it). The capture is the smoke test's `AVAHI_ANSWER`.
+- mDNS stays on one link; the extension also probes `/health` on its own subnets (/22 or smaller). A /24 sweep
+  took ~2.5 s (128 parallel, 1.2 s timeout). The dev box (10.0.0.30/24) does not see the Deck (10.0.70.18/24)
+  automatically; that is accepted, it is added by address.
 
 ## Pairing
 A client files `POST /pair/request` and long-polls `GET /pair/request/{id}?wait=25`; the device owner

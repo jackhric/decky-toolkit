@@ -12,15 +12,17 @@ from aiohttp import web
 
 sys.path.append(decky.DECKY_PLUGIN_DIR + "/py_modules")  # the loader does this too; kept for IDE/type tooling parity
 
+from decky_toolkit.advertise import Advertiser, txt_records  # noqa: E402
 from decky_toolkit.audio import AudioCapturer  # noqa: E402
 from decky_toolkit.auth import TokenAuth  # noqa: E402
 from decky_toolkit.capture import ScreenCapturer  # noqa: E402
 from decky_toolkit.console import ConsoleCollector  # noqa: E402
-from decky_toolkit.http import Api  # noqa: E402
+from decky_toolkit.http import API_VERSION, Api  # noqa: E402
+from decky_toolkit.identity import identity  # noqa: E402
 from decky_toolkit.controllers import ControllerService  # noqa: E402
 from decky_toolkit.input.service import InputService  # noqa: E402
 from decky_toolkit.pairing import PairingRequest, PairingRequests  # noqa: E402
-from decky_toolkit.protocol import McpServer  # noqa: E402
+from decky_toolkit.protocol import SERVER_INFO, McpServer  # noqa: E402
 from decky_toolkit.settings import Settings  # noqa: E402
 from decky_toolkit.tools import build_registry  # noqa: E402
 from decky_toolkit.ui import UiNavigator  # noqa: E402
@@ -82,6 +84,7 @@ class Plugin:
     console: ConsoleCollector | None = None
     pairing: PairingRequests
     pruner: asyncio.Task | None = None
+    advertiser: Advertiser | None = None
     last_error: str | None = None
 
     async def _start_server(self) -> None:
@@ -123,8 +126,15 @@ class Plugin:
         self.runner = runner
         self.last_error = None
         decky.logger.info("MCP server listening on http://%s:%s/mcp", self.settings.bind, self.settings.port)
+        if not self.settings.bind.startswith("127."):
+            self.advertiser = Advertiser(decky.logger, self.settings.port,
+                                         txt_records(SERVER_INFO["version"], API_VERSION, identity()["device_id"]))
+            self.advertiser.start()
 
     async def _stop_server(self) -> None:
+        if self.advertiser is not None:
+            await self.advertiser.stop()
+            self.advertiser = None
         if self.input is not None:
             await self.input.shutdown()
         if self.capturer is not None:

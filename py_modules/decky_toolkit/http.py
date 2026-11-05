@@ -9,6 +9,7 @@ from typing import Callable
 from aiohttp import web
 
 from . import audit, cdp, games, logs
+from .identity import identity
 from .apps import Apps
 from .audio import FORMAT as AUDIO_FORMAT, AudioCapturer, AudioDisabled, AudioUnavailable
 from .auth import TokenAuth
@@ -111,7 +112,7 @@ class Api:
         return web.Response(text="Decky Toolkit is running. Connect with the Decky Toolkit extension for VS Code / VSCodium.\n")
 
     async def handle_health(self, _request: web.Request) -> web.Response:
-        return web.json_response({"ok": True, **SERVER_INFO, "api_version": API_VERSION, "tools": len(self.mcp.tools)})
+        return web.json_response({"ok": True, **SERVER_INFO, "api_version": API_VERSION, "tools": len(self.mcp.tools), **identity()})
 
     # ---- pairing ----
 

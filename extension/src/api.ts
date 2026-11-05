@@ -6,6 +6,10 @@ export interface Health {
   version: string;
   api_version: number;
   tools: number;
+  /** Identification for network discovery; absent on older builds. */
+  hostname?: string;
+  device_id?: string | null;
+  os?: string | null;
 }
 
 export type PairClientKind = 'vscode' | 'browser' | 'mcp' | 'other';
