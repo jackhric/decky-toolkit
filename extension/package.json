@@ -345,6 +345,18 @@
         "icon": "$(add)"
       },
       {
+        "command": "decky-toolkit.searchNetwork",
+        "title": "Search network",
+        "category": "Decky",
+        "icon": "$(search)"
+      },
+      {
+        "command": "decky-toolkit.connectFound",
+        "title": "Connect",
+        "category": "Decky",
+        "icon": "$(plug)"
+      },
+      {
         "command": "decky-toolkit.editDevice",
         "title": "Edit device",
         "category": "Decky",
@@ -483,6 +495,11 @@
           "type": "boolean",
           "default": false,
           "description": "Deploy the workspace plugin (fast, without building) whenever dist/index.js, main.py or py_modules/**/*.py change. Keep your build running in watch mode (`pnpm run watch`)."
+        },
+        "decky-toolkit.discovery.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Search the local network for Decky Toolkit devices that are not saved yet (mDNS plus a probe of this machine's own subnets, like Moonlight). Runs when the Devices view opens and on Search network, never in the background. Devices on other subnets are not found; add them by address."
         }
       }
     },
@@ -501,9 +518,14 @@
           "group": "navigation@1"
         },
         {
+          "command": "decky-toolkit.searchNetwork",
+          "when": "view == decky-toolkit.devices && config.decky-toolkit.discovery.enabled",
+          "group": "navigation@2"
+        },
+        {
           "command": "decky-toolkit.refresh",
           "when": "view == decky-toolkit.devices",
-          "group": "navigation@2"
+          "group": "navigation@3"
         },
         {
           "command": "decky-toolkit.openScreen",
@@ -691,6 +713,21 @@
           "command": "decky-toolkit.copyDeckyPath",
           "when": "view == decky-toolkit.games && viewItem =~ /^decky(Dir|File)$/",
           "group": "1_path@2"
+        },
+        {
+          "command": "decky-toolkit.connectFound",
+          "when": "view == decky-toolkit.devices && viewItem == deck.found",
+          "group": "inline@1"
+        },
+        {
+          "command": "decky-toolkit.connectFound",
+          "when": "view == decky-toolkit.devices && viewItem == deck.found",
+          "group": "1_connect@1"
+        },
+        {
+          "command": "decky-toolkit.searchNetwork",
+          "when": "view == decky-toolkit.devices && viewItem == discovery.group",
+          "group": "inline@1"
         }
       ],
       "commandPalette": [
@@ -733,6 +770,14 @@
         {
           "command": "decky-toolkit.screen.resume",
           "when": "activeWebviewPanelId == 'decky-toolkit.screen'"
+        },
+        {
+          "command": "decky-toolkit.connectFound",
+          "when": "false"
+        },
+        {
+          "command": "decky-toolkit.searchNetwork",
+          "when": "config.decky-toolkit.discovery.enabled"
         }
       ],
       "editor/title": [

@@ -19,7 +19,7 @@ await esbuild.build({
     contents: "export * from './src/extension'; export * from './src/actionsTree'; export * from './src/pluginsTree'; " +
       "export * from './src/pluginDeploy'; export * from './src/stage'; export { AUTO_DEPLOY_DEBOUNCE_MS } from './src/deploy'; " +
       "export * from './src/controllers'; export * from './src/navigation'; export { HttpError } from './src/client'; " +
-      "export * from './src/games'; export * from './src/remoteFs';",
+      "export * from './src/games'; export * from './src/remoteFs'; export * from './src/discovery';",
     resolveDir: root,
     loader: 'ts',
   },
@@ -85,7 +85,8 @@ const say = kind => async (m, ...rest) => {
   return ui[kind](m, buttons);
 };
 
-const settings = { host: '10.1.2.3', port: 8765, pluginDirName: '', 'deploy.build': 'never' };
+// Discovery starts off so the older checks see only saved rows; the discovery checks turn it on.
+const settings = { host: '10.1.2.3', port: 8765, pluginDirName: '', 'deploy.build': 'never', 'discovery.enabled': false };
 const configEmitter = new EventEmitter();
 const workspaceFolders = new EventEmitter();
 const noop = async () => undefined;
@@ -584,6 +585,40 @@ ext.connectionTimings.healthPollMs = 40;
 ext.pairingTimings.retryMs = 20;
 ext.controllerTimings.pollMs = 40;
 
+// Fake LAN for discovery: interfaces, a /health per host and an mDNS responder behind a fake socket.
+const net = {
+  interfaces: { lo: [{ family: 'IPv4', internal: true, address: '127.0.0.1', netmask: '255.0.0.0' }] },
+  hosts: new Map(), probed: [], mdns: [], queries: [], slow: new Set(),
+};
+ext.discoveryHooks.interfaces = () => net.interfaces;
+ext.discoveryHooks.fetch = async (url, init) => {
+  const u = new URL(url);
+  net.probed.push(u.host);
+  if (net.slow.has(u.hostname)) {
+    return new Promise((_, reject) => init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true }));
+  }
+  const h = net.hosts.get(u.host);
+  if (h === undefined) throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'EHOSTUNREACH' } });
+  return typeof h === 'string' ? new Response(h, { status: 200 }) : new Response(JSON.stringify(h), { status: 200, headers: { 'content-type': 'application/json' } });
+};
+ext.discoveryHooks.createSocket = () => {
+  const on = {};
+  return {
+    bind: (_p, cb) => setTimeout(cb, 0),
+    on: (ev, fn) => { on[ev] = fn; },
+    setMulticastInterface: a => { net.iface = a; },
+    setMulticastTTL: () => undefined,
+    send: (msg, port, addr, cb) => {
+      net.queries.push({ iface: net.iface, port, addr, msg: Buffer.from(msg) });
+      setTimeout(() => { for (const [pkt, from] of net.mdns) on.message?.(pkt, { address: from }); cb(null); }, 1);
+    },
+    close: () => undefined,
+  };
+};
+ext.discoveryTimings.mdnsMs = 30;
+ext.discoveryTimings.probeTimeoutMs = 60;
+ext.discoveryTimings.minRescanMs = 60_000;
+
 await ext.activate(ctx);
 await settle();
 
@@ -678,14 +713,15 @@ await check('package.json: container, activation, commands, menus, version', asy
   for (const m of menus) assert.ok(declared.has(m.command), `menu refers to unknown command ${m.command}`);
   for (const m of menus) evalWhen(m.when, new Map());
   const whens = [...menus.map(m => m.when), ...pkg.contributes.views['decky-toolkit'].map(v => v.when), ...pkg.contributes.viewsWelcome.map(w => w.when)];
-  const allowedKeys = new Set(['view', 'viewItem', 'decky-toolkit.connected', 'decky-toolkit.hasDevices', 'false', 'activeWebviewPanelId',
+  const allowedKeys = new Set(['view', 'viewItem', 'decky-toolkit.connected', 'false', 'activeWebviewPanelId',
+    'decky-toolkit.hasDevices', 'config.decky-toolkit.discovery.enabled',
     'decky-toolkit.screen.input', 'decky-toolkit.screen.audio', 'decky-toolkit.screen.muted', 'decky-toolkit.screen.paused']);
   for (const w of whens.filter(Boolean)) {
     for (const [, key] of w.replace(/\/(?:\\.|[^/])+\//g, '/re/').matchAll(/(?:^|&&|\|\||\(|!)\s*([A-Za-z][\w.-]*)/g)) assert.ok(allowedKeys.has(key), `context key ${key} in ${w}`);
   }
   assert.deepEqual(pkg.contributes.viewsWelcome.map(w => w.view), ['decky-toolkit.controllers']);
   assert.deepEqual(Object.keys(pkg.contributes.configuration.properties).sort(),
-    ['decky-toolkit.deploy.build', 'decky-toolkit.deploy.onChange', 'decky-toolkit.host', 'decky-toolkit.openScreenOnConnect', 'decky-toolkit.pluginDirName', 'decky-toolkit.port']);
+    ['decky-toolkit.deploy.build', 'decky-toolkit.deploy.onChange', 'decky-toolkit.discovery.enabled', 'decky-toolkit.host', 'decky-toolkit.openScreenOnConnect', 'decky-toolkit.pluginDirName', 'decky-toolkit.port']);
   assert.deepEqual(pkg.contributes.configuration.properties['decky-toolkit.deploy.build'].enum, ['auto', 'always', 'never']);
   assert.equal(pkg.contributes.configuration.properties['decky-toolkit.deploy.build'].default, 'auto');
   assert.equal(pkg.contributes.configuration.properties['decky-toolkit.deploy.onChange'].default, false);
@@ -700,7 +736,7 @@ await check('package.json: container, activation, commands, menus, version', asy
   };
   for (const [view, want] of Object.entries(titles)) assert.deepEqual(titleMenu(view), want, `${view} title`);
   for (const view of Object.keys(titles)) {
-    for (const viewItem of ['plugin', 'deck.unpaired', 'deck.paired', 'deck.session', 'deck.busy', 'action', 'group.screen', 'controller.virtual', 'controller.physical', 'controller.unsupported',
+    for (const viewItem of ['plugin', 'deck.unpaired', 'deck.paired', 'deck.session', 'deck.busy', 'deck.found', 'discovery.group', 'discovery.add', 'action', 'group.screen', 'controller.virtual', 'controller.physical', 'controller.unsupported',
       'game', 'game.running', 'game.unsupported', 'deckyDir', 'deckyFile', 'gameGroup', 'gameLog']) {
       for (const inline of [true, false]) assert.deepEqual(dupes(itemMenu(view, viewItem, inline)), [], `${view} ${viewItem}`);
     }
@@ -720,7 +756,7 @@ await check('first activation seeds one saved device from the settings', async (
 await check('unpaired: only Devices visible, one row, Connect inline', async () => {
   assert.equal(calls.context.get('decky-toolkit.connected'), false);
   assert.deepEqual([...calls.context.keys()].sort(), ['decky-toolkit.connected', 'decky-toolkit.hasDevices'], 'the only context keys');
-  assert.equal(calls.context.get('decky-toolkit.hasDevices'), true, 'the seeded device replaces the welcome view');
+  assert.equal(calls.context.get('decky-toolkit.hasDevices'), true, 'one saved device');
   assert.deepEqual(visibleViews(), ['decky-toolkit.devices']);
   const rows = devicesProvider().getChildren();
   assert.equal(rows.length, 1);
@@ -2004,6 +2040,174 @@ await check('remote FS provider against a fake /fs* server: stat, readDirectory,
     fakeFs.missing = false;
   }
   return `${fakeFs.log.length} /fs requests; events ${events.length}; errors map to FileNotFound / FileExists / FileIsADirectory / NoPermissions / Unavailable`;
+});
+
+// Captured from avahi-publish on the Bazzite device answering a legacy unicast PTR query (2026-11-04).
+const AVAHI_ANSWER = Buffer.from('1234840000010005000000000e5f6465636b792d746f6f6c6b6974045f746370056c6f63616c00000c0001c00c000c00010000000a000a0762617a7a697465c00cc037001000010000000a001c0769643d61626364056170693d310d76657273696f6e3d302e322e30c037002100010000000a001000000000223d0762617a7a697465c020c07b001c00010000000a0010fe800000000000001d7a890bd48de1ebc07b000100010000000a00040a004612', 'hex');
+const toolkitHealth = (hostname, version = '0.3.0', extra = {}) => ({ ok: true, name: 'decky-toolkit', version, api_version: 1, tools: 60, hostname, device_id: `id-${hostname}`, os: 'SteamOS', ...extra });
+const legacyHealth = { ok: true, name: 'decky-mcp', version: '0.2.0', api_version: 1, tools: 51 };
+const useFakeLan = () => {
+  net.interfaces = {
+    lo: [{ family: 'IPv4', internal: true, address: '127.0.0.1', netmask: '255.0.0.0' }],
+    eth0: [{ family: 'IPv4', internal: false, address: '10.0.70.30', netmask: '255.255.255.0' }, { family: 'IPv6', internal: false, address: 'fe80::1', netmask: 'ffff:ffff:ffff:ffff::' }],
+    wlan0: [{ family: 'IPv4', internal: false, address: '10.1.2.50', netmask: '255.255.255.0' }, { family: 'IPv4', internal: false, address: '169.254.3.4', netmask: '255.255.0.0' }],
+    corp0: [{ family: 'IPv4', internal: false, address: '10.8.0.2', netmask: '255.255.0.0' }],
+    docker0: [{ family: 'IPv4', internal: false, address: '172.17.0.1', netmask: '255.255.0.0' }],
+    'br-2c0a796fe934': [{ family: 'IPv4', internal: false, address: '10.5.0.1', netmask: '255.255.255.0' }],
+  };
+  net.hosts = new Map([
+    ['10.0.70.18:8765', toolkitHealth('bazzite.internal', '0.3.0', { os: 'Bazzite' })],
+    ['10.0.70.40:8765', legacyHealth],
+    ['10.0.70.41:8765', { ok: true, name: 'some-other-service', version: '1.0' }],
+    ['10.0.70.42:8765', '<html>router login</html>'],
+    ['10.1.2.3:8765', toolkitHealth('steamdeck')],
+  ]);
+  net.slow = new Set(['10.0.70.99']);
+  net.mdns = [[AVAHI_ANSWER, '10.0.70.18']];
+};
+const groupNode = () => devicesProvider().getChildren().find(n => n.contextValue === 'discovery.group');
+
+await check('discovery: mDNS packet parsing (avahi capture) and interface/subnet selection', async () => {
+  const recs = ext.parseMessage(AVAHI_ANSWER);
+  assert.deepEqual(recs.map(r => r.type), [12, 16, 33, 1], 'AAAA skipped');
+  const services = ext.assembleServices(recs.map(r => ({ ...r, from: '10.0.70.18' })));
+  assert.deepEqual(services, [{ instance: 'bazzite', host: '10.0.70.18', port: 8765, txt: { id: 'abcd', api: '1', version: '0.2.0' } }]);
+  assert.throws(() => ext.parseMessage(AVAHI_ANSWER.subarray(0, 60)));
+  const q = ext.encodeQuery('_decky-toolkit._tcp.local', 12);
+  assert.equal(q.subarray(12).toString('hex'), AVAHI_ANSWER.subarray(12, q.length).toString('hex'), 'same question avahi echoed');
+  useFakeLan();
+  const ifaces = ext.usableInterfaces(net.interfaces);
+  assert.deepEqual(ifaces.map(i => `${i.name} ${i.address}/${i.prefix}`), ['eth0 10.0.70.30/24', 'wlan0 10.1.2.50/24', 'corp0 10.8.0.2/16']);
+  const { subnets, hosts } = ext.sweepTargets(ifaces);
+  assert.deepEqual(subnets, ['10.0.70.0/24', '10.1.2.0/24'], 'a /16 is too wide to sweep');
+  assert.equal(hosts.length, 2 * 253, 'network, broadcast and own address skipped');
+  assert.ok(!hosts.includes('10.0.70.30') && hosts.includes('10.0.70.1') && hosts.includes('10.0.70.254') && !hosts.includes('10.0.70.255'));
+  return `${recs.length} records; ${ifaces.length} usable interfaces; sweep ${subnets.join(', ')}`;
+});
+
+await check('discovery: off → no group and no Search network action', async () => {
+  assert.equal(groupNode(), undefined);
+  assert.deepEqual(titleMenu('decky-toolkit.devices'), ['decky-toolkit.addDevice', 'decky-toolkit.refresh']);
+  calls.context.set('config.decky-toolkit.discovery.enabled', true);
+  try {
+    assert.deepEqual(titleMenu('decky-toolkit.devices'), ['decky-toolkit.addDevice', 'decky-toolkit.searchNetwork', 'decky-toolkit.refresh']);
+  } finally {
+    calls.context.delete('config.decky-toolkit.discovery.enabled');
+  }
+  const cmd = pkg.contributes.commands.find(c => c.command === 'decky-toolkit.searchNetwork');
+  assert.deepEqual([cmd.title, cmd.icon], ['Search network', '$(search)']);
+  assert.equal(pkg.contributes.configuration.properties['decky-toolkit.discovery.enabled'].default, true);
+  return 'title: Add, Search network, Refresh';
+});
+
+await check('discovery: Search network finds devices via mDNS and the subnet sweep, ignores the rest', async () => {
+  net.probed.length = 0;
+  net.queries.length = 0;
+  await vscode.workspace.getConfiguration('decky-toolkit').update('discovery.enabled', true);
+  assert.equal(groupNode().iconPath.id, 'radio-tower', 'turning it on does not scan by itself');
+  tree('decky-toolkit.devices').view._visibility.fire({ visible: true });
+  assert.equal(groupNode().iconPath.id, 'loading~spin', 'opening the Devices view scans');
+  const scan = run('decky-toolkit.searchNetwork');
+  await settle(5);
+  const busy = groupNode();
+  assert.equal(busy.iconPath.id, 'loading~spin');
+  assert.equal(busy.description, 'searching…');
+  await scan;
+  assert.deepEqual(net.queries.map(q => [q.iface, q.addr, q.port]), [['10.0.70.30', '224.0.0.251', 5353], ['10.1.2.50', '224.0.0.251', 5353], ['10.8.0.2', '224.0.0.251', 5353]]);
+  assert.ok(net.probed.every(h => /^10\.(0\.70|1\.2)\.\d+:8765$/.test(h)), 'only the two local /24s, port 8765');
+  assert.ok(net.probed.includes('10.0.70.99:8765'), 'slow host probed and timed out');
+  const g = groupNode();
+  assert.equal(g.label, 'On this network');
+  assert.equal(g.iconPath.id, 'radio-tower');
+  assert.equal(g.description, '2 found');
+  assert.equal(g.collapsibleState, 2);
+  assert.deepEqual(itemMenu('decky-toolkit.devices', g.contextValue, true), ['decky-toolkit.searchNetwork']);
+  const kids = devicesProvider().getChildren(g);
+  assert.deepEqual(kids.map(k => [k.label, k.description, k.iconPath.id, k.contextValue]), [
+    ['bazzite', '10.0.70.18 · v0.3.0', 'vm', 'deck.found'],
+    ['10.0.70.40', '10.0.70.40 · v0.2.0', 'vm', 'deck.found'],
+    ['Add a device by address…', undefined, 'add', 'discovery.add'],
+  ], 'saved 10.1.2.3, the other service, the HTML page and the slow host are left out');
+  assert.match(kids[0].tooltip.value, /Decky Toolkit 0\.3\.0, API v1 · Bazzite/);
+  assert.match(kids[1].tooltip.value, /decky-mcp 0\.2\.0/);
+  assert.deepEqual(kids[0].command, { command: 'decky-toolkit.connectFound', title: 'Connect', arguments: ['10.0.70.18:8765'] });
+  assert.deepEqual(itemMenu('decky-toolkit.devices', 'deck.found', true), ['decky-toolkit.connectFound']);
+  assert.deepEqual(itemMenu('decky-toolkit.devices', 'deck.found', false), ['decky-toolkit.connectFound']);
+  assert.equal(kids[2].command.command, 'decky-toolkit.addDevice');
+  return `${kids.length - 1} found from ${net.probed.length} probes and ${net.queries.length} mDNS queries`;
+});
+
+await check('discovery engine: found/lost events, throttled start, stop, probe cap', async () => {
+  const d = new ext.DeviceDiscovery(() => []);
+  const events = [];
+  d.onDidChange(e => events.push({ found: e.found.map(x => x.key), lost: e.lost.map(x => x.key) }));
+  await d.rescan();
+  assert.deepEqual(events.at(-1).found.sort(), ['10.0.70.18:8765', '10.0.70.40:8765', '10.1.2.3:8765']);
+  assert.equal(d.devices.find(x => x.key === '10.0.70.18:8765').via, 'mdns');
+  net.hosts.delete('10.0.70.40:8765');
+  net.hosts.set('10.1.2.77:8765', toolkitHealth('steamdeck-2'));
+  // Same device_id at a second address (Wi-Fi + Ethernet) is listed once.
+  net.hosts.set('10.1.2.78:8765', toolkitHealth('steamdeck-2'));
+  await d.rescan();
+  assert.deepEqual(events.at(-1), { found: ['10.1.2.77:8765'], lost: ['10.0.70.40:8765'] });
+  const n = net.probed.length;
+  d.start();
+  assert.equal(d.scanning, false, 'start() right after a scan does nothing');
+  assert.equal(net.probed.length, n);
+  const pending = d.rescan();
+  assert.equal(d.scanning, true);
+  d.stop();
+  await pending;
+  assert.equal(d.scanning, false);
+  assert.ok(d.devices.some(x => x.key === '10.1.2.77:8765'), 'stop keeps the previous results');
+  ext.discoveryTimings.maxProbes = 300;
+  try {
+    await d.rescan();
+    assert.equal(d.lastScan.truncated, true);
+    assert.equal(d.lastScan.probes, 300 + 1, 'capped sweep plus one mDNS hit');
+  } finally {
+    ext.discoveryTimings.maxProbes = 1024;
+  }
+  d.dispose();
+  net.hosts.delete('10.1.2.77:8765');
+  net.hosts.delete('10.1.2.78:8765');
+  net.hosts.set('10.0.70.40:8765', legacyHealth);
+  return JSON.stringify(events);
+});
+
+await check('discovery: Connect on a found device saves it and starts pairing', async () => {
+  device.pairQueue = ['approved'];
+  const before = globalState.get('decky-toolkit.devices').length;
+  const reqs = device.pairRequests.length;
+  const kids = devicesProvider().getChildren(groupNode());
+  await run('decky-toolkit.connectFound', kids[0]);
+  await settle();
+  const list = globalState.get('decky-toolkit.devices');
+  assert.equal(list.length, before + 1);
+  assert.deepEqual({ ...list.at(-1), id: undefined }, { id: undefined, name: 'bazzite', host: '10.0.70.18', port: 8765 });
+  assert.equal(device.pairRequests.length, reqs + 1, 'a pairing request was filed');
+  assert.equal(secrets.get('decky-toolkit.token:10.0.70.18:8765'), 'fake-token');
+  assert.ok(!devicesProvider().getChildren(groupNode()).some(k => k.label === 'bazzite'), 'saved devices leave the group');
+  const row = devicesProvider().getChildren().find(r => r.device?.host === '10.0.70.18');
+  assert.equal(row.contextValue, 'deck.session');
+  return `saved ${list.at(-1).name} and paired`;
+});
+
+await check('discovery: hasDevices stays true while only found devices are listed; turning discovery off', async () => {
+  ui.warning = () => 'Remove';
+  for (const d of globalState.get('decky-toolkit.devices')) await run('decky-toolkit.removeDevice', d.id);
+  await settle();
+  assert.deepEqual(globalState.get('decky-toolkit.devices'), []);
+  assert.equal(calls.context.get('decky-toolkit.hasDevices'), true, 'the found 10.0.70.40 and 10.1.2.3 keep the tree');
+  assert.deepEqual(devicesProvider().getChildren().map(n => n.contextValue), ['discovery.group']);
+  await vscode.workspace.getConfiguration('decky-toolkit').update('discovery.enabled', false);
+  assert.deepEqual(devicesProvider().getChildren(), []);
+  assert.equal(calls.context.get('decky-toolkit.hasDevices'), false);
+  ui.warning = () => undefined;
+  await run('decky-toolkit.searchNetwork');
+  assert.match(lastMessage('info').m, /network discovery is turned off/);
+  assert.equal(groupNode(), undefined);
+  return 'hasDevices true → false';
 });
 
 await check('no unexpected error messages', async () => {

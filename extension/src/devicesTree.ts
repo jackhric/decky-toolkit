@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import type { ConnectionState, SavedDevice } from './connection';
 import { STATUS_ICON, statusLabel } from './devices';
+import type { DeviceDiscovery } from './discovery';
+import { DiscoveryNode, discoveryChildren, discoveryGroup } from './discoveryTree';
 
 const DEFAULT_PORT = 8765;
 
@@ -38,31 +40,35 @@ export function deviceRow(conn: ConnectionState, d: SavedDevice): DeviceNode {
   return n;
 }
 
-export class DevicesTreeProvider implements vscode.TreeDataProvider<DeviceNode>, vscode.Disposable {
+type Node = DeviceNode | DiscoveryNode;
+
+export class DevicesTreeProvider implements vscode.TreeDataProvider<Node>, vscode.Disposable {
   private readonly changed = new vscode.EventEmitter<undefined>();
   readonly onDidChangeTreeData = this.changed.event;
-  private readonly sub: vscode.Disposable;
+  private readonly subs: vscode.Disposable[];
 
-  constructor(private readonly conn: ConnectionState) {
-    this.sub = conn.onDidChangeStatus(() => this.refresh());
+  constructor(private readonly conn: ConnectionState, private readonly discovery?: DeviceDiscovery) {
+    this.subs = [conn.onDidChangeStatus(() => this.refresh())];
+    if (discovery) this.subs.push(discovery.onDidChangeState(() => this.refresh()), discovery.onDidChange(() => this.refresh()));
   }
 
   refresh(): void {
     this.changed.fire(undefined);
   }
 
-  getTreeItem(node: DeviceNode): vscode.TreeItem {
+  getTreeItem(node: Node): vscode.TreeItem {
     return node;
   }
 
-  getChildren(node?: DeviceNode): DeviceNode[] {
-    if (node) return [];
-    // Empty list → viewsWelcome "Add a Decky device".
-    return this.conn.devices.map(d => deviceRow(this.conn, d));
+  getChildren(node?: Node): Node[] {
+    if (node) return (node as DiscoveryNode).group && this.discovery ? discoveryChildren(this.discovery) : [];
+    const rows: Node[] = this.conn.devices.map(d => deviceRow(this.conn, d));
+    if (this.discovery?.enabled) rows.push(discoveryGroup(this.discovery));
+    return rows;
   }
 
   dispose(): void {
-    this.sub.dispose();
+    this.subs.forEach(s => s.dispose());
     this.changed.dispose();
   }
 }
