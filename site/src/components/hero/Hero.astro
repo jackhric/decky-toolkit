@@ -5,7 +5,7 @@ import EditorButton from '../EditorButton.astro';
 import { Button } from '@/components/starwind/button';
 import Icon from '../Icon.astro';
 import Tile from './Tile.astro';
-import { tileSet } from './tiles';
+import { heroTiles } from './tiles';
 
 interface Props { marketplace: string; openVsx: string; repo: string }
 const { marketplace, openVsx, repo } = Astro.props;
@@ -16,7 +16,24 @@ const navIcons = [
   { name: 'github', href: repo, label: 'GitHub' },
 ] as const;
 const iconButton = 'text-(--hero-text) rounded-lg hover:bg-(--hero-text)/8 hover:text-(--hero-text) select-none';
-const tiles = [...tileSet(0), ...tileSet(5), ...tileSet(9), ...tileSet(3), ...tileSet(7)].slice(0, 72);
+const tiles = heroTiles(72);
+const COLS = 6;
+// Deterministic per-cell noise, so server renders match and the scroll loop's two halves line up.
+const noise = (i: number, salt: number) => {
+  let h = Math.imul(i + 1, 0x9e3779b1) ^ Math.imul(salt + 7, 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d);
+  return ((h ^ (h >>> 13)) >>> 0) / 4294967296;
+};
+const cell = (i: number) => {
+  const k = i % tiles.length, col = k % COLS, row = Math.floor(k / COLS);
+  // One shared period keeps the swell coherent; phase runs diagonally across the grid, with a little jitter per card.
+  const phase = col * 0.85 + row * 0.65 + (noise(k, 1) - 0.5) * 0.5;
+  return [
+    `--in:${(0.25 + noise(k, 2) * 1.5).toFixed(2)}s`,
+    `--wd:${(-phase).toFixed(2)}s`,
+    `--wa:${(5 + noise(k, 3) * 4).toFixed(1)}px`,
+  ].join(';');
+};
 ---
 
 <section class="hero">
@@ -24,7 +41,7 @@ const tiles = [...tileSet(0), ...tileSet(5), ...tileSet(9), ...tileSet(3), ...ti
     <div class="glow"></div>
     <div class="plane">
       <div class="scroll">
-        {[...tiles, ...tiles].map(t => <Tile tile={t} />)}
+        {[...tiles, ...tiles].map((t, i) => <Tile tile={t} cell={cell(i)} />)}
       </div>
     </div>
   </div>
@@ -65,6 +82,23 @@ const tiles = [...tileSet(0), ...tileSet(5), ...tileSet(9), ...tileSet(3), ...ti
   const still = matchMedia('(prefers-reduced-motion: reduce)');
   const golden = 0.618034;
 
+  // A clip card stays hidden (its fade-in paused) until its poster has decoded, so no card shows up blank.
+  // Posters load a few at a time, which staggers their arrival; each card's own --in delay staggers the fade.
+  const pending = [...document.querySelectorAll<HTMLElement>('.hero .tile:not(.ready)')];
+  const ready = (el: HTMLElement) => el.classList.add('ready');
+  let next = 0;
+  function pump() {
+    const el = pending[next++];
+    if (!el) return;
+    const poster = el.querySelector('video')?.poster;
+    if (!poster) { ready(el); pump(); return; }
+    const img = new Image();
+    img.decoding = 'async';
+    img.src = poster;
+    img.decode().catch(() => {}).finally(() => { ready(el); pump(); });
+  }
+  for (let i = 0; i < 6; i++) pump();
+
   function load(video: HTMLVideoElement, i: number) {
     if (video.dataset.loaded) return;
     video.dataset.loaded = '1';
@@ -81,22 +115,45 @@ const tiles = [...tileSet(0), ...tileSet(5), ...tileSet(9), ...tileSet(3), ...ti
     video.load();
   }
 
+  // Decoding is the hero's main cost, so at most MAX_PLAYING clips run, and only in the lower part of the view (the top
+  // sits under the fade). The rest show their poster. Nothing downloads until the page has loaded and gone idle.
+  const MAX_PLAYING = 12;
+  const visible = new Set<HTMLVideoElement>();
+  const playing = new Set<HTMLVideoElement>();
+  function schedule() {
+    for (const v of playing) if (!visible.has(v) || document.hidden) { v.pause(); playing.delete(v); }
+    if (document.hidden) return;
+    for (const v of visible) {
+      if (playing.size >= MAX_PLAYING) break;
+      if (playing.has(v)) continue;
+      load(v, videos.indexOf(v));
+      v.play().catch(() => {});
+      playing.add(v);
+    }
+  }
   const observer = new IntersectionObserver(entries => {
     for (const { target, isIntersecting } of entries) {
-      const video = target as HTMLVideoElement;
-      if (!isIntersecting || still.matches) { video.pause(); continue; }
-      load(video, videos.indexOf(video));
-      video.play().catch(() => {});
+      if (isIntersecting) visible.add(target as HTMLVideoElement);
+      else visible.delete(target as HTMLVideoElement);
     }
-  }, { rootMargin: '150px' });
+    schedule();
+  }, { rootMargin: '-30% 0px 0px 0px' });
 
-  if (!still.matches) videos.forEach(v => observer.observe(v));
-  document.addEventListener('visibilitychange', () => {
-    for (const v of videos) {
-      if (document.hidden) v.pause();
-      else if (!still.matches) { observer.unobserve(v); observer.observe(v); }
-    }
-  });
+  const start = () => videos.forEach(v => observer.observe(v));
+  const idle = () => ('requestIdleCallback' in window ? requestIdleCallback(start, { timeout: 2000 }) : setTimeout(start, 300));
+  if (!still.matches) {
+    if (document.readyState === 'complete') idle();
+    else addEventListener('load', idle, { once: true });
+  }
+  document.addEventListener('visibilitychange', schedule);
+
+  // Off screen the hero costs nothing: its CSS animations pause (.away) and so do the clips.
+  const hero = document.querySelector<HTMLElement>('.hero')!;
+  new IntersectionObserver(([e]) => {
+    hero.classList.toggle('away', !e.isIntersecting);
+    if (e.isIntersecting) schedule();
+    else for (const v of playing) { v.pause(); playing.delete(v); }
+  }).observe(hero);
 </script>
 
 <style>
@@ -111,8 +168,31 @@ const tiles = [...tileSet(0), ...tileSet(5), ...tileSet(9), ...tileSet(3), ...ti
   }
   .plane {
     position: absolute; left: 36%; bottom: -34%; width: 1572px; height: 1896px;
-    transform-origin: 50% 100%; transform: rotateX(56deg) rotateZ(-13deg);
+    transform-origin: 50% 100%; --plane: rotateX(56deg) rotateZ(-13deg); transform: var(--plane);
+    animation: drop-in 1.9s cubic-bezier(0.16, 1, 0.3, 1) 0.15s both;
   }
+  @keyframes drop-in {
+    0% { transform: translate3d(0, -240px, 480px) var(--plane) rotateX(-16deg); }
+    80% { transform: translate3d(0, 12px, -18px) var(--plane) rotateX(1.2deg); }
+    100% { transform: translate3d(0, 0, 0) var(--plane) rotateX(0deg); }
+  }
+  /* Each card fades in after a random delay, then bobs on a slow swell whose phase rolls diagonally across the grid.
+     Flat 2D transforms only: a preserve-3d plane made Chrome depth-sort every card and multiplied layer area at 4K.
+     tile-in fills backwards only, so finished fades stop holding a compositor animation. */
+  .scroll :global(.tile) {
+    animation:
+      tile-in 1.1s cubic-bezier(0.2, 0.8, 0.2, 1) var(--in, 0s) backwards,
+      swell 9s ease-in-out var(--wd, 0s) infinite;
+  }
+  .scroll :global(.tile:not(.ready)) { animation-play-state: paused, running; }
+  .hero.away .scroll, .hero.away .scroll :global(.tile) { animation-play-state: paused; }
+  @keyframes tile-in { from { opacity: 0; translate: 0 46px; } }
+  @keyframes swell {
+    0%, 100% { transform: translateY(calc(var(--wa, 7px) * -1)); }
+    50% { transform: translateY(var(--wa, 7px)); }
+  }
+  .glow { animation: glow-in 2.4s ease-out backwards; }
+  @keyframes glow-in { from { opacity: 0; transform: scale(0.85); } }
   .plane::after {
     content: ''; position: absolute; inset: -25% 0 0; z-index: 1; pointer-events: none;
     background: linear-gradient(to top, color-mix(in srgb, var(--hero-bg) 0%, transparent) 38%, color-mix(in srgb, var(--hero-bg) 72%, transparent) 68%, var(--hero-bg) 86%);
@@ -161,7 +241,7 @@ const tiles = [...tileSet(0), ...tileSet(5), ...tileSet(9), ...tileSet(3), ...ti
     .content { margin: auto 0 0; padding: max(26vh, 150px) 20px 48px; }
     .stage { perspective: 900px; perspective-origin: 50% 8%; }
     .glow { left: -20%; width: 140%; }
-    .plane { left: -18%; bottom: 44%; transform: rotateX(58deg) rotateZ(-14deg) scale(0.6); }
+    .plane { left: -18%; bottom: 44%; --plane: rotateX(58deg) rotateZ(-14deg) scale(0.6); }
     .plane::after { background: linear-gradient(to top, color-mix(in srgb, var(--hero-bg) 0%, transparent) 30%, color-mix(in srgb, var(--hero-bg) 75%, transparent) 62%, var(--hero-bg) 82%); }
     .shade {
       background: linear-gradient(to bottom, var(--hero-bg) 0%, color-mix(in srgb, var(--hero-bg) 35%, transparent) 16%, color-mix(in srgb, var(--hero-bg) 25%, transparent) 40%, color-mix(in srgb, var(--hero-bg) 90%, transparent) 58%, var(--hero-bg) 70%);
@@ -176,5 +256,9 @@ const tiles = [...tileSet(0), ...tileSet(5), ...tileSet(9), ...tileSet(3), ...ti
     .icons { gap: 0; }
     .content { padding-inline: 16px; }
   }
-  @media (prefers-reduced-motion: reduce) { .scroll { animation-play-state: paused; } }
+  @media (prefers-reduced-motion: reduce) {
+    .scroll { animation-play-state: paused; }
+    .plane, .glow, .scroll :global(.tile) { animation: none; }
+    .scroll :global(.tile:not(.ready)) { opacity: 0; }
+  }
 </style>
