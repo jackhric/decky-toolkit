@@ -1,0 +1,180 @@
+---
+import SteamLogo from './SteamLogo.astro';
+import EditorBadge from '../EditorBadge.astro';
+import EditorButton from '../EditorButton.astro';
+import { Button } from '@/components/starwind/button';
+import Icon from '../Icon.astro';
+import Tile from './Tile.astro';
+import { tileSet } from './tiles';
+
+interface Props { marketplace: string; openVsx: string; repo: string }
+const { marketplace, openVsx, repo } = Astro.props;
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const navIcons = [
+  { name: 'vscode', href: marketplace, label: 'VS Code Marketplace' },
+  { name: 'vscodium', href: openVsx, label: 'Open VSX' },
+  { name: 'github', href: repo, label: 'GitHub' },
+] as const;
+const iconButton = 'text-(--hero-text) rounded-lg hover:bg-(--hero-text)/8 hover:text-(--hero-text) select-none';
+const tiles = [...tileSet(0), ...tileSet(5), ...tileSet(9), ...tileSet(3), ...tileSet(7)].slice(0, 72);
+---
+
+<section class="hero">
+  <div class="stage" aria-hidden="true">
+    <div class="glow"></div>
+    <div class="plane">
+      <div class="scroll">
+        {[...tiles, ...tiles].map(t => <Tile tile={t} />)}
+      </div>
+    </div>
+  </div>
+  <div class="shade"></div>
+
+  <header class="top">
+    <nav>
+      <a href="#features">Features</a>
+      <a href="#get-started">Get started</a>
+      <a href={`${base}/docs/`}>Docs</a>
+      <a href={`${base}/docs/faq/`}>FAQ</a>
+      <span class="icons">
+        {navIcons.map(({ name, href, label }) => (
+          <Button href={href} title={label} variant="ghost" size="icon-sm" class={iconButton}>
+            <Icon name={name} label={label} class="size-5" />
+          </Button>
+        ))}
+      </span>
+    </nav>
+  </header>
+
+  <div class="content">
+    <SteamLogo class="logo" />
+    <h1>
+      <span class="line">Build, test and deploy</span>{' '}
+      <span class="line">Decky&nbsp;Loader plugins</span>{' '}
+      <span class="line">from <span class="editors"><EditorBadge editor="vscode" size="lg" /> or <EditorBadge editor="vscodium" size="lg" /></span></span>
+    </h1>
+    <div class="ctas">
+      <EditorButton editor="vscode" primary />
+      <EditorButton editor="vscodium" />
+    </div>
+  </div>
+</section>
+
+<script>
+  const videos = [...document.querySelectorAll<HTMLVideoElement>('.hero video[data-webm]')];
+  const still = matchMedia('(prefers-reduced-motion: reduce)');
+  const golden = 0.618034;
+
+  function load(video: HTMLVideoElement, i: number) {
+    if (video.dataset.loaded) return;
+    video.dataset.loaded = '1';
+    for (const [type, key] of [['video/webm', 'webm'], ['video/mp4', 'mp4']] as const) {
+      const source = document.createElement('source');
+      source.type = type;
+      source.src = video.dataset[key]!;
+      video.append(source);
+    }
+    video.addEventListener('loadedmetadata', () => {
+      video.currentTime = ((i * golden) % 1) * video.duration;
+      video.playbackRate = 0.85 + ((i * golden * 7) % 1) * 0.3;
+    }, { once: true });
+    video.load();
+  }
+
+  const observer = new IntersectionObserver(entries => {
+    for (const { target, isIntersecting } of entries) {
+      const video = target as HTMLVideoElement;
+      if (!isIntersecting || still.matches) { video.pause(); continue; }
+      load(video, videos.indexOf(video));
+      video.play().catch(() => {});
+    }
+  }, { rootMargin: '150px' });
+
+  if (!still.matches) videos.forEach(v => observer.observe(v));
+  document.addEventListener('visibilitychange', () => {
+    for (const v of videos) {
+      if (document.hidden) v.pause();
+      else if (!still.matches) { observer.unobserve(v); observer.observe(v); }
+    }
+  });
+</script>
+
+<style>
+  .hero {
+    position: relative; overflow: hidden; isolation: isolate; color: var(--hero-text); background: var(--hero-bg);
+    min-height: min(92vh, 880px); display: flex; flex-direction: column;
+  }
+  .stage { position: absolute; inset: 0; user-select: none; -webkit-user-select: none; pointer-events: none; perspective: 1500px; perspective-origin: 62% 18%; }
+  .glow {
+    position: absolute; left: 30%; top: -10%; width: 90%; height: 120%;
+    background: radial-gradient(closest-side, var(--hero-glow), color-mix(in srgb, var(--hero-glow) 35%, transparent) 50%, transparent 72%);
+  }
+  .plane {
+    position: absolute; left: 36%; bottom: -34%; width: 1572px; height: 1896px;
+    transform-origin: 50% 100%; transform: rotateX(56deg) rotateZ(-13deg);
+  }
+  .plane::after {
+    content: ''; position: absolute; inset: -25% 0 0; z-index: 1; pointer-events: none;
+    background: linear-gradient(to top, color-mix(in srgb, var(--hero-bg) 0%, transparent) 38%, color-mix(in srgb, var(--hero-bg) 72%, transparent) 68%, var(--hero-bg) 86%);
+  }
+  .scroll {
+    position: relative; display: grid; grid-template-columns: repeat(6, 262px); grid-auto-rows: 158px;
+    will-change: transform; backface-visibility: hidden;
+    animation: rise 72s linear infinite -71.6s;
+  }
+  @keyframes rise { to { transform: translateY(-50%); } }
+  .shade {
+    position: absolute; inset: 0; z-index: 1; pointer-events: none;
+    background:
+      linear-gradient(90deg, var(--hero-bg) 8%, color-mix(in srgb, var(--hero-bg) 94%, transparent) 30%, color-mix(in srgb, var(--hero-bg) 55%, transparent) 50%, color-mix(in srgb, var(--hero-bg) 8%, transparent) 72%, color-mix(in srgb, var(--hero-bg) 0%, transparent) 100%),
+      linear-gradient(to bottom, var(--hero-bg), color-mix(in srgb, var(--hero-bg) 55%, transparent) 14%, color-mix(in srgb, var(--hero-bg) 0%, transparent) 36%, color-mix(in srgb, var(--hero-bg) 0%, transparent) 72%, var(--hero-bg));
+  }
+
+  .top {
+    position: relative; z-index: 3; width: 100%; max-width: 1160px; margin: 0 auto; padding: 18px 28px;
+    display: flex; align-items: center; justify-content: flex-end; gap: 16px; flex-wrap: wrap;
+  }
+  .top nav { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+  .top nav a { color: var(--hero-muted); text-decoration: none; font-weight: 500; }
+  .top nav a:hover { color: var(--hero-text); }
+  .icons { display: flex; gap: 4px; }
+
+  .content {
+    position: relative; z-index: 2; width: 100%; max-width: 1160px; margin: auto; padding: 64px 28px 112px;
+  }
+  .content :global(.logo) { width: min(440px, 80%); margin: 0 0 30px; }
+  h1 {
+    margin: 0 0 32px; font-size: clamp(2rem, 4.6vw, 3.3rem); line-height: 1.12; letter-spacing: -0.025em;
+    text-wrap: balance; text-shadow: 0 2px 24px rgb(0 0 0 / 0.45);
+  }
+  h1 .editors { white-space: nowrap; }
+  @media (min-width: 761px) { h1 .line { display: block; } }
+  .ctas { display: flex; gap: 12px; flex-wrap: wrap; }
+
+  @media (max-width: 1100px) {
+    .plane { left: 42%; }
+    .stage { perspective-origin: 70% 18%; }
+  }
+  @media (max-width: 760px) {
+    .hero { min-height: 100svh; }
+    .top nav > a { display: none; }
+    .content { margin: auto 0 0; padding: max(26vh, 150px) 20px 48px; }
+    .stage { perspective: 900px; perspective-origin: 50% 8%; }
+    .glow { left: -20%; width: 140%; }
+    .plane { left: -18%; bottom: 44%; transform: rotateX(58deg) rotateZ(-14deg) scale(0.6); }
+    .plane::after { background: linear-gradient(to top, color-mix(in srgb, var(--hero-bg) 0%, transparent) 30%, color-mix(in srgb, var(--hero-bg) 75%, transparent) 62%, var(--hero-bg) 82%); }
+    .shade {
+      background: linear-gradient(to bottom, var(--hero-bg) 0%, color-mix(in srgb, var(--hero-bg) 35%, transparent) 16%, color-mix(in srgb, var(--hero-bg) 25%, transparent) 40%, color-mix(in srgb, var(--hero-bg) 90%, transparent) 58%, var(--hero-bg) 70%);
+    }
+  }
+  @media (max-width: 360px) {
+    h1 { font-size: 1.7rem; }
+  }
+  @media (max-width: 400px) {
+    .top { padding: 14px 16px; }
+    .top nav { gap: 8px; }
+    .icons { gap: 0; }
+    .content { padding-inline: 16px; }
+  }
+  @media (prefers-reduced-motion: reduce) { .scroll { animation-play-state: paused; } }
+</style>

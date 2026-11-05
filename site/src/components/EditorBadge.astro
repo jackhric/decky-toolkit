@@ -1,0 +1,22 @@
+---
+import { Badge } from '@/components/starwind/badge';
+import { editors, type Editor } from '../data/editors';
+import Icon from './Icon.astro';
+
+interface Props { editor: Editor; size?: 'md' | 'lg' }
+const { editor, size = 'md' } = Astro.props;
+const { name, site } = editors[editor];
+---
+
+<Badge
+  href={site}
+  variant="outline"
+  class:list={[
+    'inline-block align-baseline whitespace-nowrap leading-[1.2] font-semibold text-inherit no-underline select-none',
+    'px-[0.45em] pt-[0.06em] pb-[0.1em] border-current/30 bg-current/7 backdrop-blur-sm',
+    'hover:border-current/60 hover:bg-current/14',
+    size === 'lg' ? 'text-[0.66em] tracking-[-0.01em] rounded-[0.3em]' : 'text-[0.92em] rounded-[0.4em]',
+  ]}
+>
+  <Icon name={editor} size={16} class="inline size-[0.9em] mr-[0.3em] align-[-0.1em]" />{name}
+</Badge>

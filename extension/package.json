@@ -1,14 +1,14 @@
 {
-  "name": "decky-mcp",
-  "displayName": "Decky-MCP",
-  "description": "Live screen, one-click deploy, logs, Steam console and a game / Proton save file browser for devices running Decky Loader (Steam Deck, SteamOS, Bazzite)",
-  "version": "0.7.0",
+  "name": "decky-toolkit",
+  "displayName": "Decky Toolkit",
+  "description": "Build, deploy and hot reload Decky Loader plugins on Steam Deck, SteamOS and Bazzite from VS Code.",
+  "version": "0.6.4",
   "publisher": "jackhric",
   "icon": "media/icon.png",
-  "license": "BSD-3-Clause",
+  "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jackh/decky-mcp.git"
+    "url": "git+https://github.com/jackhric/decky-toolkit.git"
   },
   "engines": {
     "vscode": "^1.90.0"
@@ -18,404 +18,417 @@
   ],
   "keywords": [
     "decky",
+    "decky loader",
+    "decky plugin",
     "steam deck",
+    "steamdeck",
     "steamos",
     "bazzite",
-    "mcp"
+    "homebrew",
+    "plugin development",
+    "hot reload",
+    "deploy",
+    "cef",
+    "devtools",
+    "remote debugging",
+    "gamescope",
+    "quick access",
+    "mcp",
+    "claude code"
   ],
   "main": "./dist/extension.js",
   "activationEvents": [
     "workspaceContains:plugin.json",
     "workspaceContains:*/plugin.json",
     "workspaceContains:*/*/plugin.json",
-    "onView:decky-mcp.devices",
-    "onView:decky-mcp.actions",
-    "onView:decky-mcp.plugins",
-    "onView:decky-mcp.games",
-    "onView:decky-mcp.controllers",
-    "onView:decky-mcp.preview",
+    "onView:decky-toolkit.devices",
+    "onView:decky-toolkit.actions",
+    "onView:decky-toolkit.plugins",
+    "onView:decky-toolkit.games",
+    "onView:decky-toolkit.controllers",
+    "onView:decky-toolkit.preview",
     "onFileSystem:decky"
   ],
   "contributes": {
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "decky-mcp",
+          "id": "decky-toolkit",
           "title": "Decky",
           "icon": "media/decky.svg"
         }
       ]
     },
     "views": {
-      "decky-mcp": [
+      "decky-toolkit": [
         {
-          "id": "decky-mcp.devices",
+          "id": "decky-toolkit.devices",
           "name": "Devices",
           "icon": "media/decky.svg",
           "initialSize": 2
         },
         {
-          "id": "decky-mcp.actions",
+          "id": "decky-toolkit.actions",
           "name": "Actions",
           "icon": "media/decky.svg",
-          "when": "decky-mcp.connected",
+          "when": "decky-toolkit.connected",
           "initialSize": 6
         },
         {
-          "id": "decky-mcp.plugins",
+          "id": "decky-toolkit.plugins",
           "name": "Plugins",
           "icon": "media/decky.svg",
-          "when": "decky-mcp.connected",
+          "when": "decky-toolkit.connected",
           "visibility": "collapsed",
           "initialSize": 2
         },
         {
-          "id": "decky-mcp.games",
+          "id": "decky-toolkit.games",
           "name": "Games",
           "icon": "media/decky.svg",
-          "when": "decky-mcp.connected",
+          "when": "decky-toolkit.connected",
           "visibility": "collapsed",
           "initialSize": 3
         },
         {
-          "id": "decky-mcp.controllers",
+          "id": "decky-toolkit.controllers",
           "name": "Controllers",
           "icon": "media/decky.svg",
-          "when": "decky-mcp.connected",
+          "when": "decky-toolkit.connected",
           "visibility": "collapsed",
           "initialSize": 2
         },
         {
           "type": "webview",
-          "id": "decky-mcp.preview",
+          "id": "decky-toolkit.preview",
           "name": "Preview",
           "icon": "media/decky.svg",
-          "when": "decky-mcp.connected",
+          "when": "decky-toolkit.connected",
           "initialSize": 1
         }
       ]
     },
     "viewsWelcome": [
       {
-        "view": "decky-mcp.devices",
-        "contents": "No devices yet. Add a Decky device (any machine running Decky Loader: Steam Deck, Bazzite, SteamOS, \u2026).\n[Add device](command:decky-mcp.addDevice)"
+        "view": "decky-toolkit.devices",
+        "contents": "No devices yet. Add a Decky device (any machine running Decky Loader: Steam Deck, Bazzite, SteamOS, …).\n[Add device](command:decky-toolkit.addDevice)"
       },
       {
-        "view": "decky-mcp.controllers",
-        "contents": "No controllers seen by Steam Input.\n[Add virtual controller](command:decky-mcp.addVirtualController)"
+        "view": "decky-toolkit.controllers",
+        "contents": "No controllers seen by Steam Input.\n[Add virtual controller](command:decky-toolkit.addVirtualController)"
       }
     ],
     "commands": [
       {
-        "command": "decky-mcp.enterToken",
+        "command": "decky-toolkit.enterToken",
         "title": "Enter token manually",
         "category": "Decky",
         "icon": "$(key)"
       },
       {
-        "command": "decky-mcp.disconnect",
+        "command": "decky-toolkit.disconnect",
         "title": "Disconnect and forget token",
         "category": "Decky",
         "icon": "$(debug-disconnect)"
       },
       {
-        "command": "decky-mcp.openScreen",
+        "command": "decky-toolkit.openScreen",
         "title": "Open screen",
         "category": "Decky",
         "icon": "$(device-desktop)"
       },
       {
-        "command": "decky-mcp.openViewer",
+        "command": "decky-toolkit.openViewer",
         "title": "Open viewer in browser",
         "category": "Decky",
         "icon": "$(link-external)"
       },
       {
-        "command": "decky-mcp.snapshot",
+        "command": "decky-toolkit.snapshot",
         "title": "Snapshot to file",
         "category": "Decky",
         "icon": "$(device-camera)"
       },
       {
-        "command": "decky-mcp.toggleInput",
+        "command": "decky-toolkit.toggleInput",
         "title": "Toggle remote input",
         "category": "Decky",
         "icon": "$(keyboard)"
       },
       {
-        "command": "decky-mcp.addVirtualController",
+        "command": "decky-toolkit.addVirtualController",
         "title": "Add virtual controller",
         "category": "Decky",
         "icon": "$(add)"
       },
       {
-        "command": "decky-mcp.removeVirtualController",
+        "command": "decky-toolkit.removeVirtualController",
         "title": "Remove virtual controller",
         "category": "Decky",
         "icon": "$(trash)"
       },
       {
-        "command": "decky-mcp.refreshControllers",
+        "command": "decky-toolkit.refreshControllers",
         "title": "Refresh controllers",
         "category": "Decky",
         "icon": "$(refresh)"
       },
       {
-        "command": "decky-mcp.navigate",
-        "title": "Navigate Steam UI to\u2026",
+        "command": "decky-toolkit.navigate",
+        "title": "Navigate Steam UI to…",
         "category": "Decky",
         "icon": "$(compass)"
       },
       {
-        "command": "decky-mcp.openPluginPanel",
-        "title": "Open plugin panel\u2026",
+        "command": "decky-toolkit.openPluginPanel",
+        "title": "Open plugin panel…",
         "category": "Decky",
         "icon": "$(extensions)"
       },
       {
-        "command": "decky-mcp.uiBack",
+        "command": "decky-toolkit.uiBack",
         "title": "Steam UI: Back",
         "category": "Decky",
         "icon": "$(arrow-left)"
       },
       {
-        "command": "decky-mcp.uiQuickAccess",
+        "command": "decky-toolkit.uiQuickAccess",
         "title": "Steam UI: Quick Access",
         "category": "Decky",
         "icon": "$(layout-sidebar-right)"
       },
       {
-        "command": "decky-mcp.uiCloseMenus",
+        "command": "decky-toolkit.uiCloseMenus",
         "title": "Steam UI: Close menus",
         "category": "Decky",
         "icon": "$(close-all)"
       },
       {
-        "command": "decky-mcp.deploy",
+        "command": "decky-toolkit.deploy",
         "title": "Deploy plugin",
         "category": "Decky",
         "icon": "$(rocket)"
       },
       {
-        "command": "decky-mcp.deployFull",
+        "command": "decky-toolkit.deployFull",
         "title": "Deploy plugin (full restart)",
         "category": "Decky",
         "icon": "$(debug-restart)"
       },
       {
-        "command": "decky-mcp.toggleAutoDeploy",
+        "command": "decky-toolkit.toggleAutoDeploy",
         "title": "Toggle auto-deploy on change",
         "category": "Decky",
         "icon": "$(sync)"
       },
       {
-        "command": "decky-mcp.restartLoader",
+        "command": "decky-toolkit.restartLoader",
         "title": "Restart loader",
         "category": "Decky",
         "icon": "$(debug-restart)"
       },
       {
-        "command": "decky-mcp.reloadPlugin",
+        "command": "decky-toolkit.reloadPlugin",
         "title": "Reload plugin",
         "category": "Decky",
         "icon": "$(refresh)"
       },
       {
-        "command": "decky-mcp.loaderLogs",
+        "command": "decky-toolkit.loaderLogs",
         "title": "Show loader logs",
         "category": "Decky",
         "icon": "$(output)"
       },
       {
-        "command": "decky-mcp.pluginLogs",
+        "command": "decky-toolkit.pluginLogs",
         "title": "Show plugin logs",
         "category": "Decky",
         "icon": "$(output)"
       },
       {
-        "command": "decky-mcp.evaluate",
+        "command": "decky-toolkit.evaluate",
         "title": "Evaluate JS in Steam UI",
         "category": "Decky"
       },
       {
-        "command": "decky-mcp.toast",
+        "command": "decky-toolkit.toast",
         "title": "Toast on device",
         "category": "Decky"
       },
       {
-        "command": "decky-mcp.writeMcpConfig",
+        "command": "decky-toolkit.writeMcpConfig",
         "title": "Write MCP config for this workspace",
         "category": "Decky"
       },
       {
-        "command": "decky-mcp.copyMcpUrl",
+        "command": "decky-toolkit.copyMcpUrl",
         "title": "Copy MCP URL",
         "category": "Decky",
         "icon": "$(link)"
       },
       {
-        "command": "decky-mcp.copyToken",
+        "command": "decky-toolkit.copyToken",
         "title": "Copy token",
         "category": "Decky",
         "icon": "$(key)"
       },
       {
-        "command": "decky-mcp.refresh",
+        "command": "decky-toolkit.refresh",
         "title": "Refresh",
         "category": "Decky",
         "icon": "$(refresh)"
       },
       {
-        "command": "decky-mcp.refreshPlugins",
+        "command": "decky-toolkit.refreshPlugins",
         "title": "Refresh plugins",
         "category": "Decky",
         "icon": "$(refresh)"
       },
       {
-        "command": "decky-mcp.installZip",
-        "title": "Install plugin zip\u2026",
+        "command": "decky-toolkit.installZip",
+        "title": "Install plugin zip…",
         "category": "Decky",
         "icon": "$(package)"
       },
       {
-        "command": "decky-mcp.changeHost",
+        "command": "decky-toolkit.changeHost",
         "title": "Change host",
         "category": "Decky",
         "icon": "$(server)"
       },
       {
-        "command": "decky-mcp.addDevice",
-        "title": "Add device\u2026",
+        "command": "decky-toolkit.addDevice",
+        "title": "Add device…",
         "category": "Decky",
         "icon": "$(add)"
       },
       {
-        "command": "decky-mcp.editDevice",
+        "command": "decky-toolkit.editDevice",
         "title": "Edit device",
         "category": "Decky",
         "icon": "$(edit)"
       },
       {
-        "command": "decky-mcp.removeDevice",
+        "command": "decky-toolkit.removeDevice",
         "title": "Remove device",
         "category": "Decky",
         "icon": "$(trash)"
       },
       {
-        "command": "decky-mcp.switchDevice",
+        "command": "decky-toolkit.switchDevice",
         "title": "Switch device",
         "category": "Decky",
         "icon": "$(vm)"
       },
       {
-        "command": "decky-mcp.connect",
+        "command": "decky-toolkit.connect",
         "title": "Connect",
         "category": "Decky",
         "icon": "$(plug)"
       },
       {
-        "command": "decky-mcp.disconnectDevice",
+        "command": "decky-toolkit.disconnectDevice",
         "title": "Disconnect",
         "category": "Decky",
         "icon": "$(debug-disconnect)"
       },
       {
-        "command": "decky-mcp.pairAgain",
+        "command": "decky-toolkit.pairAgain",
         "title": "Re-pair",
         "category": "Decky",
         "icon": "$(key)"
       },
       {
-        "command": "decky-mcp.copyViewerUrl",
+        "command": "decky-toolkit.copyViewerUrl",
         "title": "Copy viewer URL",
         "category": "Decky",
         "icon": "$(copy)"
       },
       {
-        "command": "decky-mcp.deviceActions",
-        "title": "More actions\u2026",
+        "command": "decky-toolkit.deviceActions",
+        "title": "More actions…",
         "category": "Decky",
         "icon": "$(ellipsis)"
       },
       {
-        "command": "decky-mcp.findGame",
-        "title": "Find game\u2026",
+        "command": "decky-toolkit.findGame",
+        "title": "Find game…",
         "category": "Decky",
         "icon": "$(search)"
       },
       {
-        "command": "decky-mcp.refreshGames",
+        "command": "decky-toolkit.refreshGames",
         "title": "Refresh games",
         "category": "Decky",
         "icon": "$(refresh)"
       },
       {
-        "command": "decky-mcp.openGameSaves",
-        "title": "Open save data\u2026",
+        "command": "decky-toolkit.openGameSaves",
+        "title": "Open save data…",
         "category": "Decky",
         "icon": "$(save)"
       },
       {
-        "command": "decky-mcp.openDeckyPath",
-        "title": "Open device path\u2026",
+        "command": "decky-toolkit.openDeckyPath",
+        "title": "Open device path…",
         "category": "Decky",
         "icon": "$(go-to-file)"
       },
       {
-        "command": "decky-mcp.gameLaunch",
+        "command": "decky-toolkit.gameLaunch",
         "title": "Launch game",
         "category": "Decky",
         "icon": "$(play)"
       },
       {
-        "command": "decky-mcp.gameTerminate",
+        "command": "decky-toolkit.gameTerminate",
         "title": "Terminate game",
         "category": "Decky",
         "icon": "$(debug-stop)"
       },
       {
-        "command": "decky-mcp.gameProtonLog",
+        "command": "decky-toolkit.gameProtonLog",
         "title": "Show Proton log",
         "category": "Decky",
         "icon": "$(output)"
       },
       {
-        "command": "decky-mcp.openInExplorer",
+        "command": "decky-toolkit.openInExplorer",
         "title": "Open in Explorer",
         "category": "Decky",
         "icon": "$(root-folder-opened)"
       },
       {
-        "command": "decky-mcp.copyDeckyPath",
+        "command": "decky-toolkit.copyDeckyPath",
         "title": "Copy path",
         "category": "Decky",
         "icon": "$(copy)"
       }
     ],
     "configuration": {
-      "title": "Decky-MCP",
+      "title": "Decky Toolkit",
       "properties": {
-        "decky-mcp.host": {
+        "decky-toolkit.host": {
           "type": "string",
-          "default": "10.0.70.18",
-          "description": "IP address or hostname of the device running the Decky-MCP plugin."
+          "default": "",
+          "description": "IP address or hostname of the device running the Decky Toolkit plugin."
         },
-        "decky-mcp.port": {
+        "decky-toolkit.port": {
           "type": "number",
           "default": 8765,
-          "description": "Port of the Decky-MCP HTTP server."
+          "description": "Port of the Decky Toolkit HTTP server."
         },
-        "decky-mcp.pluginDirName": {
+        "decky-toolkit.pluginDirName": {
           "type": "string",
           "default": "",
           "description": "Directory name under ~/homebrew/plugins to deploy to. Empty means the workspace folder's name."
         },
-        "decky-mcp.openScreenOnConnect": {
+        "decky-toolkit.openScreenOnConnect": {
           "type": "boolean",
           "default": true,
           "description": "Open the live screen panel after the first successful connect of a session."
         },
-        "decky-mcp.deploy.build": {
+        "decky-toolkit.deploy.build": {
           "type": "string",
           "enum": [
             "auto",
@@ -430,7 +443,7 @@
           "default": "auto",
           "description": "Whether Deploy runs `pnpm run build` (or npm/yarn, from the lockfile) first. Python files never need a build."
         },
-        "decky-mcp.deploy.onChange": {
+        "decky-toolkit.deploy.onChange": {
           "type": "boolean",
           "default": false,
           "description": "Deploy the workspace plugin (fast, without building) whenever dist/index.js, main.py or py_modules/**/*.py change. Keep your build running in watch mode (`pnpm run watch`)."
@@ -439,7 +452,7 @@
     },
     "keybindings": [
       {
-        "command": "decky-mcp.deploy",
+        "command": "decky-toolkit.deploy",
         "key": "ctrl+alt+d",
         "mac": "cmd+alt+d"
       }
@@ -447,219 +460,219 @@
     "menus": {
       "view/title": [
         {
-          "command": "decky-mcp.addDevice",
-          "when": "view == decky-mcp.devices",
+          "command": "decky-toolkit.addDevice",
+          "when": "view == decky-toolkit.devices",
           "group": "navigation@1"
         },
         {
-          "command": "decky-mcp.refresh",
-          "when": "view == decky-mcp.devices",
+          "command": "decky-toolkit.refresh",
+          "when": "view == decky-toolkit.devices",
           "group": "navigation@2"
         },
         {
-          "command": "decky-mcp.openScreen",
-          "when": "view == decky-mcp.actions",
+          "command": "decky-toolkit.openScreen",
+          "when": "view == decky-toolkit.actions",
           "group": "navigation@1"
         },
         {
-          "command": "decky-mcp.refresh",
-          "when": "view == decky-mcp.actions",
+          "command": "decky-toolkit.refresh",
+          "when": "view == decky-toolkit.actions",
           "group": "navigation@2"
         },
         {
-          "command": "decky-mcp.installZip",
-          "when": "view == decky-mcp.plugins",
+          "command": "decky-toolkit.installZip",
+          "when": "view == decky-toolkit.plugins",
           "group": "navigation@1"
         },
         {
-          "command": "decky-mcp.refreshPlugins",
-          "when": "view == decky-mcp.plugins",
+          "command": "decky-toolkit.refreshPlugins",
+          "when": "view == decky-toolkit.plugins",
           "group": "navigation@2"
         },
         {
-          "command": "decky-mcp.findGame",
-          "when": "view == decky-mcp.games",
+          "command": "decky-toolkit.findGame",
+          "when": "view == decky-toolkit.games",
           "group": "navigation@1"
         },
         {
-          "command": "decky-mcp.openDeckyPath",
-          "when": "view == decky-mcp.games",
+          "command": "decky-toolkit.openDeckyPath",
+          "when": "view == decky-toolkit.games",
           "group": "navigation@2"
         },
         {
-          "command": "decky-mcp.refreshGames",
-          "when": "view == decky-mcp.games",
+          "command": "decky-toolkit.refreshGames",
+          "when": "view == decky-toolkit.games",
           "group": "navigation@3"
         },
         {
-          "command": "decky-mcp.addVirtualController",
-          "when": "view == decky-mcp.controllers",
+          "command": "decky-toolkit.addVirtualController",
+          "when": "view == decky-toolkit.controllers",
           "group": "navigation@1"
         },
         {
-          "command": "decky-mcp.refreshControllers",
-          "when": "view == decky-mcp.controllers",
+          "command": "decky-toolkit.refreshControllers",
+          "when": "view == decky-toolkit.controllers",
           "group": "navigation@2"
         },
         {
-          "command": "decky-mcp.openScreen",
-          "when": "view == decky-mcp.preview",
+          "command": "decky-toolkit.openScreen",
+          "when": "view == decky-toolkit.preview",
           "group": "navigation@1"
         }
       ],
       "view/item/context": [
         {
-          "command": "decky-mcp.reloadPlugin",
-          "when": "view == decky-mcp.plugins && viewItem == plugin",
+          "command": "decky-toolkit.reloadPlugin",
+          "when": "view == decky-toolkit.plugins && viewItem == plugin",
           "group": "inline@1"
         },
         {
-          "command": "decky-mcp.pluginLogs",
-          "when": "view == decky-mcp.plugins && viewItem == plugin",
+          "command": "decky-toolkit.pluginLogs",
+          "when": "view == decky-toolkit.plugins && viewItem == plugin",
           "group": "inline@2"
         },
         {
-          "command": "decky-mcp.reloadPlugin",
-          "when": "view == decky-mcp.plugins && viewItem == plugin",
+          "command": "decky-toolkit.reloadPlugin",
+          "when": "view == decky-toolkit.plugins && viewItem == plugin",
           "group": "1_plugin@1"
         },
         {
-          "command": "decky-mcp.pluginLogs",
-          "when": "view == decky-mcp.plugins && viewItem == plugin",
+          "command": "decky-toolkit.pluginLogs",
+          "when": "view == decky-toolkit.plugins && viewItem == plugin",
           "group": "1_plugin@2"
         },
         {
-          "command": "decky-mcp.openPluginPanel",
-          "when": "view == decky-mcp.plugins && viewItem == plugin",
+          "command": "decky-toolkit.openPluginPanel",
+          "when": "view == decky-toolkit.plugins && viewItem == plugin",
           "group": "1_plugin@3"
         },
         {
-          "command": "decky-mcp.removeVirtualController",
-          "when": "view == decky-mcp.controllers && viewItem == controller.virtual",
+          "command": "decky-toolkit.removeVirtualController",
+          "when": "view == decky-toolkit.controllers && viewItem == controller.virtual",
           "group": "inline@1"
         },
         {
-          "command": "decky-mcp.removeVirtualController",
-          "when": "view == decky-mcp.controllers && viewItem == controller.virtual",
+          "command": "decky-toolkit.removeVirtualController",
+          "when": "view == decky-toolkit.controllers && viewItem == controller.virtual",
           "group": "1_controller@1"
         },
         {
-          "command": "decky-mcp.connect",
-          "when": "view == decky-mcp.devices && viewItem =~ /^deck\\.(unpaired|paired)$/",
+          "command": "decky-toolkit.connect",
+          "when": "view == decky-toolkit.devices && viewItem =~ /^deck\\.(unpaired|paired)$/",
           "group": "inline@1"
         },
         {
-          "command": "decky-mcp.disconnectDevice",
-          "when": "view == decky-mcp.devices && viewItem == deck.session",
+          "command": "decky-toolkit.disconnectDevice",
+          "when": "view == decky-toolkit.devices && viewItem == deck.session",
           "group": "inline@1"
         },
         {
-          "command": "decky-mcp.deviceActions",
-          "when": "view == decky-mcp.devices && viewItem =~ /^deck\\.(unpaired|paired|session)$/",
+          "command": "decky-toolkit.deviceActions",
+          "when": "view == decky-toolkit.devices && viewItem =~ /^deck\\.(unpaired|paired|session)$/",
           "group": "inline@2"
         },
         {
-          "command": "decky-mcp.connect",
-          "when": "view == decky-mcp.devices && viewItem =~ /^deck\\.(unpaired|paired)$/",
+          "command": "decky-toolkit.connect",
+          "when": "view == decky-toolkit.devices && viewItem =~ /^deck\\.(unpaired|paired)$/",
           "group": "1_connect@1"
         },
         {
-          "command": "decky-mcp.disconnectDevice",
-          "when": "view == decky-mcp.devices && viewItem == deck.session",
+          "command": "decky-toolkit.disconnectDevice",
+          "when": "view == decky-toolkit.devices && viewItem == deck.session",
           "group": "1_connect@1"
         },
         {
-          "command": "decky-mcp.pairAgain",
-          "when": "view == decky-mcp.devices && viewItem =~ /^deck\\.(paired|session)$/",
+          "command": "decky-toolkit.pairAgain",
+          "when": "view == decky-toolkit.devices && viewItem =~ /^deck\\.(paired|session)$/",
           "group": "2_pair@1"
         },
         {
-          "command": "decky-mcp.enterToken",
-          "when": "view == decky-mcp.devices && viewItem =~ /^deck\\.(unpaired|paired|session)$/",
+          "command": "decky-toolkit.enterToken",
+          "when": "view == decky-toolkit.devices && viewItem =~ /^deck\\.(unpaired|paired|session)$/",
           "group": "2_pair@2"
         },
         {
-          "command": "decky-mcp.editDevice",
-          "when": "view == decky-mcp.devices && viewItem =~ /^deck\\.(unpaired|paired|session)$/",
+          "command": "decky-toolkit.editDevice",
+          "when": "view == decky-toolkit.devices && viewItem =~ /^deck\\.(unpaired|paired|session)$/",
           "group": "3_device@1"
         },
         {
-          "command": "decky-mcp.copyViewerUrl",
-          "when": "view == decky-mcp.devices && viewItem =~ /^deck\\./",
+          "command": "decky-toolkit.copyViewerUrl",
+          "when": "view == decky-toolkit.devices && viewItem =~ /^deck\\./",
           "group": "3_device@2"
         },
         {
-          "command": "decky-mcp.removeDevice",
-          "when": "view == decky-mcp.devices && viewItem =~ /^deck\\.(unpaired|paired|session)$/",
+          "command": "decky-toolkit.removeDevice",
+          "when": "view == decky-toolkit.devices && viewItem =~ /^deck\\.(unpaired|paired|session)$/",
           "group": "3_device@3"
         },
         {
-          "command": "decky-mcp.gameLaunch",
-          "when": "view == decky-mcp.games && viewItem == game",
+          "command": "decky-toolkit.gameLaunch",
+          "when": "view == decky-toolkit.games && viewItem == game",
           "group": "inline@1"
         },
         {
-          "command": "decky-mcp.gameTerminate",
-          "when": "view == decky-mcp.games && viewItem == game.running",
+          "command": "decky-toolkit.gameTerminate",
+          "when": "view == decky-toolkit.games && viewItem == game.running",
           "group": "inline@1"
         },
         {
-          "command": "decky-mcp.openGameSaves",
-          "when": "view == decky-mcp.games && viewItem =~ /^game(\\.running)?$/",
+          "command": "decky-toolkit.openGameSaves",
+          "when": "view == decky-toolkit.games && viewItem =~ /^game(\\.running)?$/",
           "group": "inline@2"
         },
         {
-          "command": "decky-mcp.openGameSaves",
-          "when": "view == decky-mcp.games && viewItem =~ /^game(\\.running)?$/",
+          "command": "decky-toolkit.openGameSaves",
+          "when": "view == decky-toolkit.games && viewItem =~ /^game(\\.running)?$/",
           "group": "1_game@1"
         },
         {
-          "command": "decky-mcp.gameLaunch",
-          "when": "view == decky-mcp.games && viewItem == game",
+          "command": "decky-toolkit.gameLaunch",
+          "when": "view == decky-toolkit.games && viewItem == game",
           "group": "1_game@2"
         },
         {
-          "command": "decky-mcp.gameTerminate",
-          "when": "view == decky-mcp.games && viewItem == game.running",
+          "command": "decky-toolkit.gameTerminate",
+          "when": "view == decky-toolkit.games && viewItem == game.running",
           "group": "1_game@2"
         },
         {
-          "command": "decky-mcp.gameProtonLog",
-          "when": "view == decky-mcp.games && viewItem =~ /^game(\\.running)?$/",
+          "command": "decky-toolkit.gameProtonLog",
+          "when": "view == decky-toolkit.games && viewItem =~ /^game(\\.running)?$/",
           "group": "1_game@3"
         },
         {
-          "command": "decky-mcp.copyDeckyPath",
-          "when": "view == decky-mcp.games && viewItem =~ /^game(\\.running)?$/",
+          "command": "decky-toolkit.copyDeckyPath",
+          "when": "view == decky-toolkit.games && viewItem =~ /^game(\\.running)?$/",
           "group": "2_path@1"
         },
         {
-          "command": "decky-mcp.openInExplorer",
-          "when": "view == decky-mcp.games && viewItem == deckyDir",
+          "command": "decky-toolkit.openInExplorer",
+          "when": "view == decky-toolkit.games && viewItem == deckyDir",
           "group": "inline@1"
         },
         {
-          "command": "decky-mcp.openInExplorer",
-          "when": "view == decky-mcp.games && viewItem =~ /^decky(Dir|File)$/",
+          "command": "decky-toolkit.openInExplorer",
+          "when": "view == decky-toolkit.games && viewItem =~ /^decky(Dir|File)$/",
           "group": "1_path@1"
         },
         {
-          "command": "decky-mcp.copyDeckyPath",
-          "when": "view == decky-mcp.games && viewItem =~ /^decky(Dir|File)$/",
+          "command": "decky-toolkit.copyDeckyPath",
+          "when": "view == decky-toolkit.games && viewItem =~ /^decky(Dir|File)$/",
           "group": "1_path@2"
         }
       ],
       "commandPalette": [
         {
-          "command": "decky-mcp.deviceActions",
+          "command": "decky-toolkit.deviceActions",
           "when": "false"
         },
         {
-          "command": "decky-mcp.openInExplorer",
+          "command": "decky-toolkit.openInExplorer",
           "when": "false"
         },
         {
-          "command": "decky-mcp.copyDeckyPath",
+          "command": "decky-toolkit.copyDeckyPath",
           "when": "false"
         }
       ]
@@ -669,7 +682,7 @@
     "build": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
     "typecheck": "tsc --noEmit",
-    "package": "vsce package --no-dependencies",
+    "package": "vsce package --no-dependencies --baseContentUrl https://github.com/jackhric/decky-toolkit/blob/HEAD/extension --baseImagesUrl https://github.com/jackhric/decky-toolkit/raw/HEAD/extension",
     "smoke": "node scripts/smoke.mjs",
     "dev-check": "node scripts/dev-check.mjs"
   },

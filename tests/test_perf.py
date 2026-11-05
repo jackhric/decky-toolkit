@@ -10,9 +10,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
-from decky_mcp.tools import ToolRegistry  # noqa: E402
-from decky_mcp.tools import perf  # noqa: E402
-from decky_mcp.tools.perf import PerfOverlay, check_level, decode, parse_state, update_message, varint  # noqa: E402
+from decky_toolkit.tools import ToolRegistry  # noqa: E402
+from decky_toolkit.tools import perf  # noqa: E402
+from decky_toolkit.tools.perf import PerfOverlay, check_level, decode, parse_state, update_message, varint  # noqa: E402
 
 # CMsgSystemPerfState captured on the test device (standalone overlay, level off, global profile 769).
 DEVICE_STATE = ("ClEI6AcQrBsYACAFOAFIAFgAYABoD2geaDxoAHADeA+YASigATyoAQ+oAR6oATyoAQC4AQHAAQDQAQPQAQLQAQHYAQHYAQLYAQPYAQTYAQXw"

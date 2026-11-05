@@ -1,0 +1,137 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'plugin-v*'
+      - 'extension-v*'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Check tag
+    runs-on: ubuntu-26.04
+    outputs:
+      component: ${{ steps.tag.outputs.component }}
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: tag
+        run: |
+          tag="$GITHUB_REF_NAME"
+          case "$tag" in
+            plugin-v*) component=plugin; version="${tag#plugin-v}"; files=(package.json plugin.json) ;;
+            extension-v*) component=extension; version="${tag#extension-v}"; files=(extension/package.json) ;;
+            *) echo "::error::unexpected tag $tag"; exit 1 ;;
+          esac
+          export LC_ALL=C
+          id='(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)'
+          semver="^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-$id(\.$id)*)?(\+[0-9a-zA-Z-]+(\.[0-9a-zA-Z-]+)*)?$"
+          if ! [[ "$version" =~ $semver ]]; then
+            echo "::error::$tag: '$version' is not a valid semver version"
+            exit 1
+          fi
+          for f in "${files[@]}"; do
+            declared=$(node -p "require('./$f').version ?? ''")
+            if [ "$f" = plugin.json ] && [ -z "$declared" ]; then continue; fi
+            if [ "$declared" != "$version" ]; then
+              echo "::error file=$f::$tag does not match version '$declared' in $f"
+              exit 1
+            fi
+          done
+          echo "component=$component" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    name: GitHub Release
+    needs: [check, ci]
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.check.outputs.component }}
+          path: release
+      - if: needs.check.outputs.component == 'plugin'
+        run: cp release/decky-toolkit-*.zip release/decky-toolkit.zip
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: release/*
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          COMPONENT: ${{ needs.check.outputs.component }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          case "$COMPONENT" in
+            plugin) title="Decky Toolkit plugin $VERSION" ;;
+            extension) title="Decky Toolkit for VS Code $VERSION" ;;
+          esac
+          prerelease=false
+          if [[ "$VERSION" == *-* ]]; then prerelease=true; fi
+          latest=false
+          if [ "$COMPONENT" = plugin ] && [ "$prerelease" = false ]; then latest=true; fi
+          if out=$(gh release view "$tag" --json isDraft 2>&1); then
+            gh release upload "$tag" release/* --clobber
+            gh release edit "$tag" --title "$title" --prerelease="$prerelease" --latest="$latest" --draft=false
+          elif [[ "$out" != *"release not found"* ]]; then
+            echo "::error::gh release view $tag failed: $out"
+            exit 1
+          else
+            args=(--verify-tag --title "$title" --generate-notes --prerelease="$prerelease" --latest="$latest")
+            prev=$(git tag --list "$COMPONENT-v*" --sort=-v:refname | grep -vxF "$tag" | head -1 || true)
+            if [ -n "$prev" ]; then args+=(--notes-start-tag "$prev"); fi
+            gh release create "$tag" release/* "${args[@]}"
+          fi
+
+  pages:
+    name: Pages
+    needs: [check, release]
+    if: needs.check.outputs.component == 'plugin' && !contains(needs.check.outputs.version, '-')
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/pages.yml
+
+  openvsx:
+    name: Publish to Open VSX
+    needs: [check, release]
+    if: needs.check.outputs.component == 'extension' && !contains(needs.check.outputs.version, '-')
+    runs-on: ubuntu-26.04
+    environment: openvsx
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: extension
+          path: release
+      - run: npx --yes ovsx@1.3.0 publish release/*.vsix --trusted-publishing --skip-duplicate
+
+  marketplace:
+    name: Publish to VS Code Marketplace
+    needs: [check, release]
+    if: needs.check.outputs.component == 'extension' && !contains(needs.check.outputs.version, '-')
+    runs-on: ubuntu-26.04
+    environment: marketplace
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: extension
+          path: release
+      - run: npx --yes @vscode/vsce@4.1.0 publish --oidc --packagePath release/*.vsix --skip-duplicate

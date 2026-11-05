@@ -1,6 +1,6 @@
 # Input injection research (2026-11-04)
 
-Findings of a research pass on sending keyboard, mouse and gamepad input to gamescope/Steam from the Decky-MCP backend. Proof-of-concept modules: `input/uinput.py` (stdlib uinput) and `input/test_ei.py` (libei over ctypes).
+Findings of a research pass on sending keyboard, mouse and gamepad input to gamescope/Steam from the Decky Toolkit backend. Proof-of-concept modules: `input/uinput.py` (stdlib uinput) and `input/test_ei.py` (libei over ctypes).
 
 I tested everything on the device. The best route is **not** uinput for keyboard and mouse. gamescope runs its own input server (libei), and Python can drive it through `ctypes` as root: it gives exact 1:1 absolute positioning, relative motion, buttons, wheel and keys. Use uinput only for the gamepad, where Steam picks the virtual pad up as a real controller.
 
@@ -51,7 +51,7 @@ One correction to the brief: Steam runs on `DISPLAY=:0`, and the pointer for the
 | `uinput_setup` | `"@HHHH80sI"`: bustype, vendor, product, version, name[80], ff_effects_max |
 | `uinput_abs_setup` | `"@H2x6i"`: code, padding, then value/min/max/fuzz/flat/resolution |
 
-The working module (about 100 lines, stdlib only, with a `Device(name, keys=, rels=, abs=, props=, ...)` class and `emit()`/`close()`) is at `/tmp/claude-1000/-home-jackh-Documents-git-test-decky-mcp/345ec6f8-5dfe-45f1-ae80-8a0f3a2aff12/scratchpad/uinput/uinput.py`. The libei proof of concept is `test_ei.py` in the same folder. It needs only `libei.so.1` and about 18 function bindings: `ei_new_sender`, `ei_setup_backend_socket`, then `ei_seat_bind_capabilities` on SEAT_ADDED, keep the device on DEVICE_RESUMED, then `ei_device_start_emulating` and `ei_device_pointer_motion_absolute` / `ei_device_button_button` / `ei_device_keyboard_key` / `ei_device_frame`.
+The working module (about 100 lines, stdlib only, with a `Device(name, keys=, rels=, abs=, props=, ...)` class and `emit()`/`close()`) is kept as `docs/research/input/uinput.py` (originally written in a temporary research scratchpad under `/tmp`). The libei proof of concept is `test_ei.py` in the same folder. It needs only `libei.so.1` and about 18 function bindings: `ei_new_sender`, `ei_setup_backend_socket`, then `ei_seat_bind_capabilities` on SEAT_ADDED, keep the device on DEVICE_RESUMED, then `ei_device_start_emulating` and `ei_device_pointer_motion_absolute` / `ei_device_button_button` / `ei_device_keyboard_key` / `ei_device_frame`.
 
 **Gamepad layout** (it matches the SDL mapping Steam logged):
 - **Buttons:** BTN_A/B/X/Y (0x130, 0x131, 0x133, 0x134), TL/TR (0x136/0x137), SELECT/START/MODE (0x13a–0x13c), THUMBL/THUMBR (0x13d/0x13e).
@@ -89,7 +89,7 @@ The working module (about 100 lines, stdlib only, with a `Device(name, keys=, re
 
 ## Design proposal
 
-**Backend** (`py_modules/decky_mcp/input/`):
+**Backend** (`py_modules/decky_toolkit/input/`):
 - `uinput.py`: the module above.
 - `ei.py`: the ctypes libei sender. Reconnect when the socket reappears after a gamescope restart. Read `XDG_RUNTIME_DIR` (`/run/user/<uid of the gamescope-wl process>`) and the display name `gamescope-0` from the process.
 - `service.py`: one input service.

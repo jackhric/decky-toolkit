@@ -12,7 +12,7 @@ export interface NavItem extends vscode.QuickPickItem {
 const placeholders = (path: string) => [...path.matchAll(/\{([^}]+)\}/g)].map(m => m[1]);
 
 function oldDevice(conn: Connection): void {
-  void vscode.window.showWarningMessage(`Decky-MCP: Steam UI navigation needs a newer Decky-MCP; update Decky-MCP on the device (${conn.label}).`);
+  void vscode.window.showWarningMessage(`Decky Toolkit: Steam UI navigation needs a newer Decky Toolkit; update Decky Toolkit on the device (${conn.label}).`);
 }
 
 /** QuickPick entries for `GET /ui/routes`: Official, Plugins, then Menus (main menu and Quick Access tabs). */
@@ -53,7 +53,7 @@ async function fillTemplate(template: string): Promise<string | undefined> {
 async function send(conn: Connection, client: DeckyClient, request: NavigateRequest): Promise<void> {
   try {
     const res = await client.navigate(request);
-    vscode.window.setStatusBarMessage(`Decky-MCP: Steam UI at ${res.current}`, 4000);
+    vscode.window.setStatusBarMessage(`Decky Toolkit: Steam UI at ${res.current}`, 4000);
   } catch (e) {
     if (isOldDevice(e)) return oldDevice(conn);
     throw new Error(`Steam UI navigation: ${serverError(e)}`);

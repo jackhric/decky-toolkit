@@ -15,13 +15,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
 from aiohttp import ClientSession, ClientTimeout, CookieJar, FormData, web  # noqa: E402
 
-from decky_mcp.auth import TOKEN_COOKIE, TokenAuth  # noqa: E402
-from decky_mcp.capture import ScreenCapturer  # noqa: E402
-from decky_mcp.http import Api  # noqa: E402
-from decky_mcp.pairing import PairingRequests  # noqa: E402
-from decky_mcp.protocol import McpServer  # noqa: E402
-from decky_mcp.settings import Settings  # noqa: E402
-from decky_mcp.tools import ToolRegistry, build_registry  # noqa: E402
+from decky_toolkit.auth import TOKEN_COOKIE, TokenAuth  # noqa: E402
+from decky_toolkit.capture import ScreenCapturer  # noqa: E402
+from decky_toolkit.http import Api  # noqa: E402
+from decky_toolkit.pairing import PairingRequests  # noqa: E402
+from decky_toolkit.protocol import McpServer  # noqa: E402
+from decky_toolkit.settings import Settings  # noqa: E402
+from decky_toolkit.tools import ToolRegistry, build_registry  # noqa: E402
 
 TOKEN = "test-token"
 H = {"Authorization": f"Bearer {TOKEN}"}
@@ -162,7 +162,7 @@ def test_pair_request_page_and_cookie_redirect():
             assert r.status == 302 and r.headers["Location"] == "/viewer"
             assert TOKEN_COOKIE in r.headers.get("Set-Cookie", "")
         async with s.get(f"{base}/viewer") as r:
-            assert r.status == 200 and "Decky-MCP Screen" in await r.text()
+            assert r.status == 200 and "Decky Toolkit Screen" in await r.text()
         s.cookie_jar.clear()
         async with s.get(f"{base}/pair/request/{rid}?cookie=1", allow_redirects=False) as r:
             assert r.status == 410, "an approval sets a cookie only once"
@@ -219,7 +219,7 @@ def test_logs_stream_plugin(decky_home):
 
 
 def test_logs_stream_stops_follower_on_disconnect(monkeypatch):
-    from decky_mcp import logs
+    from decky_toolkit import logs
 
     closed = asyncio.Event()
 

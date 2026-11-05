@@ -41,7 +41,7 @@ async function tokenAccepted(d: SavedDevice, token: string): Promise<boolean> {
 async function cantReach(c: Connection, d: SavedDevice, retry: () => Promise<unknown>): Promise<void> {
   c.setReachable(d.id, false);
   const choice = await vscode.window.showErrorMessage(
-    `Can't reach ${d.name} at ${d.host}:${d.port}. Is the device on and Decky-MCP enabled?`, 'Retry', 'Edit device');
+    `Can't reach ${d.name} at ${d.host}:${d.port}. Is the device on and Decky Toolkit enabled?`, 'Retry', 'Edit device');
   if (choice === 'Retry') await retry();
   else if (choice === 'Edit device') await editDevice(c, d.id);
 }
@@ -51,17 +51,17 @@ function fresh(c: Connection, d: SavedDevice): SavedDevice {
 }
 
 function connected(c: Connection, d: SavedDevice, verb?: string): void {
-  if (vscode.workspace.getConfiguration('decky-mcp').get<boolean>('openScreenOnConnect', true) && !screenOpenedThisSession) {
+  if (vscode.workspace.getConfiguration('decky-toolkit').get<boolean>('openScreenOnConnect', true) && !screenOpenedThisSession) {
     screenOpenedThisSession = true;
-    void vscode.commands.executeCommand('decky-mcp.openScreen');
+    void vscode.commands.executeCommand('decky-toolkit.openScreen');
   }
   if (!verb) {
     vscode.window.setStatusBarMessage(`$(vm-connect) Connected to ${d.name}`, 4000);
     return;
   }
-  void vscode.window.showInformationMessage(`Decky-MCP: ${verb} ${d.name}.`, 'Open screen', 'Deploy plugin').then(choice => {
-    if (choice === 'Open screen') void vscode.commands.executeCommand('decky-mcp.openScreen');
-    if (choice === 'Deploy plugin') void vscode.commands.executeCommand('decky-mcp.deploy');
+  void vscode.window.showInformationMessage(`Decky Toolkit: ${verb} ${d.name}.`, 'Open screen', 'Deploy plugin').then(choice => {
+    if (choice === 'Open screen') void vscode.commands.executeCommand('decky-toolkit.openScreen');
+    if (choice === 'Deploy plugin') void vscode.commands.executeCommand('decky-toolkit.deploy');
   });
 }
 
@@ -121,17 +121,17 @@ export async function pair(c: Connection, device: SavedDevice, reachabilityCheck
   if (outcome === 'cancelled') return false;
   if (outcome === 'unsupported') {
     const choice = await vscode.window.showWarningMessage(
-      `Decky-MCP: Update Decky-MCP on ${d.name} to pair. Until then, copy the token from its Decky-MCP panel.`,
+      `Decky Toolkit: Update Decky Toolkit on ${d.name} to pair. Until then, copy the token from its Decky Toolkit panel.`,
       'Enter token manually');
     return choice ? enterToken(c, d) : false;
   }
   if (outcome === 'denied') {
-    const choice = await vscode.window.showWarningMessage(`Decky-MCP: Pairing denied on ${d.name}.`, 'Try again');
+    const choice = await vscode.window.showWarningMessage(`Decky Toolkit: Pairing denied on ${d.name}.`, 'Try again');
     return choice === 'Try again' ? pair(c, d) : false;
   }
   if ('error' in outcome) {
     const choice = await vscode.window.showWarningMessage(
-      `Decky-MCP: Pairing with ${d.name} failed: ${outcome.error}`, 'Try again', 'Enter token manually');
+      `Decky Toolkit: Pairing with ${d.name} failed: ${outcome.error}`, 'Try again', 'Enter token manually');
     if (choice === 'Try again') return pair(c, d);
     if (choice === 'Enter token manually') return enterToken(c, d);
     return false;
@@ -146,14 +146,14 @@ export async function pair(c: Connection, device: SavedDevice, reachabilityCheck
 function waitForApproval(c: Connection, d: SavedDevice): Thenable<PairOutcome> {
   const client = new DeckyClient(d);
   return vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: 'Decky-MCP', cancellable: true },
+    { location: vscode.ProgressLocation.Notification, title: 'Decky Toolkit', cancellable: true },
     async (progress, token) => {
       const abort = new AbortController();
       const cancelSub = token.onCancellationRequested(() => abort.abort());
       const pause = () => sleep(pairingTimings.retryMs, abort.signal).catch(() => undefined);
       let id: string | undefined;
       let code: string | undefined;
-      const waiting = () => `Waiting for approval on ${d.name} · code ${code}. On the device: Quick Access → Decky-MCP → Approve.`;
+      const waiting = () => `Waiting for approval on ${d.name} · code ${code}. On the device: Quick Access → Decky Toolkit → Approve.`;
       const lostContact = (e: unknown) =>
         progress.report({ message: `Lost contact with ${d.name} (${describeError(e)}), retrying…${code ? ` Code ${code}.` : ''}` });
       try {
@@ -205,7 +205,7 @@ export async function enterToken(c: Connection, device?: SavedDevice): Promise<b
   const d = device ? fresh(c, device) : c.activeDevice;
   const label = d?.name ?? c.label;
   const token = (await vscode.window.showInputBox({
-    prompt: `Bearer token for ${label} (shown in the Decky-MCP Quick Access panel)`,
+    prompt: `Bearer token for ${label} (shown in the Decky Toolkit Quick Access panel)`,
     password: true,
     ignoreFocusOut: true,
     validateInput: v => (v.trim() ? undefined : 'Token is empty'),
@@ -215,7 +215,7 @@ export async function enterToken(c: Connection, device?: SavedDevice): Promise<b
     await new DeckyClient(d ?? c.address, token).listTools();
   } catch (e) {
     if (e instanceof HttpError && e.status === 401) throw new Error('the device rejected that token.');
-    void vscode.window.showWarningMessage(`Decky-MCP: could not verify the token (${describeError(e)}); saved it anyway.`);
+    void vscode.window.showWarningMessage(`Decky Toolkit: could not verify the token (${describeError(e)}); saved it anyway.`);
   }
   if (!d) {
     await c.setToken(token);

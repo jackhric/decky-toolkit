@@ -7,8 +7,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
-from decky_mcp import cdp  # noqa: E402
-from decky_mcp.ui import UiInspector, UiTimeout, place_view, shape_element  # noqa: E402
+from decky_toolkit import cdp  # noqa: E402
+from decky_toolkit.ui import UiInspector, UiTimeout, place_view, shape_element  # noqa: E402
 
 # Measured on the device: Big Picture tab 1353x761 CSS px at dpr 1.42 on the 1920x1080 display;
 # the Quick Access view 855x682 at (1005.5, 40) per GetBounds.

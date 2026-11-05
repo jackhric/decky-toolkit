@@ -60,7 +60,7 @@ export function toFsError(e: unknown, uri: vscode.Uri, device: string): Error {
   if (e instanceof vscode.FileSystemError) return e;
   if (isConnectionError(e)) return vscode.FileSystemError.Unavailable(`Decky device ${device} is not reachable (${describeError(e)})`);
   if (!(e instanceof HttpError)) return new vscode.FileSystemError(describeError(e));
-  if (isMissingRoute(e)) return vscode.FileSystemError.Unavailable(`the Decky-MCP plugin on ${device} has no remote file access yet; update it`);
+  if (isMissingRoute(e)) return vscode.FileSystemError.Unavailable(`the Decky Toolkit plugin on ${device} has no remote file access yet; update it`);
   const code = errorCode(e);
   if (e.status === 401) return vscode.FileSystemError.NoPermissions(`${device} rejected the token; re-pair it in the Decky view`);
   if (e.status === 403) return vscode.FileSystemError.NoPermissions(serverMessage(e));
@@ -83,7 +83,7 @@ function toStat(e: FsEntry, type = typeOf(e)): vscode.FileStat {
   return { type, size: e.size, mtime: t, ctime: t };
 }
 
-/** The device file system at `decky://<host>/<path>`, backed by the `/fs` routes of the Decky-MCP server. */
+/** The device file system at `decky://<host>/<path>`, backed by the `/fs` routes of the Decky Toolkit server. */
 export class DeckyFileSystemProvider implements vscode.FileSystemProvider, vscode.Disposable {
   private readonly changed = new vscode.EventEmitter<vscode.FileChangeEvent[]>();
   readonly onDidChangeFile = this.changed.event;

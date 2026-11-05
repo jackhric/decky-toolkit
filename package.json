@@ -1,28 +1,32 @@
 {
-  "name": "decky-mcp",
-  "version": "0.2.0",
-  "description": "MCP server for AI-assisted Decky plugin development",
+  "name": "decky-toolkit",
+  "version": "0.2.1",
+  "description": "Decky Loader plugin that hosts the Decky Toolkit device agent: deploy, logs, screen, input and Steam UI control over HTTP and MCP",
   "type": "module",
   "scripts": {
     "build": "rollup -c",
     "watch": "rollup -c -w",
-    "deploy": "./scripts/deploy.sh",
     "typecheck": "tsc --noEmit"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jackh/decky-mcp.git"
+    "url": "git+https://github.com/jackhric/decky-toolkit.git"
   },
-  "keywords": ["decky", "decky-plugin", "mcp", "steam-deck", "bazzite"],
+  "keywords": [
+    "decky",
+    "decky-plugin",
+    "mcp",
+    "steam-deck",
+    "bazzite"
+  ],
   "author": "jackh",
-  "license": "BSD-3-Clause",
+  "license": "MIT",
   "devDependencies": {
     "@decky/rollup": "^1.0.2",
     "@decky/ui": "^4.11.0",
     "@rollup/rollup-linux-x64-musl": "^4.53.3",
     "@types/react": "19.1.1",
     "@types/react-dom": "19.1.1",
-    "@types/webpack": "^5.28.5",
     "rollup": "^4.53.3",
     "typescript": "^5.6.2"
   },
@@ -30,10 +34,5 @@
     "@decky/api": "^1.1.3",
     "react-icons": "^5.3.0",
     "tslib": "^2.7.0"
-  },
-  "pnpm": {
-    "peerDependencyRules": {
-      "ignoreMissing": ["react", "react-dom"]
-    }
   }
 }

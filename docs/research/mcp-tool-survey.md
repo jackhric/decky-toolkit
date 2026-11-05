@@ -6,9 +6,9 @@ clones; no code from them was run. Dates are the last commit on the default bran
 registration sites linked below. **(unverified)** marks claims taken from a README, a search listing or a
 subagent summary rather than from source.
 
-## 0. Decky-MCP today (baseline)
+## 0. Decky Toolkit today (baseline)
 
-**26 MCP tools** (registered in `py_modules/decky_mcp/tools/*.py`; Streamable HTTP on `:8765/mcp`, on the device,
+**26 MCP tools** (registered in `py_modules/decky_toolkit/tools/*.py`; Streamable HTTP on `:8765/mcp`, on the device,
 bearer token from on-device pairing):
 
 | Group | Tool | What it does |
@@ -190,7 +190,7 @@ Defined in [`src/steamdeck_mcp/server.py`](https://github.com/deucebucket/steamd
 
 ## 3. Gap analysis
 
-Legend: **Us** = Decky-MCP has a dedicated tool. **Them** = another project has it and we do not. **None** = nobody
+Legend: **Us** = Decky Toolkit has a dedicated tool. **Them** = another project has it and we do not. **None** = nobody
 has it. **Via** = mechanism: JS = SteamClient/stores over our existing CDP; SM = steamos-manager D-Bus;
 SD = systemd/logind; DL = Decky loader routes (`utilities/*`, `loader/*`); FS = files. "(eval)" means it is
 already reachable today through `cef_evaluate`, but without a typed tool. Effort: S < 1 day, M 1-3 days, L > 3 days.
@@ -246,7 +246,7 @@ already reachable today through `cef_evaluate`, but without a typed tool. Effort
 | Deck compatibility rating | Them (Web API) | Sarg338, TMHSDigital, Grinv | Store API | S |
 | GPU profiling / traces | Them | devkit (`gpu_trace`, `rgp_capture`) | RGP/RenderDoc tooling | L |
 
-## 4. Recommendations for Decky-MCP
+## 4. Recommendations for Decky Toolkit
 
 ### 4.1 Top 10 for plugin development
 
@@ -301,7 +301,7 @@ achievements (S); online/offline (S); Decky self-update check (S); OS update che
 display mode/refresh/HDR (L, protobuf and unverified); a Web API bridge for friends and Deck compatibility
 (M, needs a user-supplied key; better left to the existing Web API servers).
 
-### 4.3 What only Decky-MCP has
+### 4.3 What only Decky Toolkit has
 
 - MCP **on the device over Streamable HTTP**, with **on-device pairing approval**. Every other on-device
   server is stdio and needs SSH plus a password or key.
@@ -319,7 +319,7 @@ display mode/refresh/HDR (L, protobuf and unverified); a Web API bridge for frie
 
 ## 5. Security and safety notes
 
-- **Already high-power in Decky-MCP:** `cef_evaluate` is full Steam-client control: purchases through the
+- **Already high-power in Decky Toolkit:** `cef_evaluate` is full Steam-client control: purchases through the
   store page, account and Steam Guard flows, uninstalls, Family settings. `write_file`/`read_file` run as
   root, so they can read `~/.steam` config and `ssh` keys, and anything written is root-owned. `install_plugin`
   is code execution as root (Decky plugins with the `root` flag). Input tools can do anything a user can. These

@@ -39,20 +39,20 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   const status = new StatusBar(c);
   const logs = new LogManager(c);
   const deployOut = vscode.window.createOutputChannel('Decky');
-  const consoleOut = vscode.window.createOutputChannel('Decky-MCP Console');
+  const consoleOut = vscode.window.createOutputChannel('Decky Toolkit Console');
   const devicesTree = new DevicesTreeProvider(c);
   const workspacePlugins = new PluginWorkspace();
   const actionsTree = new ActionsTreeProvider(c, workspacePlugins);
   const pluginsTree = new PluginsTreeProvider(c);
   const preview = new PreviewViewProvider(ctx.extensionUri, c);
-  const devicesView = vscode.window.createTreeView('decky-mcp.devices', { treeDataProvider: devicesTree });
-  const actionsView = vscode.window.createTreeView('decky-mcp.actions', { treeDataProvider: actionsTree });
-  const pluginsView = vscode.window.createTreeView('decky-mcp.plugins', { treeDataProvider: pluginsTree });
+  const devicesView = vscode.window.createTreeView('decky-toolkit.devices', { treeDataProvider: devicesTree });
+  const actionsView = vscode.window.createTreeView('decky-toolkit.actions', { treeDataProvider: actionsTree });
+  const pluginsView = vscode.window.createTreeView('decky-toolkit.plugins', { treeDataProvider: pluginsTree });
   const gamesTree = new GamesTreeProvider(c);
-  const gamesView = vscode.window.createTreeView('decky-mcp.games', { treeDataProvider: gamesTree, showCollapseAll: true });
+  const gamesView = vscode.window.createTreeView('decky-toolkit.games', { treeDataProvider: gamesTree, showCollapseAll: true });
   const controllers = new ControllerWatcher(c, () => c.proxy.start());
   const controllersTree = new ControllersTreeProvider(controllers);
-  const controllersView = vscode.window.createTreeView('decky-mcp.controllers', { treeDataProvider: controllersTree });
+  const controllersView = vscode.window.createTreeView('decky-toolkit.controllers', { treeDataProvider: controllersTree });
   ctx.subscriptions.push(
     c, status, logs, deployOut, consoleOut, workspacePlugins, devicesTree, actionsTree, pluginsTree, devicesView, actionsView, pluginsView,
     controllers, controllersTree, controllersView, gamesTree, gamesView,
@@ -68,7 +68,7 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     const connected = c.connectedDevice;
     if (connectedContext !== !!connected) {
       connectedContext = !!connected;
-      void vscode.commands.executeCommand('setContext', 'decky-mcp.connected', connectedContext);
+      void vscode.commands.executeCommand('setContext', 'decky-toolkit.connected', connectedContext);
     }
     if (connected?.id !== sessionId) {
       sessionId = connected?.id;
@@ -116,78 +116,78 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
       try {
         await fn(arg);
       } catch (e) {
-        void vscode.window.showErrorMessage(`Decky-MCP: ${describeError(e)}`);
+        void vscode.window.showErrorMessage(`Decky Toolkit: ${describeError(e)}`);
       }
     }));
 
-  command('decky-mcp.connect', async arg => {
+  command('decky-toolkit.connect', async arg => {
     const d = deviceFrom(c, arg);
     if (d) await connect(c, d);
     else await addDevice(c);
   });
-  command('decky-mcp.disconnectDevice', () => c.disconnect());
-  command('decky-mcp.pairAgain', async arg => {
+  command('decky-toolkit.disconnectDevice', () => c.disconnect());
+  command('decky-toolkit.pairAgain', async arg => {
     const d = deviceFrom(c, arg);
     if (d) await pair(c, d);
   });
-  command('decky-mcp.enterToken', arg => enterToken(c, arg === undefined ? undefined : deviceFrom(c, arg)));
-  command('decky-mcp.disconnect', async () => {
+  command('decky-toolkit.enterToken', arg => enterToken(c, arg === undefined ? undefined : deviceFrom(c, arg)));
+  command('decky-toolkit.disconnect', async () => {
     await c.clearToken();
-    void vscode.window.showInformationMessage(`Decky-MCP: forgot the token for ${c.label}.`);
+    void vscode.window.showInformationMessage(`Decky Toolkit: forgot the token for ${c.label}.`);
   });
-  command('decky-mcp.refresh', async () => {
+  command('decky-toolkit.refresh', async () => {
     actionsTree.refresh();
     await c.refresh();
     refreshPlugins();
     await c.probeAll();
   });
-  command('decky-mcp.refreshPlugins', async () => refreshPlugins());
-  command('decky-mcp.changeHost', () => changeHost(c));
-  command('decky-mcp.addDevice', () => addDevice(c));
-  command('decky-mcp.editDevice', arg => editDevice(c, arg));
-  command('decky-mcp.removeDevice', arg => removeDevice(c, arg));
-  command('decky-mcp.switchDevice', () => switchDevice(c));
-  command('decky-mcp.deviceActions', arg => deviceActions(c, arg));
-  command('decky-mcp.copyViewerUrl', arg => copyViewerUrl(c, arg));
-  command('decky-mcp.openScreen', async () => {
+  command('decky-toolkit.refreshPlugins', async () => refreshPlugins());
+  command('decky-toolkit.changeHost', () => changeHost(c));
+  command('decky-toolkit.addDevice', () => addDevice(c));
+  command('decky-toolkit.editDevice', arg => editDevice(c, arg));
+  command('decky-toolkit.removeDevice', arg => removeDevice(c, arg));
+  command('decky-toolkit.switchDevice', () => switchDevice(c));
+  command('decky-toolkit.deviceActions', arg => deviceActions(c, arg));
+  command('decky-toolkit.copyViewerUrl', arg => copyViewerUrl(c, arg));
+  command('decky-toolkit.openScreen', async () => {
     if (await c.client()) await ScreenPanel.show(ctx, c, controllers);
   });
-  command('decky-mcp.openViewer', async () => {
+  command('decky-toolkit.openViewer', async () => {
     const d = (await c.client()) && c.connectedDevice;
     if (d) await vscode.env.openExternal(vscode.Uri.parse(viewerUrl(d)));
   });
-  command('decky-mcp.snapshot', () => snapshot(c));
-  command('decky-mcp.toggleInput', () => toggleInput(c));
-  command('decky-mcp.addVirtualController', () => addVirtualController(c, controllers));
-  command('decky-mcp.removeVirtualController', arg => removeVirtualController(c, controllers, arg));
-  command('decky-mcp.refreshControllers', async () => controllersTree.refresh());
-  command('decky-mcp.navigate', () => navigate(c));
-  command('decky-mcp.openPluginPanel', arg => openPluginPanel(c, arg));
-  command('decky-mcp.uiBack', () => simpleNavigate(c, { action: 'back' }));
-  command('decky-mcp.uiQuickAccess', () => simpleNavigate(c, { action: 'quick_access' }));
-  command('decky-mcp.uiCloseMenus', () => simpleNavigate(c, { action: 'close_menus' }));
-  command('decky-mcp.findGame', () => findGame(c, gamesTree, gamesView));
-  command('decky-mcp.refreshGames', async () => gamesTree.refresh());
-  command('decky-mcp.openGameSaves', arg => openGameSaves(c, gamesTree, arg));
-  command('decky-mcp.openDeckyPath', () => openDeckyPath(c));
-  command('decky-mcp.gameLaunch', arg => gameLaunch(c, gamesTree, arg));
-  command('decky-mcp.gameTerminate', arg => gameTerminate(c, gamesTree, arg));
-  command('decky-mcp.gameProtonLog', arg => gameProtonLog(c, gamesTree, arg));
-  command('decky-mcp.openInExplorer', arg => openNodeInExplorer(c, arg));
-  command('decky-mcp.copyDeckyPath', arg => copyDeckyPath(arg));
-  command('decky-mcp.deploy', () => deployer.deploy());
-  command('decky-mcp.deployFull', () => deployer.deploy({ full: true }));
-  command('decky-mcp.toggleAutoDeploy', async () => {
+  command('decky-toolkit.snapshot', () => snapshot(c));
+  command('decky-toolkit.toggleInput', () => toggleInput(c));
+  command('decky-toolkit.addVirtualController', () => addVirtualController(c, controllers));
+  command('decky-toolkit.removeVirtualController', arg => removeVirtualController(c, controllers, arg));
+  command('decky-toolkit.refreshControllers', async () => controllersTree.refresh());
+  command('decky-toolkit.navigate', () => navigate(c));
+  command('decky-toolkit.openPluginPanel', arg => openPluginPanel(c, arg));
+  command('decky-toolkit.uiBack', () => simpleNavigate(c, { action: 'back' }));
+  command('decky-toolkit.uiQuickAccess', () => simpleNavigate(c, { action: 'quick_access' }));
+  command('decky-toolkit.uiCloseMenus', () => simpleNavigate(c, { action: 'close_menus' }));
+  command('decky-toolkit.findGame', () => findGame(c, gamesTree, gamesView));
+  command('decky-toolkit.refreshGames', async () => gamesTree.refresh());
+  command('decky-toolkit.openGameSaves', arg => openGameSaves(c, gamesTree, arg));
+  command('decky-toolkit.openDeckyPath', () => openDeckyPath(c));
+  command('decky-toolkit.gameLaunch', arg => gameLaunch(c, gamesTree, arg));
+  command('decky-toolkit.gameTerminate', arg => gameTerminate(c, gamesTree, arg));
+  command('decky-toolkit.gameProtonLog', arg => gameProtonLog(c, gamesTree, arg));
+  command('decky-toolkit.openInExplorer', arg => openNodeInExplorer(c, arg));
+  command('decky-toolkit.copyDeckyPath', arg => copyDeckyPath(arg));
+  command('decky-toolkit.deploy', () => deployer.deploy());
+  command('decky-toolkit.deployFull', () => deployer.deploy({ full: true }));
+  command('decky-toolkit.toggleAutoDeploy', async () => {
     if (await workspacePlugins.pick('Auto-deploy which plugin?')) await deployer.toggleAutoDeploy();
   });
-  command('decky-mcp.installZip', async () => {
+  command('decky-toolkit.installZip', async () => {
     try {
       await installZip(c);
     } finally {
       await afterDeviceChange();
     }
   });
-  command('decky-mcp.restartLoader', async () => {
+  command('decky-toolkit.restartLoader', async () => {
     const client = await c.client();
     if (!client) return;
     try {
@@ -195,13 +195,13 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
         await client.restartLoader();
         progress.report({ message: 'waiting for it to come back…' });
         const h = await client.waitForRestart();
-        void vscode.window.showInformationMessage(`Decky-MCP: loader restarted (${h.name} ${h.version}).`);
+        void vscode.window.showInformationMessage(`Decky Toolkit: loader restarted (${h.name} ${h.version}).`);
       });
     } finally {
       await afterDeviceChange();
     }
   });
-  command('decky-mcp.reloadPlugin', async arg => {
+  command('decky-toolkit.reloadPlugin', async arg => {
     const client = await c.client();
     const dir = client && await resolveDir(client, workspacePlugins, arg, 'Plugin to reload');
     if (!client || !dir) return;
@@ -209,42 +209,42 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
       await client.reloadPlugin(dir);
     } catch (e) {
       if (isMissingRoute(e)) {
-        throw new Error('the Decky-MCP plugin on the device has no POST /plugins/{dir}/reload yet; update it, or use "Decky: Restart loader".');
+        throw new Error('the Decky Toolkit plugin on the device has no POST /plugins/{dir}/reload yet; update it, or use "Decky: Restart loader".');
       }
       throw e;
     }
-    void vscode.window.showInformationMessage(`Decky-MCP: reloaded ${dir}.`);
+    void vscode.window.showInformationMessage(`Decky Toolkit: reloaded ${dir}.`);
     refreshPlugins();
   });
-  command('decky-mcp.loaderLogs', async () => {
+  command('decky-toolkit.loaderLogs', async () => {
     if (await c.client()) logs.show('loader', 'Decky Loader', { source: 'loader' });
   });
-  command('decky-mcp.pluginLogs', async arg => {
+  command('decky-toolkit.pluginLogs', async arg => {
     const client = await c.client();
     const dir = client && await resolveDir(client, workspacePlugins, arg, 'Show logs of which plugin?');
     if (dir) logs.show(`plugin:${dir}`, `Decky: ${dir}`, { source: 'plugin', plugin: dir });
   });
-  command('decky-mcp.evaluate', () => evaluate(c, consoleOut, ctx));
-  command('decky-mcp.toast', async () => {
+  command('decky-toolkit.evaluate', () => evaluate(c, consoleOut, ctx));
+  command('decky-toolkit.toast', async () => {
     const client = await c.client();
     if (!client) return;
     const body = await vscode.window.showInputBox({ prompt: 'Toast text to show on the device', value: 'Hello from VS Code' });
     if (!body) return;
     await client.callToolText('toast', { title: 'VS Code', body });
   });
-  command('decky-mcp.writeMcpConfig', () => writeMcpConfig(c));
-  command('decky-mcp.copyMcpUrl', async () => {
+  command('decky-toolkit.writeMcpConfig', () => writeMcpConfig(c));
+  command('decky-toolkit.copyMcpUrl', async () => {
     if (!(await c.client())) return;
     const url = new DeckyClient(c.address).mcpUrl;
     await vscode.env.clipboard.writeText(url);
-    void vscode.window.showInformationMessage(`Decky-MCP: copied ${url}. MCP clients also need the bearer token (MCP → Copy token).`);
+    void vscode.window.showInformationMessage(`Decky Toolkit: copied ${url}. MCP clients also need the bearer token (MCP → Copy token).`);
   });
-  command('decky-mcp.copyToken', async () => {
+  command('decky-toolkit.copyToken', async () => {
     const token = (await c.client()) && await c.token();
     if (!token) return;
     await vscode.env.clipboard.writeText(token);
     void vscode.window.showWarningMessage(
-      `Decky-MCP: copied the bearer token for ${c.label}. It is a secret: anyone with it can control the device, so keep it out of shared files and chats.`);
+      `Decky Toolkit: copied the bearer token for ${c.label}. It is a secret: anyone with it can control the device, so keep it out of shared files and chats.`);
   });
 
   const last = c.lastSessionDevice;
@@ -283,7 +283,7 @@ async function snapshot(c: Connection): Promise<void> {
   });
   if (!uri) return;
   await vscode.workspace.fs.writeFile(uri, jpeg);
-  const choice = await vscode.window.showInformationMessage(`Decky-MCP: saved ${vscode.workspace.asRelativePath(uri)}.`, 'Open');
+  const choice = await vscode.window.showInformationMessage(`Decky Toolkit: saved ${vscode.workspace.asRelativePath(uri)}.`, 'Open');
   if (choice === 'Open') await vscode.commands.executeCommand('vscode.open', uri);
 }
 
@@ -305,7 +305,7 @@ async function installZip(c: Connection): Promise<void> {
     try {
       result = await client.installPlugin(data, filename, 'loader');
     } catch (e) {
-      if (isMissingRoute(e)) throw new Error('the Decky-MCP plugin on the device has no POST /plugins/install yet; update it.');
+      if (isMissingRoute(e)) throw new Error('the Decky Toolkit plugin on the device has no POST /plugins/install yet; update it.');
       throw e;
     }
     if (result.restarted === 'loader') {
@@ -313,7 +313,7 @@ async function installZip(c: Connection): Promise<void> {
       await client.waitForRestart();
     }
     const { name, version, dir } = result.installed;
-    void vscode.window.showInformationMessage(`Decky-MCP: installed ${name}${version ? ` ${version}` : ''} as ${dir}.`);
+    void vscode.window.showInformationMessage(`Decky Toolkit: installed ${name}${version ? ` ${version}` : ''} as ${dir}.`);
   });
 }
 
@@ -336,11 +336,11 @@ async function evaluate(c: Connection, out: vscode.OutputChannel, ctx: vscode.Ex
   if (!client) return;
   const expression = await vscode.window.showInputBox({
     prompt: 'JavaScript to evaluate in Steam SharedJSContext (promises are awaited)',
-    value: ctx.workspaceState.get<string>('decky-mcp.lastExpression', 'window.DeckyPluginLoader?.version'),
+    value: ctx.workspaceState.get<string>('decky-toolkit.lastExpression', 'window.DeckyPluginLoader?.version'),
     ignoreFocusOut: true,
   });
   if (!expression) return;
-  await ctx.workspaceState.update('decky-mcp.lastExpression', expression);
+  await ctx.workspaceState.update('decky-toolkit.lastExpression', expression);
   out.appendLine(`> ${expression}`);
   try {
     const result = await client.callToolText('cef_evaluate', { expression });
@@ -364,7 +364,7 @@ async function writeMcpConfig(c: Connection): Promise<void> {
   }
   const uri = vscode.Uri.joinPath(folder.uri, '.mcp.json');
   const ok = await vscode.window.showWarningMessage(
-    `Write the Decky-MCP server to ${vscode.workspace.asRelativePath(uri)}?`,
+    `Write the Decky Toolkit server to ${vscode.workspace.asRelativePath(uri)}?`,
     {
       modal: true,
       detail: 'The bearer token is stored in plain text in that file so MCP clients (Claude Code etc.) can use it. ' +
@@ -384,5 +384,5 @@ async function writeMcpConfig(c: Connection): Promise<void> {
     decky: { type: 'http', url: new DeckyClient(c.address).mcpUrl, headers: { Authorization: `Bearer ${token}` } },
   };
   await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(config, null, 2) + '\n'));
-  void vscode.window.showInformationMessage('Decky-MCP: wrote mcpServers.decky to .mcp.json.');
+  void vscode.window.showInformationMessage('Decky Toolkit: wrote mcpServers.decky to .mcp.json.');
 }

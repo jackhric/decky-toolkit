@@ -11,11 +11,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
 from aiohttp import ClientSession, ClientTimeout, web  # noqa: E402
 
-from decky_mcp import audit  # noqa: E402
-from decky_mcp.auth import TokenAuth  # noqa: E402
-from decky_mcp.http import Api  # noqa: E402
-from decky_mcp.protocol import McpServer  # noqa: E402
-from decky_mcp.tools import ToolRegistry, build_registry, guard, system  # noqa: E402
+from decky_toolkit import audit  # noqa: E402
+from decky_toolkit.auth import TokenAuth  # noqa: E402
+from decky_toolkit.http import Api  # noqa: E402
+from decky_toolkit.protocol import McpServer  # noqa: E402
+from decky_toolkit.tools import ToolRegistry, build_registry, guard, system  # noqa: E402
 
 STEAM = "/home/deck/.local/share/Steam"
 
@@ -58,7 +58,7 @@ def test_write_protected_but_readable(path):
     f"{STEAM}/logs/console_log.txt",
     "/home/deck/.ssh/id_ed25519.pub",
     "/home/deck/.ssh/known_hosts",
-    "/home/deck/homebrew/settings/decky-mcp/settings.json",
+    "/home/deck/homebrew/settings/decky-toolkit/settings.json",
     "/tmp/config.vdf",
 ])
 def test_ordinary_paths(path):

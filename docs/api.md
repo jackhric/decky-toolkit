@@ -1,7 +1,7 @@
-# Decky-MCP HTTP API
+# Decky Toolkit HTTP API
 
 Base URL: `http://<deck-ip>:8765`. Everything except `/`, `/health`, the pairing request routes
-(`/pair/request...`) and the viewer's own token handling requires either `Authorization: Bearer <token>` or the `decky_mcp_token`
+(`/pair/request...`) and the viewer's own token handling requires either `Authorization: Bearer <token>` or the `decky_toolkit_token`
 cookie; routes marked "bearer" refuse the cookie.
 Unauthorised requests get `401`; a request with an `Origin` header that does not point at this host
 or loopback gets `403`. `GET /health` reports `api_version`; clients compare it before using
@@ -60,7 +60,7 @@ removed 60 s after the last gamepad message.
 | --- | --- | --- | --- |
 | `GET /input/settings` | bearer/cookie | live | `{enabled, backend: "ei"\|"uinput"\|null, available, reason}`. `reason` explains `available: false`. `404` on servers without input support. |
 | `PUT /input/settings` | bearer/cookie | live | `{"enabled": true\|false}` (strict boolean; anything else or extra fields: `400`). Persists. Disabling releases every held key/button, removes the keyboard/mouse devices and the implicit `auto` pad (pads from `/controllers/virtual` stay, back at neutral) and closes open `/input` sockets with `4003`. Same shape as `GET`. Cookie auth is accepted so the viewer can toggle it. |
-| `GET /input` | bearer/cookie | live | WebSocket. Closes with code `4003` (reason text) while input is disabled. On connect and whenever it changes the server sends `{"type":"state","enabled","backend","focus_size":[w,h]}`. Invalid messages get `{"type":"error","message"}`; the socket stays open. Any message with an `id` field is answered with `{"type":"ack","id"}` once injected. Everything the socket still holds (keys, mouse buttons, pad state) is released when it closes. The first input of a session from a new address logs it and emits `decky_mcp_input_session` (at most once per address per 60 s). Rate cap about 1000 events/s; releases are never dropped. |
+| `GET /input` | bearer/cookie | live | WebSocket. Closes with code `4003` (reason text) while input is disabled. On connect and whenever it changes the server sends `{"type":"state","enabled","backend","focus_size":[w,h]}`. Invalid messages get `{"type":"error","message"}`; the socket stays open. Any message with an `id` field is answered with `{"type":"ack","id"}` once injected. Everything the socket still holds (keys, mouse buttons, pad state) is released when it closes. The first input of a session from a new address logs it and emits `decky_toolkit_input_session` (at most once per address per 60 s). Rate cap about 1000 events/s; releases are never dropped. |
 
 Client messages on `/input`:
 
@@ -168,7 +168,7 @@ Errors: `400` bad argument, `403` sensitive path, `404` unknown app/path, `502` 
 
 The server runs as root, so writes are limited to (`games.write_roots` / `games.writable`, resolved through symlinks):
 inside `steamapps/common/<game>/` of any library, inside a Proton prefix `steamapps/compatdata/<appid>/`, inside
-`userdata/<account>/<appid>/`, the plugin runtime dir (`~/homebrew/data/decky-mcp`), and `~/.local/share/<dir>/...`,
+`userdata/<account>/<appid>/`, the plugin runtime dir (`~/homebrew/data/decky-toolkit`), and `~/.local/share/<dir>/...`,
 `~/.config/<dir>/...` (`~/.config/unity3d/<company>/<product>/...`) where `<dir>` matches an installed title's name or
 install dir as `game_dirs` matches them (not Steam's own dir or desktop config such as `systemd`, `autostart`, `fish`).
 The entries themselves (a game dir, a prefix, a `~/.local/share/<Game>` dir) cannot be replaced. Everything in
@@ -190,13 +190,13 @@ consumer, no re-encode, viewers are not affected. Resolution, quality and the ma
 ## Pairing
 
 A client asks for access, the device owner approves or denies it in the Decky panel (Quick Access →
-Decky-MCP: while a request is pending the panel shows only an "Approve pairing request?" prompt). There is no time limit: a request stays pending as long as its client
+Decky Toolkit: while a request is pending the panel shows only an "Approve pairing request?" prompt). There is no time limit: a request stays pending as long as its client
 keeps polling. Requests live in memory, so a plugin restart forgets them (polls then get `404` and
 the client files a new one).
 
 | Route | Auth | Status | Notes |
 | --- | --- | --- | --- |
-| `POST /pair/request` | none (Origin checked) | live | JSON `{client_name, client_kind}`. `client_name`: 1-64 characters (whitespace collapsed); `client_kind`: `vscode` \| `browser` \| `mcp` \| `other` (default `other`). `201 {id, code, poll_after_ms}`: `id` is a 128-bit secret only the requester knows, `code` 4 digits, unique among pending requests, shown on the device so the user can match it. A new request from the same address and `client_name` replaces that client's pending one. `429 {"error"}` with 10 pending requests in total or 2 from the address; `400` for bad input. Emits `decky_mcp_pair_request` (the device shows a toast). |
+| `POST /pair/request` | none (Origin checked) | live | JSON `{client_name, client_kind}`. `client_name`: 1-64 characters (whitespace collapsed); `client_kind`: `vscode` \| `browser` \| `mcp` \| `other` (default `other`). `201 {id, code, poll_after_ms}`: `id` is a 128-bit secret only the requester knows, `code` 4 digits, unique among pending requests, shown on the device so the user can match it. A new request from the same address and `client_name` replaces that client's pending one. `429 {"error"}` with 10 pending requests in total or 2 from the address; `400` for bad input. Emits `decky_toolkit_pair_request` (the device shows a toast). |
 | `GET /pair/request/{id}` | none (Origin checked) | live | `?wait=<s>` (0-25, default 0) long-polls until the request is decided, dropped or the wait ends. Pending/denied: `{status}`. Approved: `{status: "approved", token, url, api_version}` on the first poll that sees the approval (`url` is `http://<ip>:<port>`), `{status: "approved"}` afterwards. `?cookie=1` on an approved request sets the viewer cookie and redirects to `/viewer` (once; again: `410`). Unknown, cancelled, replaced or expired id: `404`. Every poll keeps the request alive. |
 | `DELETE /pair/request/{id}` | none (Origin checked) | live | Cancels a pending request: `{cancelled: true}`, else `404`. |
 | `GET /pair/requests` | bearer/cookie | live | Every request still held: `[{id, code, client_name, client_kind, remote, status, age_s}]`. |
@@ -214,9 +214,9 @@ request: approval needs someone at the device.
 
 | Route | Auth | Status | Notes |
 | --- | --- | --- | --- |
-| `POST /plugins/install` | bearer | live | Body: `multipart/form-data` with field `file` (a plugin zip as produced by the Decky CLI or `scripts/deploy.sh` staging: either `<name>/...` as the single top-level dir, or files at the zip root). Query: `restart=loader` (default) \| `plugin` \| `none`. Validates `plugin.json` (string `name`, string `author`, list `flags`, int `api_version`) and refuses absolute paths, `..` and symlinks (`400 {"error"}`). The dir name is the zip's top-level dir, else `name` with spaces turned into `-`. Installs to `~/homebrew/plugins/<dirname>` atomically (unzip to a temp dir next to `plugins/`, D0755/F0644 root:root, swap). `version` comes from `package.json` (may be `null`). Response `{installed: {dir, name, version}, restarted: "loader"|"plugin"|"none"}`. `restart=loader`: the zip is unpacked to `~/homebrew/.decky-mcp-pending/<dirname>` and, 1 s after the reply, a transient systemd unit stops the loader, swaps the dir in and starts the loader again (a swap the loader's file watcher sees while it is stopping leaves an orphaned, memory-leaking backend). `restart=plugin`: as `POST /plugins/{dir}/reload` after the swap; the plugin must already be loaded (a first install needs `loader`). `restart=none`: for a plugin with the `debug` flag the loader's file watcher re-imports it on its own 1-3 s later, usually twice (once per changed file); asking for `plugin` as well adds another reload. |
+| `POST /plugins/install` | bearer | live | Body: `multipart/form-data` with field `file` (a plugin zip as produced by the Decky CLI or the extension's deploy staging: either `<name>/...` as the single top-level dir, or files at the zip root). Query: `restart=loader` (default) \| `plugin` \| `none`. Validates `plugin.json` (string `name`, string `author`, list `flags`, int `api_version`) and refuses absolute paths, `..` and symlinks (`400 {"error"}`). The dir name is the zip's top-level dir, else `name` with spaces turned into `-`. Installs to `~/homebrew/plugins/<dirname>` atomically (unzip to a temp dir next to `plugins/`, D0755/F0644 root:root, swap). `version` comes from `package.json` (may be `null`). Response `{installed: {dir, name, version}, restarted: "loader"|"plugin"|"none"}`. `restart=loader`: the zip is unpacked to `~/homebrew/.decky-toolkit-pending/<dirname>` and, 1 s after the reply, a transient systemd unit stops the loader, swaps the dir in and starts the loader again (a swap the loader's file watcher sees while it is stopping leaves an orphaned, memory-leaking backend). `restart=plugin`: as `POST /plugins/{dir}/reload` after the swap; the plugin must already be loaded (a first install needs `loader`). `restart=none`: for a plugin with the `debug` flag the loader's file watcher re-imports it on its own 1-3 s later, usually twice (once per changed file); asking for `plugin` as well adds another reload. |
 | `GET /plugins` | bearer/cookie | live | Same as the `list_plugins` tool. |
-| `POST /plugins/{dir}/reload` | bearer | live | Re-import one plugin via Decky (`loader/reload_plugin`, called through `window.DeckyBackend` in SharedJSContext) without restarting the loader: the loader stops and restarts its backend, logs `Loaded <name> (v<version>)` and tells the frontend to import `dist/index.js` again (cache-busted), so both halves update (verified 2026-11-04, with and without the `debug` flag). `{dir, name, scheduled}`; reloading Decky-MCP itself is deferred 1 s (`scheduled: true`). `404` if the dir has no `plugin.json`, `502` if the Steam UI is unreachable. |
+| `POST /plugins/{dir}/reload` | bearer | live | Re-import one plugin via Decky (`loader/reload_plugin`, called through `window.DeckyBackend` in SharedJSContext) without restarting the loader: the loader stops and restarts its backend, logs `Loaded <name> (v<version>)` and tells the frontend to import `dist/index.js` again (cache-busted), so both halves update (verified 2026-11-04, with and without the `debug` flag). `{dir, name, scheduled}`; reloading Decky Toolkit itself is deferred 1 s (`scheduled: true`). `404` if the dir has no `plugin.json`, `502` if the Steam UI is unreachable. |
 | `POST /loader/restart` | bearer | live | Same as the `restart_loader` tool. `{restarting: true, delay_s: 1}`. |
 
 ## Logs
@@ -285,7 +285,7 @@ MCP tools only.
 | Tool | Notes |
 | --- | --- |
 | `plugin_methods(dir)` | Parses (does not import) `<dir>/main.py` with `ast`: public `async def` methods of the top-level `class Plugin`. `{dir, file, methods: [{name, args: [{name, annotation?, default?}], doc, line}]}`; `*args`/`**kw` appear as `*name`/`**name`, `doc` is the first docstring line. |
-| `call_plugin_method(plugin, method, args=[], timeout=30)` | `plugin` is the `plugin.json` name (e.g. `Decky-MCP`). Keys named `token` (and `viewer_url` values carrying `token=`) are removed from `result` at any depth, so Decky-MCP's own `get_status` does not hand out the bearer token. Runs `window.DeckyBackend.call('loader/call_plugin_method', plugin, method, ...args)` in SharedJSContext, i.e. exactly what the plugin's frontend `callable()` does, over the frontend's existing loader connection. `{ok: true, result}`, or `{ok: false, error, traceback}`: Decky rejects with a `PyError` whose message is empty and whose `pythonTraceback` ends in the exception line (e.g. `Exception: port must be 1024-65535`); an unknown method also fails this way. Methods starting with `_` (lifecycle hooks) are refused before anything is sent. |
+| `call_plugin_method(plugin, method, args=[], timeout=30)` | `plugin` is the `plugin.json` name (e.g. `Decky Toolkit`). Keys named `token` (and `viewer_url` values carrying `token=`) are removed from `result` at any depth, so Decky Toolkit's own `get_status` does not hand out the bearer token. Runs `window.DeckyBackend.call('loader/call_plugin_method', plugin, method, ...args)` in SharedJSContext, i.e. exactly what the plugin's frontend `callable()` does, over the frontend's existing loader connection. `{ok: true, result}`, or `{ok: false, error, traceback}`: Decky rejects with a `PyError` whose message is empty and whose `pythonTraceback` ends in the exception line (e.g. `Exception: port must be 1024-65535`); an unknown method also fails this way. Methods starting with `_` (lifecycle hooks) are refused before anything is sent. |
 | `plugin_frontend_check(dir)` | Scans `<dir>/src/**/*.ts(x)` when sources are installed, else `dist/index.js`, for `callable("x")` / `call("x", ...)` (also `callable$1` and TS generics), and compares with `plugin_methods`. `{source: "src"\|"dist", files_scanned, frontend_calls: {name: ["file:line"]}, backend_methods, missing_backend, unused_backend}`. `missing_backend` entries fail at runtime. |
 
 ## Security
@@ -297,7 +297,7 @@ MCP tools only.
   CEF cookie store (`*/htmlcache/*Cookies*`), `~/.ssh/id_*` (not `.pub`), `/etc/shadow`, `/etc/gshadow`.
   `write_file` also refuses `*/config/libraryfolders.vdf` and `*/steamapps/libraryfolders.vdf` (readable).
   Matching is case-insensitive on both the given and the symlink-resolved path. The list lives in
-  `py_modules/decky_mcp/tools/guard.py` (`is_sensitive`, `is_write_protected`, `check_read`,
+  `py_modules/decky_toolkit/tools/guard.py` (`is_sensitive`, `is_write_protected`, `check_read`,
   `check_write`); every tool that takes a device path calls it. The error is `PermissionError: refusing
   to read ...`.
 - **Confirm.** `restart_loader` and `install_plugin` with `restart: "loader"` (the default) need
@@ -354,10 +354,10 @@ external overlay into its PipeWire stream, so captures and recordings never show
 
 | Event | Payload | Meaning |
 | --- | --- | --- |
-| `decky_mcp_pair_request` | `{id, code, client_name, client_kind, remote}` | a client asked to pair; toast "<client_name> wants to pair · code <code>" |
-| `decky_mcp_pair_requests` | the `list_pair_requests` list | requests were filed, decided, cancelled or expired; the panel refreshes |
-| `decky_mcp_paired` | `remote_ip: string, client_name: string` | a pairing request was allowed on the device |
-| `decky_mcp_input_session` | `remote_ip: string` | a client started sending input (`"MCP client"` for tool calls); the panel shows a toast |
+| `decky_toolkit_pair_request` | `{id, code, client_name, client_kind, remote}` | a client asked to pair; toast "<client_name> wants to pair · code <code>" |
+| `decky_toolkit_pair_requests` | the `list_pair_requests` list | requests were filed, decided, cancelled or expired; the panel refreshes |
+| `decky_toolkit_paired` | `remote_ip: string, client_name: string` | a pairing request was allowed on the device |
+| `decky_toolkit_input_session` | `remote_ip: string` | a client started sending input (`"MCP client"` for tool calls); the panel shows a toast |
 
 ## Errors
 

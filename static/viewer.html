@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Decky-MCP Screen</title>
+<title>Decky Toolkit Screen</title>
 <link rel="icon" href="data:,">
 <style>
   :root { color-scheme: dark; }
@@ -56,7 +56,7 @@
 </head>
 <body>
 <header>
-  <b><span class="dot" id="dot"></span>Decky-MCP Screen</b>
+  <b><span class="dot" id="dot"></span>Decky Toolkit Screen</b>
   <span class="stat">fps <span id="fps">–</span></span>
   <span class="stat">Mbps <span id="mbps">–</span></span>
   <span class="stat">res <span id="res">–</span></span>
@@ -414,7 +414,7 @@
   // Same model as the editor panel: GET /controllers, live over /controllers/events while the
   // popover is open (5 s poll if the stream fails). A 404 (older device) hides all of it.
   let ctl = null, ctlEs = null, ctlPoll = null, padTarget = '';
-  try { padTarget = localStorage.getItem('decky-mcp-pad') || ''; } catch (e) { /* Auto */ }
+  try { padTarget = localStorage.getItem('decky-toolkit-pad') || ''; } catch (e) { /* Auto */ }
   const ADD_PAD = '__add__';
   const padMsg = st => padTarget ? { type: 'gamepad', ...st, pad: padTarget } : { type: 'gamepad', ...st };
   // Steam Input numbers slots from 0; people count controllers from 1.
@@ -490,7 +490,7 @@
     if (padSent) send(padMsg(NEUTRAL_PAD));
     padSent = null;
     padTarget = id;
-    try { localStorage.setItem('decky-mcp-pad', id); } catch (e) { /* not persisted */ }
+    try { localStorage.setItem('decky-toolkit-pad', id); } catch (e) { /* not persisted */ }
   }
   // Returns the new pad's id; the server's refusal text (all slots used, Steam Input did not pick it up) is shown as-is.
   async function addPad(name, say) {
@@ -589,7 +589,7 @@ class PcmPlayer extends AudioWorkletProcessor {
 registerProcessor('pcm-player', PcmPlayer);`;
   let actx = null, anode = null, again = null, aws = null, aRetry = null, aPoll = null, deviceAudio = false;
   let muted = false, volume = 0.8, aWin = [], aWinBytes = 0, nextT = 0;
-  try { const saved = JSON.parse(localStorage.getItem('decky-mcp-audio') || '{}'); muted = !!saved.muted; if (typeof saved.volume === 'number') volume = saved.volume; } catch (e) { /* defaults */ }
+  try { const saved = JSON.parse(localStorage.getItem('decky-toolkit-audio') || '{}'); muted = !!saved.muted; if (typeof saved.volume === 'number') volume = saved.volume; } catch (e) { /* defaults */ }
   el('vol').value = Math.round(volume * 100);
 
   function updateAudioUi() {
@@ -603,7 +603,7 @@ registerProcessor('pcm-player', PcmPlayer);`;
   }
   function applyVolume() {
     if (again) again.gain.value = muted ? 0 : volume;
-    try { localStorage.setItem('decky-mcp-audio', JSON.stringify({ muted, volume })); } catch (e) { /* not persisted */ }
+    try { localStorage.setItem('decky-toolkit-audio', JSON.stringify({ muted, volume })); } catch (e) { /* not persisted */ }
     updateAudioUi();
   }
   el('mute').onclick = () => { muted = !muted; applyVolume(); };

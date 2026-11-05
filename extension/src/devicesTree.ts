@@ -34,7 +34,7 @@ export function deviceRow(conn: ConnectionState, d: SavedDevice): DeviceNode {
   else if (session && h.kind === 'unreachable') md.appendMarkdown(`Connected, but not answering: ${h.error}\n\n`);
   else md.appendMarkdown(`${label}${busy ? '' : status === 'unpaired' ? ' · click to pair and connect' : ' · click to connect'}\n\n`);
   n.tooltip = md;
-  if (!session && !busy) n.command = { command: 'decky-mcp.connect', title: 'Connect', arguments: [d.id] };
+  if (!session && !busy) n.command = { command: 'decky-toolkit.connect', title: 'Connect', arguments: [d.id] };
   return n;
 }
 

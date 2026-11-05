@@ -5,10 +5,10 @@ import { DeckyClient, DeviceAddress, HttpError, describeError, isConnectionError
 import { DeviceProxy, ProxyTarget } from './proxy';
 
 const STATS_POLL_MS = 5000;
-const DEVICES_KEY = 'decky-mcp.devices';
-const ACTIVE_KEY = 'decky-mcp.activeDevice';
-const SESSION_KEY = 'decky-mcp.connectedDevice';
-const TOKEN_PREFIX = 'decky-mcp.token:';
+const DEVICES_KEY = 'decky-toolkit.devices';
+const ACTIVE_KEY = 'decky-toolkit.activeDevice';
+const SESSION_KEY = 'decky-toolkit.connectedDevice';
+const TOKEN_PREFIX = 'decky-toolkit.token:';
 
 /** Mutable so tests can shorten them. */
 export const connectionTimings = { healthPollMs: 15000 };
@@ -91,20 +91,21 @@ export class Connection implements ConnectionState, vscode.Disposable {
         else if (e.key.startsWith(TOKEN_PREFIX)) void this.loadTokenFlags().then(() => this.fireStatus());
       }),
       vscode.workspace.onDidChangeConfiguration(e => {
-        if (e.affectsConfiguration('decky-mcp.host') || e.affectsConfiguration('decky-mcp.port')) void this.refresh();
+        if (e.affectsConfiguration('decky-toolkit.host') || e.affectsConfiguration('decky-toolkit.port')) void this.refresh();
       }),
     );
   }
 
   private get settingsAddress(): DeviceAddress {
-    const cfg = vscode.workspace.getConfiguration('decky-mcp');
-    return { host: cfg.get<string>('host', '10.0.70.18').trim(), port: cfg.get<number>('port', 8765) };
+    const cfg = vscode.workspace.getConfiguration('decky-toolkit');
+    return { host: cfg.get<string>('host', '').trim(), port: cfg.get<number>('port', 8765) };
   }
 
   /** Seeds the device list from the host/port settings the first time the extension runs. */
   async initDevices(): Promise<void> {
     if (this.ctx.globalState.get<SavedDevice[]>(DEVICES_KEY) !== undefined) return;
     const { host, port } = this.settingsAddress;
+    if (!host) return;
     const seed: SavedDevice = { id: newDeviceId(), name: host, host, port };
     await this.ctx.globalState.update(DEVICES_KEY, [seed]);
     await this.ctx.globalState.update(ACTIVE_KEY, seed.id);
@@ -407,9 +408,9 @@ export class Connection implements ConnectionState, vscode.Disposable {
       const d = this.activeDevice;
       const connectTo = d ? `Connect to ${d.name}` : undefined;
       const choice = await vscode.window.showWarningMessage(
-        'Decky-MCP: not connected to a device.', ...(connectTo ? [connectTo] : []), 'Choose device');
-      if (choice && choice === connectTo) await vscode.commands.executeCommand('decky-mcp.connect', d!.id);
-      else if (choice === 'Choose device') await vscode.commands.executeCommand('decky-mcp.switchDevice');
+        'Decky Toolkit: not connected to a device.', ...(connectTo ? [connectTo] : []), 'Choose device');
+      if (choice && choice === connectTo) await vscode.commands.executeCommand('decky-toolkit.connect', d!.id);
+      else if (choice === 'Choose device') await vscode.commands.executeCommand('decky-toolkit.switchDevice');
     }
     return this.connectedDevice ? this.authedClient() : undefined;
   }

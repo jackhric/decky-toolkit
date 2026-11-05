@@ -9,8 +9,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
-from decky_mcp import games, vdf  # noqa: E402
-from decky_mcp.games import SensitivePath  # noqa: E402
+from decky_toolkit import games, vdf  # noqa: E402
+from decky_toolkit.games import SensitivePath  # noqa: E402
 
 from test_routes import H, with_server  # noqa: E402
 
@@ -372,7 +372,7 @@ def test_fs_read_write_mkdir_rename(tree, tmp_path):
 
 
 def test_fs_write_routes(tree, tmp_path, monkeypatch):
-    from decky_mcp.auth import TOKEN_COOKIE
+    from decky_toolkit.auth import TOKEN_COOKIE
     home, root = tree["home"], tree["root"]
     runtime = tmp_path / "runtime"
     runtime.mkdir()

@@ -4,7 +4,7 @@ import { DeckyClient, describeError, isOldDevice } from './client';
 import type { Connection, ConnectionState, SavedDevice } from './connection';
 import { deckyUri, deviceAuthority, globEscape } from './remoteFs';
 
-export const GAMES_UNSUPPORTED = 'update Decky-MCP on the device';
+export const GAMES_UNSUPPORTED = 'update Decky Toolkit on the device';
 const MAX_SAVE_LOCATIONS = 8;
 
 /** `Proton 11`, `Proton Experimental`, `Linux runtime` or `native`. */
@@ -216,13 +216,13 @@ export class GamesTreeProvider implements vscode.TreeDataProvider<GameNode>, vsc
       if (isOldDevice(e)) {
         const n = info('Games', 'game', GAMES_UNSUPPORTED);
         n.iconPath = new vscode.ThemeIcon('game', new vscode.ThemeColor('disabledForeground'));
-        n.tooltip = 'The Decky-MCP plugin on this device predates the library routes (GET /apps answers 404).';
+        n.tooltip = 'The Decky Toolkit plugin on this device predates the library routes (GET /apps answers 404).';
         n.contextValue = 'game.unsupported';
         return [n];
       }
       const n = info(`Could not load games: ${describeError(e)}`, 'warning');
       n.tooltip = 'Click to retry';
-      n.command = { command: 'decky-mcp.refreshGames', title: 'Retry' };
+      n.command = { command: 'decky-toolkit.refreshGames', title: 'Retry' };
       this.roots = undefined;
       return [n];
     }
@@ -348,7 +348,7 @@ export async function gameChildren(client: DeckyClient, game: GameNode): Promise
   log.iconPath = new vscode.ThemeIcon('output');
   log.contextValue = 'gameLog';
   log.tooltip = '~/steam-<appid>.log (written with PROTON_LOG=1) and the lines of Steam\'s logs that mention this title';
-  log.command = { command: 'decky-mcp.gameProtonLog', title: 'Show log', arguments: [game] };
+  log.command = { command: 'decky-toolkit.gameProtonLog', title: 'Show log', arguments: [game] };
   out.push(log);
   return out;
 }
@@ -420,7 +420,7 @@ function appidOf(arg: unknown): number | undefined {
 async function pickGame(tree: GamesTreeProvider, placeHolder: string): Promise<AppSummary | undefined> {
   const apps = await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: 'Loading games' }, () => tree.list());
   if (!apps.length) {
-    void vscode.window.showInformationMessage('Decky-MCP: no installed games found on the device.');
+    void vscode.window.showInformationMessage('Decky Toolkit: no installed games found on the device.');
     return undefined;
   }
   const picked = await vscode.window.showQuickPick(buildGamePicks(apps), { placeHolder, matchOnDescription: true, matchOnDetail: true });
@@ -481,7 +481,7 @@ export async function openGameSaves(conn: Connection, tree: GamesTreeProvider, a
     () => Promise.all([client.appSaves(app.appid).catch(() => undefined), client.appDirs(app.appid).catch(() => undefined)]));
   const folder = bestSaveFolder(saves, dirs);
   if (!folder) {
-    void vscode.window.showWarningMessage(`Decky-MCP: no save data found for ${name}${saves?.notes.length ? ` (${saves.notes.join('; ')})` : ''}.`);
+    void vscode.window.showWarningMessage(`Decky Toolkit: no save data found for ${name}${saves?.notes.length ? ` (${saves.notes.join('; ')})` : ''}.`);
     return;
   }
   await openInExplorer(device, folder, `${name} saves`);
@@ -523,8 +523,8 @@ export async function gameLaunch(conn: Connection, tree: GamesTreeProvider, arg?
   if (!app) return;
   const res = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Launching ${gameName(app)}` },
     async () => JSON.parse(await client.callToolText('app_launch', { appid: app.appid }, 45000)) as LaunchResult);
-  if (res.running) void vscode.window.showInformationMessage(`Decky-MCP: ${res.name ?? gameName(app)} is running${res.launched ? '' : ' (it already was)'}.`);
-  else void vscode.window.showWarningMessage(`Decky-MCP: ${res.name ?? gameName(app)} did not start${res.note ? `: ${res.note}` : ''}.`);
+  if (res.running) void vscode.window.showInformationMessage(`Decky Toolkit: ${res.name ?? gameName(app)} is running${res.launched ? '' : ' (it already was)'}.`);
+  else void vscode.window.showWarningMessage(`Decky Toolkit: ${res.name ?? gameName(app)} did not start${res.note ? `: ${res.note}` : ''}.`);
   tree.refresh();
 }
 
@@ -539,8 +539,8 @@ export async function gameTerminate(conn: Connection, tree: GamesTreeProvider, a
   if (ok !== 'Terminate') return;
   const res = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Terminating ${name}` },
     async () => JSON.parse(await client.callToolText('app_terminate', { appid: app.appid, confirm: true }, 45000)) as LaunchResult);
-  if (res.running) void vscode.window.showWarningMessage(`Decky-MCP: ${name} is still running.`);
-  else void vscode.window.showInformationMessage(`Decky-MCP: ${name} ${res.terminated ? 'terminated' : 'was not running'}.`);
+  if (res.running) void vscode.window.showWarningMessage(`Decky Toolkit: ${name} is still running.`);
+  else void vscode.window.showInformationMessage(`Decky Toolkit: ${name} ${res.terminated ? 'terminated' : 'was not running'}.`);
   tree.refresh();
 }
 

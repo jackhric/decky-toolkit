@@ -1,6 +1,6 @@
-# Decky-MCP for VS Code
+# Decky Toolkit for VS Code
 
-Companion extension for the [Decky-MCP](../README.md) Decky Loader plugin. It talks to the plugin's
+Companion extension for the [Decky Toolkit](https://github.com/jackhric/decky-toolkit#readme) Decky Loader plugin. It talks to the plugin's
 HTTP server on the device (port 8765; any machine running Decky Loader: Steam Deck, SteamOS,
 Bazzite, …) and gives you, inside VS Code or VSCodium:
 
@@ -16,24 +16,24 @@ Bazzite, …) and gives you, inside VS Code or VSCodium:
 - Steam UI navigation (any page, a game's details, a plugin's panel, Back, Quick Access),
 - a live view of the device's display (30 fps MJPEG) in an editor tab,
 - one-click deploy of the Decky plugin open in your workspace: it is detected automatically, built
-  only when its sources changed, and reloaded on its own in about a second (no loader restart),
+  only when its sources changed, and reloaded on its own (no loader restart),
   optionally on every change; plus install of any plugin zip,
 - live loader and plugin logs in output channels,
 - a JavaScript console for the Steam UI (`SharedJSContext`) and toasts on the device,
 - a generated `.mcp.json` so Claude Code and other MCP clients in the workspace can use the device.
 
-The Decky-MCP plugin must already be installed and enabled on the device.
+The Decky Toolkit plugin must already be installed and enabled on the device.
 
 ## Getting started
 
 1. **Click the Decky icon** (the Steam Deck logo) in the Activity Bar. The **Devices** view lists
-   your saved devices. The first time, it contains the device from the `decky-mcp.host` setting; use
+   your saved devices. The first time, it contains the device from the `decky-toolkit.host` setting; use
    the **+** in the view title to add another (see [Adding a device](#adding-a-device)).
 2. **Click the device** (or its plug icon). If it is not paired yet, pairing starts at once; see
-   [Pairing](#pairing). If it is paired, it connects in a second.
+   [Pairing](#pairing). If it is paired, it connects.
 3. **Work.** When it is connected, the **Actions**, **Plugins**, **Games**, **Controllers** and **Preview** views appear below
    the list, with the device's name in their title bars. The screen panel opens automatically after
-   the first connect of a session (setting `decky-mcp.openScreenOnConnect`). If your workspace is a
+   the first connect of a session (setting `decky-toolkit.openScreenOnConnect`). If your workspace is a
    Decky plugin, you are offered to deploy it; afterwards use the `$(rocket) Deploy <name>` button in
    the status bar, <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd> (<kbd>Cmd</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd>
    on macOS) or **Plugin → Deploy** in the Actions view. See [Deploy](#deploy).
@@ -104,7 +104,7 @@ you expand or collapse.
   - **Evaluate JS in Steam UI**, **Toast on device**.
 
   The status bar briefly shows the page the Steam UI ended up on. A device whose plugin predates
-  navigation answers 404; the commands then say *update Decky-MCP on the device*.
+  navigation answers 404; the commands then say *update Decky Toolkit on the device*.
 - **MCP**
   - **Write MCP config for this workspace**, **Copy MCP URL** (`http://host:port/mcp`),
     **Copy token** (the bearer token; a warning reminds you it is a secret).
@@ -157,7 +157,7 @@ Expanding a game loads `/apps/{appid}/dirs` and `/apps/{appid}/saves` and shows:
 Right-click a folder or file for **Open in Explorer** (also the inline icon on folders) and **Copy
 path**; right-click a game for **Open save data**, **Launch**/**Terminate**, **Show Proton log**
 and **Copy path** (the install folder). A device whose plugin predates the library routes shows one
-greyed-out row, *update Decky-MCP on the device*.
+greyed-out row, *update Decky Toolkit on the device*.
 
 #### Jump into a game's saves
 
@@ -179,7 +179,7 @@ not the connected one; the token comes from secret storage.
 - **Write**: saving uses `PUT /fs/write`; new folders `POST /fs/mkdir`, rename/move
   `POST /fs/rename`, delete `DELETE /fs?...&confirm=1` (VS Code asks before deleting). The device
   only writes inside a game's install folder, a Proton prefix (`compatdata/<appid>/...`),
-  `userdata/<account>/<appid>/...`, the Decky-MCP data folder, and `~/.local/share` / `~/.config`
+  `userdata/<account>/<appid>/...`, the Decky Toolkit data folder, and `~/.local/share` / `~/.config`
   folders named after an installed game; deleting follows `fs_delete`'s rules (not the
   `~/.local/share` game folders). New files and folders get the owner of their parent, so the game
   can still write its saves.
@@ -219,7 +219,7 @@ and whether it is the pad the device created on its own for forwarded input ("Au
   every 5 s and retries the stream.
 - With no controllers the view says *No controllers seen by Steam Input.* with an **Add virtual
   controller** button. A device whose plugin predates controller management shows one greyed-out
-  row, *update Decky-MCP on the device*, and recovers on its own once the plugin is updated.
+  row, *update Decky Toolkit on the device*, and recovers on its own once the plugin is updated.
 
 ### Preview
 
@@ -232,7 +232,7 @@ for the screen panel.
 The extension looks for Decky plugins in the workspace: every folder with a `plugin.json`, in a
 workspace folder or up to two levels below it (not in `node_modules`). It reads the name, author,
 flags and `api_version` from `plugin.json` and the version from `package.json`, and installs to
-`~/homebrew/plugins/<folder name>` (setting `decky-mcp.pluginDirName` overrides the name). Plugins
+`~/homebrew/plugins/<folder name>` (setting `decky-toolkit.pluginDirName` overrides the name). Plugins
 are expected to follow the [decky-plugin-template](https://github.com/SteamDeckHomebrew/decky-plugin-template)
 layout. Edits to `plugin.json` or `package.json` are picked up at once.
 
@@ -242,7 +242,7 @@ connected, the status bar shows `$(rocket) Deploy <name>` (`$(sync~spin)` while 
 
 **One click.** Deploy runs these steps and reports *Deployed <name> in 0.6 s*:
 
-1. **Build, only if needed.** With `decky-mcp.deploy.build` = `auto` (default), `pnpm run build` runs
+1. **Build, only if needed.** With `decky-toolkit.deploy.build` = `auto` (default), `pnpm run build` runs
    only when a file under `src/` (or `tsconfig.json` / `rollup.config.*`) is newer than
    `dist/index.js`, or `dist/index.js` is missing. `main.py` and `py_modules/` never need a build.
    `always` and `never` do what they say. The package manager follows the lockfile
@@ -273,7 +273,7 @@ after 4 s (it is off for 10 s after the loader starts). Without the flag a deplo
 reload and finishes sooner.
 
 **Auto-deploy on change** (off by default; toggle with **Plugin → Auto-deploy on change** or the
-`decky-mcp.deploy.onChange` setting): changes to `dist/index.js`, `main.py` or
+`decky-toolkit.deploy.onChange` setting): changes to `dist/index.js`, `main.py` or
 `py_modules/**/*.py` trigger a fast deploy 750 ms after the last change, without building. Keep
 your bundler running in watch mode (`pnpm run watch`) so every save rebuilds `dist/index.js`. A
 change during a running deploy queues one more deploy. Auto-deploys report in the status bar
@@ -283,7 +283,7 @@ instead of a notification.
 
 The screen panel can drive the device with your keyboard, mouse and a gamepad. Remote input is **off
 by default** and is a device-wide switch: it is the same flag as the **Allow remote input** toggle
-in the device's Decky-MCP panel and the **⌨ Input** button in the browser viewer.
+in the device's Decky Toolkit panel and the **⌨ Input** button in the browser viewer.
 
 - **Turn it on or off** with the **Input** button in the screen panel toolbar (highlighted while
   on), or run **Decky: Toggle remote input** from the command palette. The extension sends
@@ -333,25 +333,25 @@ Pairing starts when you connect to a device without a token (or whose token the 
 when you choose **Re-pair**.
 
 1. **Reachability.** The extension calls `GET /health` (no token). If the device does not answer, you
-   get one error: *Can't reach <name> at host:port. Is the device on and Decky-MCP enabled?* with
+   get one error: *Can't reach <name> at host:port. Is the device on and Decky Toolkit enabled?* with
    **Retry** and **Edit device**. Nothing else happens.
 2. **Request.** The extension files `POST /pair/request` with the name *VS Code on <hostname>*
    (*VSCodium* or *Cursor* in those editors) and gets a 4-digit code.
-3. **Waiting, with no time limit.** One progress notification: *Decky-MCP: Waiting for approval on
-   <name> · code 4821. On the device: Quick Access → Decky-MCP → Approve.* with **Cancel**; the device
+3. **Waiting, with no time limit.** One progress notification: *Decky Toolkit: Waiting for approval on
+   <name> · code 4821. On the device: Quick Access → Decky Toolkit → Approve.* with **Cancel**; the device
    row says *waiting for approval · code 4821*. The device shows a toast *VS Code on <hostname> wants
-   to pair · code 4821*, and its Decky-MCP panel switches to an *Approve pairing request?* prompt with
+   to pair · code 4821*, and its Decky Toolkit panel switches to an *Approve pairing request?* prompt with
    **Approve** and **Deny**. The extension long-polls `GET /pair/request/{id}?wait=25`. Network errors (the device
    sleeping, a loader restart) only show *Lost contact with <name>, retrying…*; it keeps trying until
    you cancel. If the device forgot the request (plugin restarted), it files a new one and shows the
    new code. **Cancel** withdraws the request (`DELETE /pair/request/{id}`).
 4. **Allowed.** The token is stored, the device becomes connected (the screen panel opens per
-   `decky-mcp.openScreenOnConnect`) and you see *Paired with <name>* with **Open screen** and
+   `decky-toolkit.openScreenOnConnect`) and you see *Paired with <name>* with **Open screen** and
    **Deploy plugin**.
 5. **Denied.** *Pairing denied on <name>* with **Try again**.
 
-A device whose plugin predates pairing requests gets *Update Decky-MCP on <name> to pair* with
-**Enter token manually**; paste the token shown in its Decky-MCP panel. Other failures (for example
+A device whose plugin predates pairing requests gets *Update Decky Toolkit on <name> to pair* with
+**Enter token manually**; paste the token shown in its Decky Toolkit panel. Other failures (for example
 too many pending requests) offer **Try again** and **Enter token manually**.
 
 ### Adding a device
@@ -385,13 +385,13 @@ All of these are also in the command palette under the `Decky:` category.
 | Decky: Disconnect and forget token | Forgets the token for the active device |
 | Decky: Switch device / Add device… / Edit device / Remove device | Connect to another saved device, manage saved devices |
 | Decky: Copy viewer URL | Copies `http://host:port/viewer` for a browser |
-| Decky: Change host | Changes the active device's host/port and writes the `decky-mcp.host`/`port` settings |
+| Decky: Change host | Changes the active device's host/port and writes the `decky-toolkit.host`/`port` settings |
 | Decky: Open screen | Live screen panel with sound, fps / Mbps / resolution / audio kbps, stream settings, mute and volume, pause, fit/actual, snapshot and the remote input toggle |
 | Decky: Open viewer in browser | Opens `http://host:port/viewer` in the default browser (pair the browser on the device) |
 | Decky: Snapshot to file | Saves the current `/frame.jpg` with a Save dialog |
 | Decky: Deploy plugin | Build if needed, zip, `POST /plugins/install`, reload just this plugin and confirm it (<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd>) |
 | Decky: Deploy plugin (full restart) | Same, but restarts Decky Loader and waits for `/health` |
-| Decky: Toggle auto-deploy on change | Flips `decky-mcp.deploy.onChange` for the workspace |
+| Decky: Toggle auto-deploy on change | Flips `decky-toolkit.deploy.onChange` for the workspace |
 | Decky: Toggle remote input | Turns remote keyboard, mouse and gamepad input on or off for the whole device (`PUT /input/settings`) |
 | Decky: Add virtual controller / Remove virtual controller / Refresh controllers | Manage virtual Xbox 360 pads on the device (`/controllers/virtual`) |
 | Decky: Navigate Steam UI to… | Picker of official pages, plugin pages and menus from `/ui/routes`; asks for template values such as the app id |
@@ -408,7 +408,7 @@ All of these are also in the command palette under the `Decky:` category.
 | Decky: Reload plugin | `POST /plugins/{dir}/reload` for one plugin backend |
 | Decky: Show loader logs | Streams `journalctl -u plugin_loader` via `/logs/stream` |
 | Decky: Show plugin logs | Streams a plugin's log from `~/homebrew/logs/<dir>/` |
-| Decky: Evaluate JS in Steam UI | Runs an expression with the `cef_evaluate` tool; result in an info message or the "Decky-MCP Console" output |
+| Decky: Evaluate JS in Steam UI | Runs an expression with the `cef_evaluate` tool; result in an info message or the "Decky Toolkit Console" output |
 | Decky: Toast on device | Shows a Decky toast |
 | Decky: Write MCP config for this workspace | Adds `mcpServers.decky` to `.mcp.json` in the first workspace folder |
 | Decky: Copy MCP URL | Copies `http://host:port/mcp` |
@@ -419,14 +419,14 @@ All of these are also in the command palette under the `Decky:` category.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `decky-mcp.openScreenOnConnect` | `true` | Open the screen panel after the first successful connect of a session |
-| `decky-mcp.host` | `10.0.70.18` | Device IP or hostname. Seeds the first saved device; used when the device list is empty |
-| `decky-mcp.port` | `8765` | Decky-MCP server port (same rules as `host`) |
-| `decky-mcp.pluginDirName` | (empty) | Target dir under `~/homebrew/plugins` for deploy; empty means the plugin folder's name |
-| `decky-mcp.deploy.build` | `auto` | `auto`: build only when `src/` is newer than `dist/index.js`; `always`; `never` |
-| `decky-mcp.deploy.onChange` | `false` | Fast-deploy (without building) when `dist/index.js`, `main.py` or `py_modules/**/*.py` change |
+| `decky-toolkit.openScreenOnConnect` | `true` | Open the screen panel after the first successful connect of a session |
+| `decky-toolkit.host` | (empty) | Device IP or hostname. When set, seeds the first saved device; used when the device list is empty |
+| `decky-toolkit.port` | `8765` | Decky Toolkit server port (same rules as `host`) |
+| `decky-toolkit.pluginDirName` | (empty) | Target dir under `~/homebrew/plugins` for deploy; empty means the plugin folder's name |
+| `decky-toolkit.deploy.build` | `auto` | `auto`: build only when `src/` is newer than `dist/index.js`; `always`; `never` |
+| `decky-toolkit.deploy.onChange` | `false` | Fast-deploy (without building) when `dist/index.js`, `main.py` or `py_modules/**/*.py` change |
 
-Saved devices live in VS Code's global state (`decky-mcp.devices`), so all windows share them.
+Saved devices live in VS Code's global state (`decky-toolkit.devices`), so all windows share them.
 Tokens are stored per `host:port` in secret storage.
 
 ## How it works
@@ -457,11 +457,11 @@ cd extension
 pnpm install
 pnpm run build        # esbuild → dist/extension.js
 pnpm run typecheck    # tsc --noEmit
-npx @vscode/vsce package --no-dependencies   # → decky-mcp-<version>.vsix
+npx @vscode/vsce package --no-dependencies   # → decky-toolkit-<version>.vsix
 ```
 
 Run it in the Extension Development Host: run `pnpm run build`, open the `extension/` folder in VS
-Code and press <kbd>F5</kbd> (launch config "Run Decky-MCP extension"), then open your Decky plugin
+Code and press <kbd>F5</kbd> (launch config "Run Decky Toolkit extension"), then open your Decky plugin
 folder in the new window. Or from a shell:
 
 ```sh
@@ -472,7 +472,7 @@ code --extensionDevelopmentPath="$PWD" /path/to/your/decky-plugin
 (`codium` works the same way.) Use `pnpm run watch` to rebuild on save, then run
 "Developer: Reload Window" in the development host.
 
-Install the packaged build with `code --install-extension decky-mcp-0.5.0.vsix`.
+Install the packaged build with `code --install-extension decky-toolkit-<version>.vsix`.
 
 ### Smoke test (no device)
 
@@ -493,7 +493,7 @@ install (loader restart), fast deploy (`restart=plugin`), debug-flagged deploy (
 full restart, a failing build and auto-deploy on change. It also checks that Connect on an unpaired device files a pairing request
 (name, kind, the waiting message and the row's code, then approval), a denied request with Try
 again, waiting through a lost connection and a forgotten request (new code) and Cancel sending
-`DELETE`, the "Update Decky-MCP" path for an older device, the reachability error with Retry, the 15 s health check going unreachable and back, Add device, snapshot, Copy MCP URL /
+`DELETE`, the "Update Decky Toolkit" path for an older device, the reachability error with Retry, the 15 s health check going unreachable and back, Add device, snapshot, Copy MCP URL /
 token and Open viewer, and the remote input toggle (screen panel message, palette command, status
 bar indicator, unavailable and unsupported devices), and the screen panel's stream settings and
 audio: `ready` loads `/stream/settings`, `setStream` sends only known fields, a stats tick mirrors
@@ -519,11 +519,11 @@ DOM).
 code the extension uses and checks on the device that both halves changed:
 
 ```sh
-DECKY_TOKEN_FILE=~/deck-token node scripts/deploy-check.mjs /path/to/decky-mcp-test [host] [port]
+DECKY_TOKEN_FILE=~/deck-token node scripts/deploy-check.mjs /path/to/decky-toolkit-test [host] [port]
 ```
 
-The plugin must be named `Decky-MCP Test`, export `VERSION` from `src/version.ts` and
-`py_modules/testver/__init__.py`, set `window.__deckyMcpTestVersion = VERSION` in its frontend and
+The plugin must be named `Decky Toolkit Test`, export `VERSION` from `src/version.ts` and
+`py_modules/testver/__init__.py`, set `window.__deckyToolkitTestVersion = VERSION` in its frontend and
 have a `version` method. The script rewrites those per round: first install, fast deploy with and
 without the `debug` flag, a deploy with nothing to build and one full restart (skipped while a
 `/stream.mjpeg` viewer is connected, unless `IGNORE_VIEWERS=1`). Each round checks the bundle's version via `cef_evaluate`,

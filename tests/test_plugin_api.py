@@ -9,8 +9,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
-from decky_mcp import cdp  # noqa: E402
-from decky_mcp.tools import build_registry, plugin_api  # noqa: E402
+from decky_toolkit import cdp  # noqa: E402
+from decky_toolkit.tools import build_registry, plugin_api  # noqa: E402
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "sample_plugin"
 
@@ -84,20 +84,20 @@ def test_call_plugin_method(monkeypatch):
         return {"ok": True, "result": {"running": True}}
 
     monkeypatch.setattr(cdp, "evaluate_in", fake_eval)
-    res = asyncio.run(plugin_api.call_plugin_method("Decky-MCP", "get_status", [1, "a"]))
-    assert res == {"plugin": "Decky-MCP", "method": "get_status", "ok": True, "result": {"running": True}}
+    res = asyncio.run(plugin_api.call_plugin_method("Decky Toolkit", "get_status", [1, "a"]))
+    assert res == {"plugin": "Decky Toolkit", "method": "get_status", "ok": True, "result": {"running": True}}
     title, js, timeout = seen[0]
     assert title is None and timeout == 30
-    assert "loader/call_plugin_method" in js and '["Decky-MCP", "get_status", 1, "a"]' in js
+    assert "loader/call_plugin_method" in js and '["Decky Toolkit", "get_status", 1, "a"]' in js
 
-    res = asyncio.run(plugin_api.call_plugin_method("Decky-MCP", "boom"))
+    res = asyncio.run(plugin_api.call_plugin_method("Decky Toolkit", "boom"))
     assert res["ok"] is False and res["error"] == "Exception: port must be 1024-65535" and "Traceback" in res["traceback"]
 
     for method in ("_main", "_unload", "__init__"):
-        out = call("call_plugin_method", plugin="Decky-MCP", method=method)
+        out = call("call_plugin_method", plugin="Decky Toolkit", method=method)
         assert out["isError"] and "starting with '_'" in out["content"][0]["text"]
     for kwargs in ({"method": "x; alert(1)"}, {"method": "ok", "args": {"a": 1}}, {"method": "ok", "plugin": ""}):
-        out = call("call_plugin_method", **{"plugin": "Decky-MCP", **kwargs})
+        out = call("call_plugin_method", **{"plugin": "Decky Toolkit", **kwargs})
         assert out["isError"] and out["content"][0]["text"].startswith("ValueError")
     assert len(seen) == 2
 
@@ -110,7 +110,7 @@ def test_call_plugin_method_redacts_token(monkeypatch):
         return {"ok": True, "result": status}
 
     monkeypatch.setattr(cdp, "evaluate_in", fake_eval)
-    res = asyncio.run(plugin_api.call_plugin_method("Decky-MCP", "get_status"))
+    res = asyncio.run(plugin_api.call_plugin_method("Decky Toolkit", "get_status"))
     assert res["result"] == {"enabled": True, "url": "http://h:8765/mcp", "nested": [{"keep": 1}]}
     assert "secret" not in json.dumps(res)
     assert plugin_api.redact_secrets({"viewer_url": "http://h/viewer"}) == {"viewer_url": "http://h/viewer"}

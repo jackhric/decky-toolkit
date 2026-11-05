@@ -10,7 +10,7 @@ export class StatusBar implements vscode.Disposable {
   private readonly sub: vscode.Disposable;
 
   constructor(private readonly conn: ConnectionState) {
-    this.item.command = 'decky-mcp.switchDevice';
+    this.item.command = 'decky-toolkit.switchDevice';
     this.sub = conn.onDidChange(() => this.render());
     this.render();
     this.item.show();
@@ -46,7 +46,7 @@ export class ScreenPanel {
       return;
     }
     const { base, external } = await externalProxyBase(conn);
-    const panel = vscode.window.createWebviewPanel('decky-mcp.screen', `Screen: ${conn.label}`, vscode.ViewColumn.Beside, {
+    const panel = vscode.window.createWebviewPanel('decky-toolkit.screen', `Screen: ${conn.label}`, vscode.ViewColumn.Beside, {
       enableScripts: true,
       retainContextWhenHidden: true,
       localResourceRoots: [vscode.Uri.joinPath(ctx.extensionUri, 'media')],
@@ -135,7 +135,7 @@ export class ScreenPanel {
         try {
           await toggleInput(conn, !!m.enabled);
         } catch (e) {
-          void vscode.window.showErrorMessage(`Decky-MCP: ${describeError(e)}`);
+          void vscode.window.showErrorMessage(`Decky Toolkit: ${describeError(e)}`);
         }
         sendInput(true);
       }

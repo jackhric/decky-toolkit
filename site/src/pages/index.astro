@@ -1,0 +1,74 @@
+---
+import "@/styles/starwind.css";
+import '@fontsource-variable/plus-jakarta-sans';
+import '../styles/theme.css';
+import Features from '../components/Features.astro';
+import Footer from '../components/Footer.astro';
+import Hero from '../components/hero/Hero.astro';
+import Seo from '../components/Seo.astro';
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const repo = 'https://github.com/jackhric/decky-toolkit';
+const marketplace = 'https://marketplace.visualstudio.com/items?itemName=jackhric.decky-toolkit';
+const openVsx = 'https://open-vsx.org/extension/jackhric/decky-toolkit';
+const pluginUrl = 'jackhric.github.io/decky-toolkit/decky-toolkit.zip';
+const title = 'Decky Toolkit: Decky Loader plugin development in VS Code';
+const description = 'Build, deploy and hot reload Decky Loader plugins on your Steam Deck from VS Code or VSCodium. Live screen, logs, CEF console and an MCP server.';
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <Seo title={title} description={description} />
+    <link rel="icon" type="image/svg+xml" href={`${base}/favicon.svg`} />
+    <meta name="color-scheme" content="light dark" />
+  </head>
+  <body>
+    <Hero marketplace={marketplace} openVsx={openVsx} repo={repo} />
+
+    <main>
+      <Features />
+
+    </main>
+
+    <Footer repo={repo} pluginUrl={pluginUrl} />
+
+    <script>
+      for (const button of document.querySelectorAll<HTMLButtonElement>('button[data-copy]')) {
+        const input = document.getElementById(button.dataset.copy!) as HTMLInputElement | null;
+        input?.addEventListener('focus', () => input.select());
+        button.addEventListener('click', async () => {
+          try {
+            await navigator.clipboard.writeText(input?.value ?? '');
+            button.textContent = 'Copied';
+          } catch {
+            input?.select();
+            button.textContent = 'Press Ctrl+C';
+          }
+          setTimeout(() => { button.textContent = 'Copy'; }, 1800);
+        });
+      }
+    </script>
+  </body>
+</html>
+
+<style is:global>
+  @layer base {
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0; background: var(--background); color: var(--foreground);
+      font: 16px/1.6 'Plus Jakarta Sans Variable', system-ui, -apple-system, 'Segoe UI', Roboto, Ubuntu, sans-serif;
+    }
+    a { color: var(--foreground); text-underline-offset: 3px; }
+    a[data-slot] { text-decoration: none; }
+    img { max-width: 100%; height: auto; }
+    h2 { font-size: clamp(1.35rem, 2.6vw, 1.85rem); text-align: center; margin: 0 0 28px; letter-spacing: -0.015em; }
+  }
+
+  main { max-width: 1040px; margin: 0 auto; padding-inline: 20px; }
+
+
+</style>

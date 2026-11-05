@@ -1,0 +1,20 @@
+@import '@fontsource-variable/plus-jakarta-sans';
+@import './theme.css';
+
+/* Starlight's own styles are layered, so these unlayered overrides must be scoped per theme or they leak into the other one. */
+:root {
+  --sl-font: 'Plus Jakarta Sans Variable', system-ui, -apple-system, 'Segoe UI', Roboto, Ubuntu, sans-serif;
+}
+
+:root[data-theme='dark'] {
+  --sl-color-accent-low: hsl(var(--hue) 40% 18%);
+  --sl-color-accent: hsl(var(--hue) 72% 64%);
+  --sl-color-accent-high: hsl(var(--hue) 85% 86%);
+  --sl-color-black: #0b0b0c;
+}
+
+:root[data-theme='light'] {
+  --sl-color-accent-low: hsl(var(--hue) 70% 92%);
+  --sl-color-accent: hsl(var(--hue) 62% 50%);
+  --sl-color-accent-high: hsl(var(--hue) 60% 26%);
+}

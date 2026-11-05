@@ -1,13 +1,13 @@
-# Decky-MCP — notes for agents working in this repo
+# Decky Toolkit — notes for agents working in this repo
 
 ## What this is
 A Decky Loader plugin whose Python backend hosts an MCP Streamable-HTTP server (port 8765, bearer
 token) so external coding agents can inspect/control the Steam Deck during plugin development.
-See README.md for the tool list and architecture.
+See README.md for setup and docs/reference.md for the tool list and architecture.
 
 ## Layout
 - `main.py` — Decky `Plugin` class: settings, aiohttp server lifecycle, frontend-callable methods.
-- `py_modules/decky_mcp/` — `protocol.py` (JSON-RPC + HTTP transport), `http.py` (REST routes, see
+- `py_modules/decky_toolkit/` — `protocol.py` (JSON-RPC + HTTP transport), `http.py` (REST routes, see
   `docs/api.md`), `auth.py`, `tools/` (tool registry and tools), `install.py` (plugin zip
   validation + atomic install), `logs.py` (journal / plugin log tail and follow), `cdp.py` (Chrome
   DevTools client for Steam CEF on 127.0.0.1:8080), `settings.py`, `input/` (remote input: `ei.py`
@@ -22,7 +22,17 @@ See README.md for the tool list and architecture.
   `tools/perf.py` (Steam performance overlay).
 - `src/index.tsx` — Quick Access panel (React, `@decky/ui`, `@decky/api`). Built by `pnpm run build`
   into `dist/index.js`.
-- `scripts/deploy.sh`, `scripts/smoke.sh`, `scripts/logs.sh` — read `deploy.env` (gitignored).
+- `scripts/test.sh` — Python tests under uv with the loader's Python major (CI runs it). Deploying this repo to
+  a device is done with the extension itself (it detects the root `plugin.json`); there are no ssh scripts.
+- `scripts/install-gif/record.sh` — re-records `docs/images/install/vscode-install.gif` (official VS Code under
+  Xvfb driven by Playwright, installing the published extension); needs node, xvfb-run, ffmpeg.
+- `scripts/og-image/capture.sh` — captures the link-preview card (`og.jpg`) from the built homepage hero at
+  1200x630. `pages.yml` runs it on every deploy, so the live card follows the hero; the committed
+  `site/public/og.jpg` is only the fallback if that capture fails.
+- `site/` — landing page and docs (Astro, base `/decky-toolkit`), deployed by `.github/workflows/pages.yml` next to
+  `decky-toolkit.zip` and `update.json`. Colours only come from `site/src/styles/theme.css`; UI primitives are
+  Starwind UI (`src/components/starwind`, Tailwind v4 without preflight); docs are Starlight pages in
+  `src/content/docs/docs/`. `scripts/make-clip.sh` cuts hero background clips (WebM, MP4, WebP poster).
 
 ## Runtime facts (verified on the target device, 2026-11-03)
 - Device: Bazzite `bazzite-deck-44.20261012`, host `bazzite`, IP 10.0.70.18, user `jackh`
@@ -31,8 +41,8 @@ See README.md for the tool list and architecture.
   **3.14.8** (PyInstaller, extracted to `/tmp/_MEI*`). Plugin backends run as the loader's forkserver
   children; `py_modules/` is appended to `sys.path`. `aiohttp`, `yarl`, `multidict`, `certifi` are
   importable from the bundle. Do not ship cp311 wheels; prefer pure Python.
-- `~/homebrew/plugins` is root-owned 755. Our deploy rsyncs to a user staging dir then `sudo rsync`s
-  into place and restarts `plugin_loader`.
+- `~/homebrew/plugins` is root-owned 755. The install route unpacks to a staging dir next to it and
+  swaps the plugin dir in as root.
 - Loader HTTP API is `127.0.0.1:1337` (token via `GET /auth/token`, header `X-Decky-Auth`). Its
   websocket is single-client — never connect to it from the plugin.
 - Steam CEF debugger is `127.0.0.1:8080` (file `~/.steam/steam/.cef-enable-remote-debugging` exists).
@@ -49,8 +59,8 @@ See README.md for the tool list and architecture.
   on EOF and leaked 6 GB before the OOM killer got it (observed 2026-11-03). Python 3.14 uses the
   forkserver start method, so the parent PID is the forkserver helper, not the loader; the
   `_loader_watchdog` thread tracks the grandparent loader PID (plus start time) and `os._exit`s.
-- The loader's file watcher loads a plugin whose files change even while shutting down, so
-  `scripts/deploy.sh` stops the loader before syncing.
+- The loader's file watcher loads a plugin whose files change even while shutting down, so a
+  `restart=loader` install stops the loader before swapping the dir in.
 - Subprocesses inherit the PyInstaller `LD_LIBRARY_PATH`; `tools.system.clean_env` strips it.
 - `"debug"` in `plugin.json` flags enables hot reload on `dist/index.js`/`main.py` changes. An
   install through `/plugins/install` swaps the whole dir, so for a debug-flagged plugin the watcher
@@ -66,7 +76,7 @@ See README.md for the tool list and architecture.
   do it. The watcher never imports a brand-new plugin dir; a first install needs a loader restart.
 - A `restart=loader` install that swapped the plugin dir while the loader was running raced the watcher and
   left orphaned backends leaking memory; the install route now stages the dir and a systemd job stops the
-  loader, swaps, and starts it (same order as scripts/deploy.sh).
+  loader, swaps, and starts it.
 
 ## Screen streaming facts (verified 2026-11-03)
 - gamescope publishes a PipeWire `Video/Source` node named `gamescope` (BGRx/NV12 1920x1080) that
@@ -145,7 +155,7 @@ See README.md for the tool list and architecture.
   is silently ignored and every capture stream fails with "target not found"/"no target node
   available". `pulsesrc` as root fails too (pipewire-pulse refuses a root client on uid 1000's dir).
 - Pipeline (as root with `XDG_RUNTIME_DIR=/run/user/1000`): `gst-launch-1.0 -q pipewiresrc
-  stream-properties=props,stream.capture.sink=true,node.name=decky-mcp-audio ! audioconvert !
+  stream-properties=props,stream.capture.sink=true,node.name=decky-toolkit-audio ! audioconvert !
   audioresample ! audio/x-raw,format=S16LE,rate=48000,channels=2,layout=interleaved ! fdsink fd=1
   sync=false`. Without `target-object` it follows the default sink. audioconvert downmixes the 5.1
   monitor: a stereo 440 Hz test tone at amplitude 3000 arrives at -23.8 dBFS (rms 2121, unchanged).
@@ -286,15 +296,38 @@ A client files `POST /pair/request` and long-polls `GET /pair/request/{id}?wait=
 approves or denies it in the panel, which shows only an "Approve pairing request?" prompt while one is
 pending (frontend methods `list_pair_requests`,
 `approve_pair_request`, `deny_pair_request`). No time limit. Requests live in memory
-(`py_modules/decky_mcp/pairing.py`): a pending one expires 60 s after its last poll, a decided one 5 min
+(`py_modules/decky_toolkit/pairing.py`): a pending one expires 60 s after its last poll, a decided one 5 min
 after the decision, and a plugin restart forgets them all, so clients re-request (new code) on a 404.
 The token goes out once per approval; the browser flow gets the cookie via `?cookie=1` instead.
 Approval is deliberately device-only (no HTTP/MCP route), the one exception to the remote-configurable
-rule below. `/mcp` always requires the bearer token. Events: `decky_mcp_pair_request` (toast with name
-and code), `decky_mcp_pair_requests` (list changed), `decky_mcp_paired` (remote IP, client name). To
+rule below. `/mcp` always requires the bearer token. Events: `decky_toolkit_pair_request` (toast with name
+and code), `decky_toolkit_pair_requests` (list changed), `decky_toolkit_paired` (remote IP, client name). To
 drive frontend methods from a test, evaluate
-`window.DeckyBackend.call('loader/call_plugin_method', 'Decky-MCP', '<method>', ...args)` in
-SharedJSContext via the `cef_evaluate` tool, or use `call_plugin_method` (`plugin: "Decky-MCP"`).
+`window.DeckyBackend.call('loader/call_plugin_method', 'Decky Toolkit', '<method>', ...args)` in
+SharedJSContext via the `cef_evaluate` tool, or use `call_plugin_method` (`plugin: "Decky Toolkit"`).
+
+## CI and releases
+- Work branches off `dev` and PRs target `dev`; `dev` is merged into `main` to release. CI runs on PRs and
+  pushes for both branches; release-please only runs on `main`.
+- `.github/workflows/ci.yml`: plugin (typecheck, build, zip), Python tests, extension (typecheck, build,
+  smoke, package). Also called by `release.yml`.
+- Versions are bumped only by release-please (`release-please-config.json`, `.release-please-manifest.json`)
+  from conventional commits: never edit the `version` in `package.json` or `extension/package.json` by
+  hand. Components `plugin` (repo root, excluding `extension/`) and `extension`; tags `plugin-vX.Y.Z` /
+  `extension-vX.Y.Z`. Merging the release PR creates draft releases plus tags; `release.yml` checks the tag
+  against package.json, runs CI, attaches the zip / `.vsix`, publishes the draft, and publishes extension
+  releases to Open VSX and the VS Code Marketplace by trusted publishing (OIDC, environments `openvsx` and
+  `marketplace`, no token secrets).
+- Node matches Decky Loader's own CI (`node-version: 26` in SteamDeckHomebrew/decky-loader workflows).
+- GitHub Pages (`pages.yml`, source: GitHub Actions) serves the site plus the latest plugin release as
+  `jackhric.github.io/decky-toolkit/decky-toolkit.zip`, the Decky "Install Plugin from URL" link. It deploys on
+  plugin releases (called from `release.yml`), on pushes to `main` touching `site/`, and by hand. A deploy
+  replaces the whole site, so the future Astro landing page (`site/`) must be built in this workflow.
+  Plugin releases also carry a fixed-name `decky-toolkit.zip` and are the repo's "Latest" release.
+- Every third-party action is pinned to a full commit SHA with a `# vX.Y.Z` comment; Dependabot bumps them.
+  Keep it that way. The release-please App key lives in the `release` environment (main only).
+- PRs are squash-merged with the PR title as the commit message, so the PR title is what release-please
+  reads; `pr-title.yml` enforces a conventional title (`feat:`, `fix:`, `feat!:` for breaking, ...).
 
 ## Conventions
 - Every setting is configurable remotely (approving a pairing request is not a setting): through an MCP tool, the HTTP API (for the extension) and

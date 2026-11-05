@@ -62,13 +62,13 @@ function Content() {
   const pending = requests.filter((r) => r.status === "pending");
 
   useEffect(() => {
-    const onInput = addEventListener<[enabled: boolean]>("decky_mcp_input_state", () => refresh());
-    const onRequest = addEventListener<[info: unknown]>("decky_mcp_pair_request", () => refreshRequests());
-    const onRequests = addEventListener<[list: PairRequest[]]>("decky_mcp_pair_requests", (list) => setRequests(list));
+    const onInput = addEventListener<[enabled: boolean]>("decky_toolkit_input_state", () => refresh());
+    const onRequest = addEventListener<[info: unknown]>("decky_toolkit_pair_request", () => refreshRequests());
+    const onRequests = addEventListener<[list: PairRequest[]]>("decky_toolkit_pair_requests", (list) => setRequests(list));
     return () => {
-      removeEventListener("decky_mcp_input_state", onInput);
-      removeEventListener("decky_mcp_pair_request", onRequest);
-      removeEventListener("decky_mcp_pair_requests", onRequests);
+      removeEventListener("decky_toolkit_input_state", onInput);
+      removeEventListener("decky_toolkit_pair_request", onRequest);
+      removeEventListener("decky_toolkit_pair_requests", onRequests);
     };
   }, []);
 
@@ -88,9 +88,9 @@ function Content() {
     setBusy(true);
     try {
       setRequests(await (allow ? approvePairRequest(r.id) : denyPairRequest(r.id)));
-      toaster.toast({ title: "Decky-MCP", body: `${allow ? "Approved" : "Denied"} ${r.client_name}` });
+      toaster.toast({ title: "Decky Toolkit", body: `${allow ? "Approved" : "Denied"} ${r.client_name}` });
     } catch (e) {
-      toaster.toast({ title: "Decky-MCP error", body: String(e) });
+      toaster.toast({ title: "Decky Toolkit error", body: String(e) });
       refreshRequests();
     } finally {
       setBusy(false);
@@ -101,9 +101,9 @@ function Content() {
     setBusy(true);
     try {
       setStatus(await fn());
-      toaster.toast({ title: "Decky-MCP", body: okMsg });
+      toaster.toast({ title: "Decky Toolkit", body: okMsg });
     } catch (e) {
-      toaster.toast({ title: "Decky-MCP error", body: String(e) });
+      toaster.toast({ title: "Decky Toolkit error", body: String(e) });
     } finally {
       setBusy(false);
     }
@@ -152,7 +152,7 @@ function Content() {
     <>
       <PanelSection title="Connect">
         <PanelSectionRow>
-          <Field label={status.ip} description={`Port ${status.port} · add this address in the Decky-MCP extension`} focusable />
+          <Field label={status.ip} description={`Port ${status.port} · add this address in the Decky Toolkit extension`} focusable />
         </PanelSectionRow>
         <PanelSectionRow>
           <Field label="Server" focusable>{serverState}</Field>
@@ -187,7 +187,7 @@ function Content() {
                   const input = await getInputSettings();
                   setStatus((s) => (s ? { ...s, input } : s));
                 } catch (e) {
-                  toaster.toast({ title: "Decky-MCP error", body: String(e) });
+                  toaster.toast({ title: "Decky Toolkit error", body: String(e) });
                 } finally {
                   setBusy(false);
                 }
@@ -218,27 +218,27 @@ function Content() {
 }
 
 export default definePlugin(() => {
-  const paired = addEventListener<[remote: string, clientName?: string]>("decky_mcp_paired", (remote, clientName) => {
-    toaster.toast({ title: "Decky-MCP", body: `${clientName ?? "Client"} paired from ${remote}` });
+  const paired = addEventListener<[remote: string, clientName?: string]>("decky_toolkit_paired", (remote, clientName) => {
+    toaster.toast({ title: "Decky Toolkit", body: `${clientName ?? "Client"} paired from ${remote}` });
   });
   // Registered here rather than in the panel so the toast shows while Quick Access is closed.
-  const pairRequest = addEventListener<[info: { client_name: string; code: string }]>("decky_mcp_pair_request", (info) => {
+  const pairRequest = addEventListener<[info: { client_name: string; code: string }]>("decky_toolkit_pair_request", (info) => {
     toaster.toast({
-      title: "Decky-MCP pairing request",
-      body: `${info.client_name} wants to pair · code ${info.code}. Open Quick Access → Decky-MCP to approve.`,
+      title: "Decky Toolkit pairing request",
+      body: `${info.client_name} wants to pair · code ${info.code}. Open Quick Access → Decky Toolkit to approve.`,
     });
   });
-  const inputSession = addEventListener<[remote: string]>("decky_mcp_input_session", (remote) => {
-    toaster.toast({ title: "Decky-MCP", body: `Remote input from ${remote}` });
+  const inputSession = addEventListener<[remote: string]>("decky_toolkit_input_session", (remote) => {
+    toaster.toast({ title: "Decky Toolkit", body: `Remote input from ${remote}` });
   });
   return {
-    name: "Decky-MCP",
+    name: "Decky Toolkit",
     content: <Content />,
     icon: <FaPlug />,
     onDismount() {
-      removeEventListener("decky_mcp_paired", paired);
-      removeEventListener("decky_mcp_pair_request", pairRequest);
-      removeEventListener("decky_mcp_input_session", inputSession);
+      removeEventListener("decky_toolkit_paired", paired);
+      removeEventListener("decky_toolkit_pair_request", pairRequest);
+      removeEventListener("decky_toolkit_input_session", inputSession);
     },
   };
 });

@@ -1,0 +1,66 @@
+name: Pages
+
+on:
+  push:
+    branches: [main]
+    paths: ['site/**', 'scripts/og-image/**', '.github/workflows/pages.yml']
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build site
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # Starlight's "Last updated" dates come from git history
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 12
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+          cache: pnpm
+          cache-dependency-path: site/pnpm-lock.yaml
+      - name: Build site
+        working-directory: site
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+          mv dist ../_site
+      - name: Capture the link-preview image
+        continue-on-error: true
+        run: OG_SITE_DIR=_site OG_CHROME="$(command -v google-chrome)" ./scripts/og-image/capture.sh _site/og.jpg
+      - name: Add the latest plugin zip
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(gh release list -R "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases --limit 100 \
+            --json tagName --jq '[.[] | select(.tagName | startswith("plugin-v"))][0].tagName')
+          if [ -z "$tag" ]; then echo "::error::no published plugin-v* release"; exit 1; fi
+          gh release download "$tag" -R "$GITHUB_REPOSITORY" -p 'decky-toolkit-*.zip' -O _site/decky-toolkit.zip
+          echo "decky-toolkit.zip is $tag" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: _site
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-26.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}decky-toolkit.zip
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

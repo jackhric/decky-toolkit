@@ -11,11 +11,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
 from aiohttp import ClientSession, ClientTimeout, web  # noqa: E402
 
-from decky_mcp.auth import TokenAuth  # noqa: E402
-from decky_mcp.console import ConsoleCollector, parse_event, render_args, render_remote_object  # noqa: E402
-from decky_mcp.http import Api  # noqa: E402
-from decky_mcp.protocol import McpServer  # noqa: E402
-from decky_mcp.tools import build_registry  # noqa: E402
+from decky_toolkit.auth import TokenAuth  # noqa: E402
+from decky_toolkit.console import ConsoleCollector, parse_event, render_args, render_remote_object  # noqa: E402
+from decky_toolkit.http import Api  # noqa: E402
+from decky_toolkit.protocol import McpServer  # noqa: E402
+from decky_toolkit.tools import build_registry  # noqa: E402
 
 LOG = logging.getLogger("t")
 TS = 1_793_000_000_000.0  # ms, as CDP sends
@@ -77,8 +77,8 @@ def test_render_args_format_specifiers():
 
 def test_parse_console_exception_and_log_events():
     frame = {"functionName": "warnIt", "scriptId": "1", "url": "https://x/app.js", "lineNumber": 9, "columnNumber": 4}
-    e = parse_event(**{"method": "Runtime.consoleAPICalled", "params": console_msg("warning", s("decky-mcp test"), frames=[frame])["params"]})
-    assert (e["source"], e["type"], e["level"], e["text"]) == ("console", "warning", "warn", "decky-mcp test")
+    e = parse_event(**{"method": "Runtime.consoleAPICalled", "params": console_msg("warning", s("decky-toolkit test"), frames=[frame])["params"]})
+    assert (e["source"], e["type"], e["level"], e["text"]) == ("console", "warning", "warn", "decky-toolkit test")
     assert (e["url"], e["line"], e["column"], e["function"]) == ("https://x/app.js", 10, 5, "warnIt")
     assert e["ts"] == TS / 1000 and e["time"].startswith("2026-")
     assert parse_event("Runtime.consoleAPICalled", {"type": "assert", "args": []})["level"] == "error"
@@ -88,9 +88,9 @@ def test_parse_console_exception_and_log_events():
     exc = parse_event("Runtime.exceptionThrown", {"timestamp": TS, "exceptionDetails": {
         "exceptionId": 1, "text": "Uncaught", "lineNumber": 0, "columnNumber": 25, "url": "https://x/a.js",
         "exception": {"type": "object", "subtype": "error", "className": "Error",
-                      "description": "Error: decky-mcp boom\n    at <anonymous>:1:26"}}})
+                      "description": "Error: decky-toolkit boom\n    at <anonymous>:1:26"}}})
     assert (exc["source"], exc["level"]) == ("exception", "error")
-    assert exc["text"] == "Uncaught Error: decky-mcp boom\n    at <anonymous>:1:26"
+    assert exc["text"] == "Uncaught Error: decky-toolkit boom\n    at <anonymous>:1:26"
     assert (exc["url"], exc["line"], exc["column"]) == ("https://x/a.js", 1, 26)
     thrown_string = parse_event("Runtime.exceptionThrown", {"timestamp": TS, "exceptionDetails": {
         "text": "Uncaught", "exception": {"type": "string", "value": "plain"}}})
@@ -175,7 +175,7 @@ def test_follow_replays_tail_then_streams_live():
 
 
 def test_start_without_cef_does_not_block(monkeypatch):
-    from decky_mcp import cdp
+    from decky_toolkit import cdp
 
     async def unreachable():
         raise cdp.CdpError("Steam CEF debugger not reachable")
@@ -210,12 +210,12 @@ async def with_api(fn, console):
 
 def test_console_routes_and_tools():
     c = ConsoleCollector(LOG)
-    c.handle_message("SharedJSContext", console_msg("warning", s("decky-mcp test")))
+    c.handle_message("SharedJSContext", console_msg("warning", s("decky-toolkit test")))
 
     async def run(session, base):
         async with session.get(f"{base}/cef/console", headers=H) as r:
             body = await r.json()
-        assert [e["text"] for e in body["entries"]] == ["decky-mcp test"]
+        assert [e["text"] for e in body["entries"]] == ["decky-toolkit test"]
         async with session.get(f"{base}/cef/console?level=nope", headers=H) as r:
             assert r.status == 400
         async with session.get(f"{base}/cef/console/stream?target=bogus", headers=H) as r:
@@ -226,7 +226,7 @@ def test_console_routes_and_tools():
         async with session.get(f"{base}/cef/console/stream?tail=5", headers=H) as r:
             assert r.headers["Content-Type"].startswith("text/event-stream")
             first = await asyncio.wait_for(r.content.readline(), 2)
-            assert json.loads(first.decode()[len("data: "):])["text"] == "decky-mcp test"
+            assert json.loads(first.decode()[len("data: "):])["text"] == "decky-toolkit test"
             await r.content.readline()
             c.handle_message("SharedJSContext", console_msg("error", s("live one"), ts=TS + 5))
             live = await asyncio.wait_for(r.content.readline(), 2)

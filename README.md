@@ -1,277 +1,97 @@
-# Decky-MCP
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/decky-toolkit-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="assets/decky-toolkit-light.svg">
+    <img alt="Decky Toolkit" src="assets/decky-toolkit-light.svg" width="480">
+  </picture>
+</p>
 
-A [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) plugin that runs a
-[Model Context Protocol](https://modelcontextprotocol.io) server on the Steam Deck itself, so AI
-coding agents on your dev machine (Claude Code, Cursor, MCP Inspector, …) can inspect and drive the
-device while you develop other Decky plugins.
+<p align="center">
+  <b>Build, deploy and test Decky Loader plugins with improved DX and speed straight from your IDE (VSCode / VSCodium)</b>
+</p>
 
-The server speaks MCP Streamable HTTP (stateless, plain JSON responses) on `http://<deck-ip>:8765/mcp`,
-protected by a bearer token shown in the plugin's Quick Access panel.
+<p align="center">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
+  <a href="https://github.com/jackhric/decky-toolkit/actions/workflows/ci.yml?query=branch%3Amain"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/jackhric/decky-toolkit/ci.yml?branch=main&label=CI&logo=githubactions&logoColor=white"></a>
+  <a href="https://github.com/jackhric/decky-toolkit/releases"><img alt="Plugin version" src="https://img.shields.io/github/package-json/v/jackhric/decky-toolkit?label=plugin&color=9C6AEC"></a>
+  <a href="https://marketplace.visualstudio.com/items?itemName=jackhric.decky-toolkit"><img alt="VS Code Marketplace" src="https://img.shields.io/github/package-json/v/jackhric/decky-toolkit?filename=extension%2Fpackage.json&label=VS%20Code%20Marketplace&color=0AA5FF&logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48cGF0aCBmaWxsPSIjZmZmIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiIGQ9Ik03MC45IDk5LjZDNzIuNSAxMDAuMiA3NC4zIDEwMC4yIDc1LjkgOTkuNEw5Ni41IDg5LjRDOTguNiA4OC40IDEwMCA4Ni4yIDEwMCA4My44VjE2LjJDMTAwIDEzLjggOTguNiAxMS42IDk2LjUgMTAuNkw3NS45IDAuNkM3My44LTAuNCA3MS4zLTAuMSA2OS41IDEuMkM2OS4zIDEuNCA2OSAxLjYgNjguOCAxLjhMMjkuNCAzOEwxMi4yIDI0LjlDMTAuNiAyMy43IDguNCAyMy44IDYuOSAyNS4xTDEuNCAzMC4yQy0wLjUgMzEuOC0wLjUgMzQuNyAxLjQgMzYuM0wxNi4yIDUwTDEuNCA2My43Qy0wLjUgNjUuMy0wLjUgNjguMiAxLjQgNjkuOEw2LjkgNzQuOUM4LjQgNzYuMiAxMC42IDc2LjMgMTIuMiA3NS4xTDI5LjQgNjJMNjguOCA5OC4yQzY5LjQgOTguOCA3MC4xIDk5LjMgNzAuOSA5OS42Wk03NSAyNy4yTDQ1LjEgNTBMNzUgNzIuOFYyNy4yWiIvPjwvc3ZnPg=="></a>
+  <a href="https://open-vsx.org/extension/jackhric/decky-toolkit"><img alt="Open VSX" src="https://img.shields.io/open-vsx/v/jackhric/decky-toolkit?label=Open%20VSX&color=0AA5FF&logo=vscodium&logoColor=white"></a>
+  <a href="https://github.com/SteamDeckHomebrew/decky-loader"><img alt="Decky Loader 3.3+" src="https://img.shields.io/badge/Decky%20Loader-3.3%2B-1B1B1B?logo=steam&logoColor=white"></a>
+  <img alt="Platform: SteamOS and Bazzite" src="https://img.shields.io/badge/platform-SteamOS%20%7C%20Bazzite-555">
+</p>
 
-## Tools
+<p align="center">
+  <a href="#features">Features</a> ·
+  <a href="#getting-started">Getting started</a> ·
+  <a href="extension/README.md">VS Code extension</a> ·
+  <a href="docs/reference.md">Reference</a>
+</p>
 
-| Tool | What it does |
-| --- | --- |
-| `decky_status` | Loader version, OS, Python runtime, uid, installed plugins |
-| `list_plugins` | Plugins under `~/homebrew/plugins` with their `plugin.json` metadata |
-| `read_plugin_log` | Tail a plugin's backend log from `~/homebrew/logs/<plugin>/` |
-| `loader_log` | Tail `journalctl -u plugin_loader`, optional substring filter |
-| `restart_loader` | Restart `plugin_loader.service` (scheduled 1 s out so the call returns); needs `confirm: true` |
-| `install_plugin` | Install a plugin zip (device path or base64) atomically, then restart the loader (needs `confirm: true`), reload the plugin, or neither |
-| `reload_plugin` | Reload one plugin's backend through Decky without restarting the loader |
-| `plugin_methods` | List a plugin's frontend-callable backend methods (public async methods of `class Plugin`, with args and docstrings) |
-| `call_plugin_method` | Call a plugin's backend method the way its frontend does; returns the result or Decky's Python traceback |
-| `plugin_frontend_check` | Find `callable("x")`/`call("x")` names in a plugin's frontend that have no backend method |
-| `cef_targets` | List Steam CEF DevTools tabs on `localhost:8080` |
-| `cef_evaluate` | Run JS in a Steam tab (default `SharedJSContext`, where `window.DeckyPluginLoader` lives) |
-| `cef_console` / `cef_console_clear` | Steam UI console output (console calls, uncaught exceptions, browser log), captured in the background per tab |
-| `cef_screenshot` | PNG screenshot of a Steam tab via `Page.captureScreenshot` |
-| `screen_capture` | JPEG of the full gamescope display (games included) from its PipeWire video node |
-| `stream_status` | Live stream state: running, fps, bitrate, resolution, viewer count, settings |
-| `set_stream_settings` | Change the stream's frame rate (1-60), JPEG quality and output width |
-| `toast` | Show a Decky toast in the Steam UI |
-| `set_input_enabled` | Turn remote input on or off (off by default) |
-| `input_key` / `input_text` | Press key combos (`"ctrl+shift+a"`, `"enter"`) or type ASCII text |
-| `input_mouse` | Move, click, double-click, hold or scroll the pointer (normalised or pixel coordinates) |
-| `input_gamepad` | Press buttons, move sticks and triggers on a virtual Xbox 360 pad (`pad` picks one), or run a sequence |
-| `list_controllers` | Gamepads as Steam Input sees them (type, slot, active), merged with evdev detail |
-| `add_virtual_controller` / `remove_virtual_controller` | Plug in or unplug a virtual Xbox 360 pad; returns once Steam Input lists it |
-| `ui_routes` | Steam and Decky pages you can navigate to, plugin routes, current page and menu state |
-| `ui_navigate` | Go to a page (`/settings/display`, `/decky/settings`), back, open Quick Access / a Decky plugin panel / a game page |
-| `ui_query` | Find elements by CSS selector or text, with screen coordinates ready for `input_mouse` |
-| `ui_focus` | The element that has gamepad focus, plus the current route |
-| `ui_wait_for` | Wait until an element appears or disappears, or a route is shown, instead of sleeping |
-| `read_file` / `write_file` | Read or write files on the device (runs as root); Steam credential/session files and SSH keys are refused |
-| `apps_list` / `app_info` | Steam library from the client: install dir, Proton or runtime, size, last played; one app with its dirs |
-| `apps_running` | Running apps with the pid of their `reaper` process and its children |
-| `app_launch` / `app_terminate` | Start a game like pressing Play; force-quit it (`confirm: true`) |
-| `game_dirs` | Install dir, Proton prefix and its AppData/Documents dirs, Steam Cloud userdata, shader cache, XDG dirs |
-| `game_saves` | Likely save files: Steam Cloud's own list first, then Auto-Cloud dirs, then heuristics |
-| `proton_log` | `~/steam-<appid>.log` (PROTON_LOG) and the app's lines in Steam's `logs/` |
-| `fs_list` / `fs_stat` / `fs_delete` | Browse the device; delete only inside game, prefix, userdata or plugin data dirs (`confirm: true`) |
-| `screen_record` / `screen_record_stop` | Record up to 120 s of screen and sound to an MKV (MJPEG + PCM) from the live stream |
-| `recordings_list` / `recording_delete` | Saved recordings (download via `GET /recordings/<name>`); delete with `confirm: true` |
-| `perf_overlay` / `perf_overlay_status` | Steam's performance overlay level 0-4, as on the Quick Access performance tab |
+## Features
 
-## Pairing
+- One-click deploy from VS Code / VSCodium that reloads just your plugin, with no loader restart.
+- Hot reloading: the device follows your edits as you save.
+- Live view of the Deck's screen, with sound, inside the extension.
+- Keyboard, mouse and gamepad input sent straight to the device.
+- Steam Input management and one-step jumps to any Steam page or your plugin's Quick Access panel.
+- Loader and plugin logs streamed into VS Code output channels.
+- JavaScript console for Steam's `SharedJSContext`.
+- Games view: launch and stop games, and browse install dirs, Proton prefixes and saves as `decky://` folders.
+- HTTP API and MCP server for your own tools and agents.
+- Pairing approved on the device, with bearer-token auth.
 
-A client never needs the token typed in. It asks the device for access, and you allow it on the
-device itself. There is no time limit: a request waits as long as the client is waiting.
+## Getting started
 
-From the VS Code extension (see [extension/README.md](extension/README.md#pairing)):
+### Requirements
 
-1. Add the device and click it in the Decky **Devices** view.
-2. The editor shows *Waiting for approval on <device> · code 4821* (and the device row says
-   *waiting for approval · code 4821*).
-3. On the device a toast says *VS Code on <your-pc> wants to pair · code 4821*. Open Quick Access
-   (…) → Decky-MCP. While a request is pending the panel shows only *Approve pairing request?* with
-   *VS Code on <your-pc> (<your-ip>) · code 4821* and **Approve** / **Deny** side by side (several
-   requests come one at a time, "1 of 3"). Check the code and press **Approve**.
-4. The extension stores the token and connects. Deny shows *Pairing denied on <device>* with
-   **Try again**; Cancel in the editor withdraws the request.
+- A Steam Deck, SteamOS or Bazzite device running [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) 3.3 or newer.
+- On your computer: VS Code 1.90+ (or VSCodium).
 
-From a browser:
+### 1. Install the extension in your IDE
 
-1. Open `http://<deck-ip>:8765/viewer`. Without the cookie you get a **Request access** page with a
-   name field (prefilled with your browser and OS, e.g. *Firefox on Linux*).
-2. Press **Request access**. The page shows *Waiting for approval on the device · code 4821*.
-3. Approve it on the device as above. The page sets an HttpOnly cookie and opens the viewer. A denied
-   request says so and offers **Retry**.
+<p align="center">
+  <img alt="Installing Decky Toolkit from the Extensions view in VS Code" src="docs/images/install/vscode-install.gif" width="800">
+</p>
 
-Alternatively open `/viewer?token=<token>` once (the token is in the Decky-MCP panel); the token
-moves into the same cookie. Other clients (scripts, CLI agents) use the same routes:
-`POST /pair/request`, then long-poll `GET /pair/request/{id}?wait=25` until it returns the token;
-see [docs/api.md](docs/api.md#pairing). Pending requests expire 60 s after their client stops
-polling, at most 10 can be pending (2 per address), and the toast and code let you spot a request
-you did not make.
-
-The normal panel is deliberately minimal: the device's IP address in large type ("port 8765"
-below it), which is all the extension's Add device needs, and one server status line. Everything
-else (server and remote input toggles, restart, regenerate token, viewer URL and token) is under
-**Advanced**.
-
-## Live screen viewer
-
-Open `http://<deck-ip>:8765/viewer` in a paired browser (see [Pairing](#pairing)). The page shows the full display at 30 fps (1080p, roughly 50 Mbit/s at the default JPEG
-quality 70) with fps, bitrate and resolution readouts, pause, fit/actual size, snapshot and
-fullscreen. The **⚙ Stream** button opens frame rate (15/24/30/60 fps), JPEG quality and size
-(native, 1600, 1280, 960, 640 px wide) controls and the device-wide audio switch; a change applies
-within a fraction of a second without dropping the connection. Sound is on by default (see Audio). Other endpoints, all behind the same token: `/stream.mjpeg`
-(multipart MJPEG), `/frame.jpg` (one current frame), `/stream/stats` (JSON), `/stream/settings`
-(`GET`/`PUT` JSON) and `/audio` (PCM over WebSocket).
-
-The **🎮 Controllers** button lists every controller on the device as Steam Input sees it
-(`physical · Steam Input: steamdeck (slot 0)`, `virtual · not seen by Steam Input`, …). Type a
-name (or leave the field empty for `Virtual pad N`) and click **Add virtual** to create a virtual
-Xbox 360 pad; virtual pads have a **Remove** button. The list updates live while the popover is
-open (`/controllers/events`). If the device refuses a pad (all 4 slots used, or Steam Input did not
-pick it up) its message is shown as it is. Next to *🎮 connected* a **Forward to** select picks
-which pad your local gamepad drives: **Auto** (the pad the device creates on its own) or one of the
-virtual pads. The button and the select are hidden on a device whose plugin predates controller
-management. Steam UI navigation is not in the viewer; it is a development action, available in the
-VS Code extension and over `POST /ui/navigate`.
-
-Stream settings are device-wide; the last change wins. There is one capture pipeline, and every
-viewer, MCP tool call and editor panel shares it, so changing the frame rate in one browser changes
-it for everybody.
-
-Capture comes from gamescope's own PipeWire `Video/Source` node, read by a `gst-launch-1.0`
-subprocess (`pipewiresrc ! videoconvert ! videorate ! jpegenc ! multipartmux`). Every element is
-part of the stock Bazzite and SteamOS 3.8 images, so there is nothing to install. The pipeline only
-runs while a viewer or tool call is consuming frames and stops 10 s after the last one leaves.
-
-gamescope only pushes a frame when it repaints, so the plugin nudges it with
-`gamescopectl debug_force_repaint` when a stream starts, and `pipewiresrc keepalive-time=100`
-re-emits the last frame so static screens still stream. Frame rate, JPEG quality and output width
-are stored in `settings.json` (`stream_fps`, `stream_quality`, `stream_width`) and can be changed
-from the viewer, `PUT /stream/settings` or the `set_stream_settings` tool. Measured on the BC-250
-at 1080p, JPEG quality 70, with a changing screen: 60 fps costs about 33-40 % of one CPU core and
-30-100 Mbit/s depending on content; 30 fps about 23 % and up to ~50 Mbit/s. On Wi-Fi, lower the
-width or quality.
-
-## Audio
-
-The stream has sound. It is **on by default**: the viewer (and the editor panel) plays what the
-Deck is playing, taken from the default audio output's monitor. Audio goes as raw 16-bit 48 kHz
-stereo PCM over a WebSocket (`/audio`), about 1.5 Mbit/s, which is small next to the video. The
-capture costs well under 1 % of one CPU core (`gst-launch-1.0 pipewiresrc ! audioconvert`) and only
-runs while someone listens.
-
-- **🔊 / 🔇** in the toolbar mutes this browser only; the slider next to it sets the local volume.
-  The Deck itself keeps playing, and other viewers are not affected. Mute and volume are
-  remembered per browser.
-- Browsers start sound only after a user action, so the toolbar says *Click anywhere to enable
-  audio* until you click or press a key on the page.
-- **Audio** in the **⚙ Stream** popover turns the audio stream on or off for every client
-  (device-wide, stored as `audio_enabled` in `settings.json`; also `PUT /stream/settings` with
-  `{"audio": false}` or the `set_stream_settings` tool). Turning it off closes every audio socket.
-- Playback keeps about 120 ms of sound buffered and drops back to that when it falls more than
-  300 ms behind, so sound and picture stay together. Over plain `http://` on the LAN the browser has
-  no AudioWorklet (it needs a secure context), so the viewer schedules short audio buffers instead,
-  with the same buffer budget.
-
-## Remote input
-
-The viewer and MCP clients can drive the Deck with keyboard, mouse and gamepad input. It is **off
-by default**. Turn it on with the **Allow remote input** toggle in the Decky-MCP panel, the
-**⌨ Input** button in the viewer, `PUT /input/settings` or the `set_input_enabled` tool. The setting
-is stored in `settings.json` and applies to every client.
-
-In the viewer, with input on:
-
-- **Mouse and keyboard**: click the picture to capture the keyboard (a blue outline shows it).
-  Mouse moves, clicks and the wheel land on the matching spot of the Deck screen, and keys are sent
-  by physical position (`KeyboardEvent.code`). Clicking the toolbar, switching tabs or leaving the
-  window releases every held key.
-- **Gamepad**: a controller plugged into the viewer machine is forwarded about 60 times a second
-  while the page has focus ("🎮 connected" in the toolbar). It shows up on the Deck as an Xbox 360
-  pad, and the pad is removed 60 s after the last input.
-
-Keyboard and mouse go through gamescope's own libei input server, so a pointer position lands 1:1
-on the Steam UI (verified to the pixel) and a key press works like a real keyboard. If gamescope
-has no libei socket, the plugin falls back to uinput devices. The gamepad is always a uinput
-device that Steam opens like a real controller. All of it is stdlib plus `ctypes`; nothing to
-install.
-
-Security notes for input:
-
-- Input is full control of the device: store purchases, Desktop Mode, a terminal. It needs the
-  token (bearer or the viewer cookie) and passes the same `Origin` check as the other routes.
-- Input is off until you turn it on.
-- The Deck shows a toast "Remote input from <ip>" when a client starts sending input, and every
-  input session is written to the plugin log.
-- Keys, mouse buttons and the gamepad are released when a client disconnects, when input is turned
-  off and when the plugin unloads.
-
-## Controllers
-
-`list_controllers` (or `GET /controllers`) shows what Steam Input has: each controller's Steam type,
-player slot and whether it is the active one, plus the kernel device it maps to.
-`add_virtual_controller` plugs in a virtual Xbox 360 pad (up to 4) and only returns once Steam
-Input lists it; drive it with `input_gamepad(pad=<id>)`, which goes through Steam Input like a real
-controller, and unplug it with `remove_virtual_controller`. Without `pad`, `input_gamepad` uses an
-implicit pad that disappears after 60 s idle. `GET /controllers/events` streams every change.
-
-## UI navigation
-
-`ui_navigate` moves the Steam UI with Decky's own navigation helpers: `path` for a page
-(`/library/home`, `/settings/audio`, `/settings/controller`, `/decky/settings/plugins`, routes Decky
-plugins registered), or `action` `back`, `quick_access` (with `tab`, e.g. `decky`), `main_menu`,
-`close_menus`, `plugin` (opens that Decky plugin's Quick Access panel) or `app` (a game page).
-`ui_routes` lists the verified pages. Both have HTTP twins (`GET /ui/routes`, `POST /ui/navigate`).
-
-## REST endpoints
-
-Besides `/mcp` the server has plain HTTP routes for scripts and editor integrations; see
-[docs/api.md](docs/api.md) for the full list. The most useful ones:
+Or if you fancy a terminal:
 
 ```sh
-curl -H "Authorization: Bearer $TOKEN" -F file=@my-plugin.zip "http://<deck-ip>:8765/plugins/install?restart=loader"
-curl -N -H "Authorization: Bearer $TOKEN" "http://<deck-ip>:8765/logs/stream?plugin=my-plugin"   # SSE
-curl -H "Authorization: Bearer $TOKEN" "http://<deck-ip>:8765/logs/tail?source=loader&tail=50"
-curl -H "Authorization: Bearer $TOKEN" "http://<deck-ip>:8765/apps/70300/saves"
-curl -OJ -H "Authorization: Bearer $TOKEN" "http://<deck-ip>:8765/recordings/<name>"
-curl -X POST -H "Content-Type: application/json" -d '{"client_name":"my script","client_kind":"other"}' \
-  "http://<deck-ip>:8765/pair/request"                   # {id, code}; allow it on the device, then:
-curl "http://<deck-ip>:8765/pair/request/<id>?wait=25"   # {status: "approved", token, ...} once
+code --install-extension jackhric.decky-toolkit     # VS Code
+codium --install-extension jackhric.decky-toolkit   # VSCodium
 ```
 
-## How it works
+### 2. Install the plugin on the device
 
-- `main.py` is the Decky backend. It loads settings, then starts an `aiohttp` server from inside the
-  plugin's asyncio loop. `aiohttp` comes from the loader's own PyInstaller bundle, so there are no
-  dependencies to vendor.
-- `py_modules/decky_mcp/protocol.py` implements the JSON-RPC methods `initialize`, `ping`,
-  `tools/list`, `tools/call` and the HTTP transport rules (bearer auth, `Origin` check, 202 for
-  notifications, 405 for GET).
-- `py_modules/decky_mcp/cdp.py` is a tiny Chrome DevTools Protocol client used to talk to Steam's
-  CEF debugger. The plugin deliberately does **not** connect to the loader's own websocket on port
-  1337: the loader keeps a single client and would kick the Steam UI off.
-- `src/index.tsx` is the Quick Access panel: enable/disable, endpoint, token, restart, regenerate token.
+On the device, turn on Decky's developer mode (Decky settings → **General** → **Other** →
+**Developer mode**). Then open **Developer** → **Third-Party Plugins** → **Install Plugin from URL**,
+enter `jackhric.github.io/decky-toolkit/decky-toolkit.zip` (always the latest plugin release) and
+press **Install**.
 
-The plugin runs with the `root` flag so it can restart the loader, read every plugin's logs and write
-anywhere. The `debug` flag makes the loader hot-reload the plugin when `dist/index.js` or `main.py`
-change (changes under `py_modules/` still need a loader restart).
+### 3. Pair your editor with the device
 
-## Development
+1. Click the **Decky** icon in the Activity Bar, then **Add device** (or **+**) and enter the
+   device's IP address.
+2. Click the device. VS Code shows a four-digit code.
+3. The device shows a toast with the same code. In Quick Access → **Decky Toolkit**, check the
+   code and press **Approve**.
 
-Requirements on the dev machine: Node 18+, pnpm 9, rsync, ssh key access to the device with
-passwordless sudo.
+### 4. Deploy your plugin
 
-```sh
-pnpm install
-cp deploy.env.example deploy.env   # set DECK_HOST / DECK_USER
-pnpm run deploy                    # build, rsync, install, restart plugin_loader
-./scripts/smoke.sh                 # health, initialize, tools/list, two tool calls
-./scripts/logs.sh                  # follow the loader journal (add -a for everything)
-```
+Open your plugin's folder in VS Code and press <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd>
+(<kbd>Cmd</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd> on macOS), or use the **Deploy** button in the status
+bar. The screen view opens on the first connect, so you see the result straight away.
 
-Connect Claude Code:
+The [extension guide](extension/README.md) covers every view and setting. The
+[reference](docs/reference.md) covers the plugin itself, its HTTP API and how it works.
 
-```sh
-claude mcp add --transport http decky http://<deck-ip>:8765/mcp -H "Authorization: Bearer <token>"
-```
+## AI Disclaimer
 
-The token lives in `~/homebrew/settings/decky-mcp/settings.json` on the device (mode 0600, owned by
-root) and is shown in the plugin panel.
+This project was built with heavy use of [Claude Code](https://claude.com/claude-code). Because of
+this, the Decky Toolkit plugin will not be available in the default Decky Plugin Store, which does not
+accept plugins that contain LLM-generated code (see its
+[submission guidelines](https://wiki.deckbrew.xyz/en/plugin-dev/submitting-plugins#ai-llms-and-so-on)).
+Install it from source as described in [Getting started](#getting-started).
 
-## Security notes
+## License
 
-- The server binds `0.0.0.0` by default. Bazzite's default firewalld zone already allows TCP
-  1025-65535 inbound, so it is reachable from the LAN as soon as the plugin loads.
-- Traffic is plain HTTP, so the token is visible on the local network. Treat this as a development
-  tool on a trusted LAN. Disable it from the panel when not in use.
-- `write_file`, `read_file` and `cef_evaluate` are intentionally powerful: anyone with the token
-  has root on the device.
-- The file browser tools (`fs_*`, `game_saves`) refuse Steam's login files (`config/loginusers.vdf`,
-  `config/config.vdf`, `ssfn*`). Destructive tools (`fs_delete`, `app_terminate`, `recording_delete`) need
-  `confirm: true`, and `fs_delete` only works inside game, Proton prefix, userdata and plugin data dirs.
-
-## Targets
-
-- Tested: Bazzite `bazzite-deck-44.20261012` (Fedora 44) on an AMD BC-250 board, Decky Loader
-  v3.3.1 (bundled CPython 3.14.8), SELinux enforcing, firewalld active.
-- Vetted from Valve's 3.8.14 recovery image, not yet run on hardware: stock SteamOS 3.8 ships
-  gstreamer 1.26 with `gst-plugin-pipewire`, `gst-plugins-good`, `gst-plugins-base`, ffmpeg 7.1
-  with `h264_vaapi`, and gamescope with the PipeWire node always on in Game Mode. No SELinux and
-  `/home` is mounted exec, so the same plugin zip should work unchanged.
+[MIT](LICENSE)
