@@ -21,6 +21,7 @@ import { PluginsTreeProvider } from './pluginsTree';
 import { PreviewViewProvider } from './preview';
 import { DeckyFileSystemProvider, SCHEME } from './remoteFs';
 import { ScreenPanel, StatusBar } from './screenPanel';
+import { WelcomeViewProvider } from './welcome';
 
 export { connectionTimings } from './connection';
 export { pairingTimings } from './pairing';
@@ -57,14 +58,20 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     c, status, logs, deployOut, consoleOut, workspacePlugins, devicesTree, actionsTree, pluginsTree, devicesView, actionsView, pluginsView,
     controllers, controllersTree, controllersView, gamesTree, gamesView,
     vscode.window.registerWebviewViewProvider(PreviewViewProvider.viewId, preview),
+    vscode.window.registerWebviewViewProvider(WelcomeViewProvider.viewId, new WelcomeViewProvider(ctx.extensionUri)),
   );
   const refreshPlugins = () => pluginsTree.refresh();
 
   let connectedContext: boolean | undefined;
+  let hasDevicesContext: boolean | undefined;
   let statsLease: vscode.Disposable | undefined;
   let controllersLease: vscode.Disposable | undefined;
   let sessionId: string | undefined;
   const sync = () => {
+    if (hasDevicesContext !== c.devices.length > 0) {
+      hasDevicesContext = c.devices.length > 0;
+      void vscode.commands.executeCommand('setContext', 'decky-toolkit.hasDevices', hasDevicesContext);
+    }
     const connected = c.connectedDevice;
     if (connectedContext !== !!connected) {
       connectedContext = !!connected;

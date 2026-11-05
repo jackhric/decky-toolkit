@@ -41,6 +41,7 @@
     "workspaceContains:plugin.json",
     "workspaceContains:*/plugin.json",
     "workspaceContains:*/*/plugin.json",
+    "onView:decky-toolkit.welcome",
     "onView:decky-toolkit.devices",
     "onView:decky-toolkit.actions",
     "onView:decky-toolkit.plugins",
@@ -62,10 +63,19 @@
     "views": {
       "decky-toolkit": [
         {
+          "type": "webview",
+          "id": "decky-toolkit.welcome",
+          "name": "Devices",
+          "icon": "media/decky.svg",
+          "when": "!decky-toolkit.hasDevices",
+          "initialSize": 2
+        },
+        {
           "id": "decky-toolkit.devices",
           "name": "Devices",
           "icon": "media/decky.svg",
-          "initialSize": 2
+          "initialSize": 2,
+          "when": "decky-toolkit.hasDevices"
         },
         {
           "id": "decky-toolkit.actions",
@@ -109,10 +119,6 @@
       ]
     },
     "viewsWelcome": [
-      {
-        "view": "decky-toolkit.devices",
-        "contents": "No devices yet. Add a Decky device (any machine running Decky Loader: Steam Deck, Bazzite, SteamOS, …).\n[Add device](command:decky-toolkit.addDevice)"
-      },
       {
         "view": "decky-toolkit.controllers",
         "contents": "No controllers seen by Steam Input.\n[Add virtual controller](command:decky-toolkit.addVirtualController)"
@@ -771,7 +777,61 @@
           "group": "navigation@5"
         }
       ]
-    }
+    },
+    "walkthroughs": [
+      {
+        "id": "pairing",
+        "title": "Connect a Decky device",
+        "description": "Install the plugin on your device, add it here and approve it on the device.",
+        "steps": [
+          {
+            "id": "install",
+            "title": "Install the Decky Toolkit plugin",
+            "description": "The device needs [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) and the Decky Toolkit plugin. In Decky's settings turn on **Developer mode**, then open **Developer → Install Plugin from URL** and enter **jackhric.github.io/decky-toolkit/decky-toolkit.zip**.\n[Open the plugin on GitHub](https://github.com/jackhric/decky-toolkit)",
+            "media": {
+              "svg": "media/mark-flat.svg",
+              "altText": "The Decky Toolkit logo: a mug with a Steam Deck mark and a terminal badge"
+            }
+          },
+          {
+            "id": "add",
+            "title": "Add your device",
+            "description": "Enter the device's IP address. It is shown in large type in Quick Access → **Decky Toolkit** on the device.\n[Add a device](command:decky-toolkit.addDevice)",
+            "media": {
+              "svg": "media/mark-flat.svg",
+              "altText": "The Decky Toolkit logo: a mug with a Steam Deck mark and a terminal badge"
+            },
+            "completionEvents": [
+              "onCommand:decky-toolkit.addDevice"
+            ]
+          },
+          {
+            "id": "approve",
+            "title": "Approve it on the device",
+            "description": "Click the device in the **Devices** view. VS Code shows a four-digit code, and the device shows a toast with the same code. In Quick Access → **Decky Toolkit**, check the code and press **Approve**.",
+            "media": {
+              "svg": "media/mark-flat.svg",
+              "altText": "The Decky Toolkit logo: a mug with a Steam Deck mark and a terminal badge"
+            },
+            "completionEvents": [
+              "onContext:decky-toolkit.connected"
+            ]
+          },
+          {
+            "id": "screen",
+            "title": "Open the screen",
+            "description": "Once connected, the device's screen opens beside your editor, with sound.\n[Open screen](command:decky-toolkit.openScreen)",
+            "media": {
+              "svg": "media/mark-flat.svg",
+              "altText": "The Decky Toolkit logo: a mug with a Steam Deck mark and a terminal badge"
+            },
+            "completionEvents": [
+              "onCommand:decky-toolkit.openScreen"
+            ]
+          }
+        ]
+      }
+    ]
   },
   "scripts": {
     "build": "node esbuild.mjs",

@@ -4,7 +4,7 @@ import * as esbuild from 'esbuild';
 import assert from 'assert/strict';
 import Module, { createRequire } from 'module';
 import { execFileSync } from 'child_process';
-import { mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'fs';
 import { hostname, tmpdir } from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
@@ -32,7 +32,7 @@ await esbuild.build({
 });
 
 const calls = {
-  treeViews: [], treeProviders: [], webviewProviders: [], commands: new Map(), context: new Map(), statusItems: [],
+  treeViews: [], treeProviders: [], webviewProviders: [], commands: new Map(), context: new Map(), statusItems: [], executed: [],
   panels: [], progress: [], messages: [], statusMessages: [], clipboard: [], unexpectedErrors: [], opened: [], written: [], saveDialogs: [],
   watchers: [], output: [], fsProviders: [], folderUpdates: [], docs: [], revealed: [],
 };
@@ -66,7 +66,7 @@ class RelativePattern { constructor(base, pattern) { this.base = base; this.patt
 const Uri = {
   parse: s => ({ toString: () => s, path: new URL(s).pathname }),
   file: p => ({ toString: () => `file://${p}`, path: p, fsPath: p }),
-  joinPath: (u, ...p) => ({ toString: () => [u.toString(), ...p].join('/'), path: [u.path ?? '', ...p].join('/') }),
+  joinPath: (u, ...p) => ({ toString: () => [u.toString(), ...p].join('/'), path: [u.path ?? '', ...p].join('/'), fsPath: [u.fsPath ?? u.path ?? '', ...p].join('/') }),
   from: ({ scheme, authority = '', path: p = '' }) => ({ scheme, authority, path: p, toString: () => `${scheme}://${authority}${p}` }),
 };
 const files = new Map();
@@ -159,6 +159,7 @@ const vscode = {
     registerCommand: (id, fn) => { calls.commands.set(id, fn); return new Disposable(() => calls.commands.delete(id)); },
     executeCommand: async (id, ...args) => {
       if (id === 'setContext') { calls.context.set(args[0], args[1]); return; }
+      calls.executed.push([id, ...args]);
       return calls.commands.get(id)?.(...args);
     },
   },
@@ -206,7 +207,7 @@ const secrets = new Map();
 const globalState = new Map();
 const ctx = {
   subscriptions: [],
-  extensionUri: Uri.parse('file:///ext'),
+  extensionUri: Uri.file(root),
   secrets: {
     get: async k => secrets.get(k),
     store: async (k, v) => { secrets.set(k, v); secretsEmitter.fire({ key: k }); },
@@ -639,18 +640,18 @@ async function actionsTree() {
   return { roots, kids };
 }
 
-await check('activate() registers the six views and the decky: file system', async () => {
+await check('activate() registers the seven views and the decky: file system', async () => {
   const trees = [...calls.treeViews.map(t => t.id), ...calls.treeProviders.map(t => t.id)].sort();
   assert.deepEqual(trees, ['decky-toolkit.actions', 'decky-toolkit.controllers', 'decky-toolkit.devices', 'decky-toolkit.games', 'decky-toolkit.plugins']);
   assert.deepEqual(calls.fsProviders.map(f => [f.scheme, f.options]), [['decky', { isCaseSensitive: true }]]);
-  assert.deepEqual(calls.webviewProviders.map(w => w.id), ['decky-toolkit.preview']);
+  assert.deepEqual(calls.webviewProviders.map(w => w.id), ['decky-toolkit.preview', 'decky-toolkit.welcome']);
   const declared = pkg.contributes.views['decky-toolkit'].map(v => [v.id, v.name]);
   assert.deepEqual(declared, [
-    ['decky-toolkit.devices', 'Devices'], ['decky-toolkit.actions', 'Actions'], ['decky-toolkit.plugins', 'Plugins'], ['decky-toolkit.games', 'Games'],
+    ['decky-toolkit.welcome', 'Devices'], ['decky-toolkit.devices', 'Devices'], ['decky-toolkit.actions', 'Actions'], ['decky-toolkit.plugins', 'Plugins'], ['decky-toolkit.games', 'Games'],
     ['decky-toolkit.controllers', 'Controllers'], ['decky-toolkit.preview', 'Preview']]);
   const games = pkg.contributes.views['decky-toolkit'].find(v => v.id === 'decky-toolkit.games');
   assert.equal(games.visibility, 'collapsed', 'Games starts collapsed like Plugins and Controllers');
-  return `createTreeView(${trees.join(', ')}), registerWebviewViewProvider(decky-toolkit.preview)`;
+  return `createTreeView(${trees.join(', ')}), registerWebviewViewProvider(decky-toolkit.preview, decky-toolkit.welcome)`;
 });
 
 await check('package.json: container, activation, commands, menus, version', async () => {
@@ -661,12 +662,13 @@ await check('package.json: container, activation, commands, menus, version', asy
   assert.equal(container.title, 'Decky');
   assert.equal(readFileSync(path.join(root, container.icon), 'utf8').includes('currentColor'), true);
   for (const v of pkg.contributes.views['decky-toolkit']) assert.ok(pkg.activationEvents.includes(`onView:${v.id}`), v.id);
-  assert.equal(pkg.activationEvents.length, 10);
+  assert.equal(pkg.activationEvents.length, 11);
   assert.ok(pkg.activationEvents.includes('onFileSystem:decky'), 'restored decky:// folders activate the extension');
   for (const glob of ['plugin.json', '*/plugin.json', '*/*/plugin.json']) assert.ok(pkg.activationEvents.includes(`workspaceContains:${glob}`), glob);
   assert.deepEqual(pkg.contributes.keybindings, [{ command: 'decky-toolkit.deploy', key: 'ctrl+alt+d', mac: 'cmd+alt+d' }]);
   for (const v of pkg.contributes.views['decky-toolkit']) {
-    assert.ok(v.id === 'decky-toolkit.devices' ? v.when === undefined : v.when === 'decky-toolkit.connected', `${v.id} when: ${v.when}`);
+    const want = { 'decky-toolkit.welcome': '!decky-toolkit.hasDevices', 'decky-toolkit.devices': 'decky-toolkit.hasDevices' }[v.id] ?? 'decky-toolkit.connected';
+    assert.equal(v.when, want, `${v.id} when`);
   }
   const declared = new Set(pkg.contributes.commands.map(c => c.command));
   const registered = new Set(calls.commands.keys());
@@ -676,12 +678,12 @@ await check('package.json: container, activation, commands, menus, version', asy
   for (const m of menus) assert.ok(declared.has(m.command), `menu refers to unknown command ${m.command}`);
   for (const m of menus) evalWhen(m.when, new Map());
   const whens = [...menus.map(m => m.when), ...pkg.contributes.views['decky-toolkit'].map(v => v.when), ...pkg.contributes.viewsWelcome.map(w => w.when)];
-  const allowedKeys = new Set(['view', 'viewItem', 'decky-toolkit.connected', 'false', 'activeWebviewPanelId',
+  const allowedKeys = new Set(['view', 'viewItem', 'decky-toolkit.connected', 'decky-toolkit.hasDevices', 'false', 'activeWebviewPanelId',
     'decky-toolkit.screen.input', 'decky-toolkit.screen.audio', 'decky-toolkit.screen.muted', 'decky-toolkit.screen.paused']);
   for (const w of whens.filter(Boolean)) {
     for (const [, key] of w.replace(/\/(?:\\.|[^/])+\//g, '/re/').matchAll(/(?:^|&&|\|\||\(|!)\s*([A-Za-z][\w.-]*)/g)) assert.ok(allowedKeys.has(key), `context key ${key} in ${w}`);
   }
-  assert.deepEqual(pkg.contributes.viewsWelcome.map(w => w.view), ['decky-toolkit.devices', 'decky-toolkit.controllers']);
+  assert.deepEqual(pkg.contributes.viewsWelcome.map(w => w.view), ['decky-toolkit.controllers']);
   assert.deepEqual(Object.keys(pkg.contributes.configuration.properties).sort(),
     ['decky-toolkit.deploy.build', 'decky-toolkit.deploy.onChange', 'decky-toolkit.host', 'decky-toolkit.openScreenOnConnect', 'decky-toolkit.pluginDirName', 'decky-toolkit.port']);
   assert.deepEqual(pkg.contributes.configuration.properties['decky-toolkit.deploy.build'].enum, ['auto', 'always', 'never']);
@@ -703,7 +705,7 @@ await check('package.json: container, activation, commands, menus, version', asy
       for (const inline of [true, false]) assert.deepEqual(dupes(itemMenu(view, viewItem, inline)), [], `${view} ${viewItem}`);
     }
   }
-  assert.deepEqual(visibleViews(new Map()), ['decky-toolkit.devices'], 'before activation only Devices shows');
+  assert.deepEqual(visibleViews(new Map()), ['decky-toolkit.welcome'], 'before activation only the Add a device welcome shows');
   return `${declared.size} commands registered, ${menus.length} menu entries resolve, titles ${Object.values(titles).map(t => t.length).join('/')}`;
 });
 
@@ -717,7 +719,8 @@ await check('first activation seeds one saved device from the settings', async (
 
 await check('unpaired: only Devices visible, one row, Connect inline', async () => {
   assert.equal(calls.context.get('decky-toolkit.connected'), false);
-  assert.deepEqual([...calls.context.keys()], ['decky-toolkit.connected'], 'the only context key');
+  assert.deepEqual([...calls.context.keys()].sort(), ['decky-toolkit.connected', 'decky-toolkit.hasDevices'], 'the only context keys');
+  assert.equal(calls.context.get('decky-toolkit.hasDevices'), true, 'the seeded device replaces the welcome view');
   assert.deepEqual(visibleViews(), ['decky-toolkit.devices']);
   const rows = devicesProvider().getChildren();
   assert.equal(rows.length, 1);
@@ -760,7 +763,7 @@ await check('fake client: plugin tree states, Actions Screen offline when unreac
 });
 
 await check('preview webview: CSP and proxy URL, no token', async () => {
-  const { provider } = calls.webviewProviders[0];
+  const { provider } = calls.webviewProviders.find(w => w.id === 'decky-toolkit.preview');
   const messages = new EventEmitter();
   const webview = { options: {}, html: '', cspSource: 'vscode-resource:', asWebviewUri: u => u, postMessage: async () => true, onDidReceiveMessage: messages.event };
   const view = { webview, visible: true, onDidChangeVisibility: new EventEmitter().event, onDidDispose: () => new Disposable() };
@@ -772,6 +775,39 @@ await check('preview webview: CSP and proxy URL, no token', async () => {
   assert.ok(!webview.html.includes('fake-token'));
   assert.equal(webview.options.enableScripts, true);
   return 'ok';
+});
+
+await check('welcome view: flat logo, Add a device, plugin requirement, pairing walkthrough; shown only without devices', async () => {
+  const { provider } = calls.webviewProviders.find(w => w.id === 'decky-toolkit.welcome');
+  const messages = new EventEmitter();
+  const webview = { options: {}, html: '', cspSource: 'vscode-resource:', asWebviewUri: u => u, postMessage: async () => true, onDidReceiveMessage: messages.event };
+  provider.resolveWebviewView({ webview, visible: true, onDidChangeVisibility: new EventEmitter().event, onDidDispose: () => new Disposable() });
+  const html = webview.html;
+  assert.match(html, /default-src 'none'; style-src 'nonce-[^']+'; script-src 'nonce-[^']+'/);
+  assert.doesNotMatch(html, /https?:\/\/(?!github\.com\/jackhric\/decky-toolkit|www\.w3\.org\/2000\/svg)/, 'nothing loads from the network');
+  assert.match(html, /<svg class="mark"[^>]*viewBox="140 140 480 470"/, 'the flat mark is inlined so it takes the theme colour');
+  assert.match(html, /<button id="add"[^>]*><svg[^>]*>.*<\/svg>Add a device<\/button>/s);
+  assert.match(html, /needs Decky Loader and the <a id="plugin" href="https:\/\/github\.com\/jackhric\/decky-toolkit"/);
+  assert.match(html, /How pairing works/);
+  const css = html.match(/<style[^>]*>([\s\S]*?)<\/style>/)[1];
+  assert.doesNotMatch(css, /#[0-9a-f]{3,8}\b|rgb|hsl/i, 'colours come from --vscode-* tokens only');
+
+  ui.inputBox = () => undefined;
+  messages.fire({ type: 'add' });
+  messages.fire({ type: 'plugin' });
+  messages.fire({ type: 'pairing' });
+  await settle();
+  assert.ok(calls.executed.some(([id]) => id === 'decky-toolkit.addDevice'));
+  assert.equal(calls.opened.at(-1), 'https://github.com/jackhric/decky-toolkit');
+  assert.deepEqual(calls.executed.find(([id]) => id === 'workbench.action.openWalkthrough'), ['workbench.action.openWalkthrough', 'jackhric.decky-toolkit#pairing', false]);
+
+  const walk = pkg.contributes.walkthroughs.find(w => w.id === 'pairing');
+  assert.deepEqual(walk.steps.map(st => st.id), ['install', 'add', 'approve', 'screen']);
+  for (const st of walk.steps) assert.ok(existsSync(path.join(root, st.media.svg)), st.media.svg);
+  assert.match(walk.steps[0].description, /jackhric\.github\.io\/decky-toolkit\/decky-toolkit\.zip/);
+  assert.equal(calls.context.get('decky-toolkit.hasDevices'), true, 'a saved device shows the tree instead');
+  assert.deepEqual(visibleViews(new Map([['decky-toolkit.hasDevices', false]])), ['decky-toolkit.welcome']);
+  return 'add → decky-toolkit.addDevice, plugin → GitHub, pairing → walkthrough (4 steps); welcome ⇄ tree on decky-toolkit.hasDevices';
 });
 
 await check('Connect on an unpaired device files a pairing request, waits for approval and connects', async () => {
