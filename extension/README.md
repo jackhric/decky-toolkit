@@ -66,12 +66,42 @@ The `…` icon and the right-click menu hold the rest: **Re-pair** (only for a p
 **Enter token manually**, **Edit** and **Remove**. A connected device never
 shows Pair, Enter token or Connect as a row or a button. Connect and disconnect live only here.
 
-The view title has **Add device** (+) and **Refresh** (also checks which devices answer). With no
-saved devices a welcome view takes its place: the flat Decky Toolkit mark, an **Add a device** button,
-the line *The device needs Decky Loader and the Decky Toolkit plugin installed* (the plugin name links to
-this repo) and **How pairing works**, which opens the *Connect a Decky device* walkthrough (install the
-plugin, add the device, approve it, open the screen). The welcome view and the Devices tree switch on the
-`decky-toolkit.hasDevices` context key.
+The view title has **Add device** (+), **Search network** (`$(search)`, see [Discovery](#discovery))
+and **Refresh** (also checks which devices answer). With no saved devices and none found on the network,
+a welcome view takes its place: the flat Decky Toolkit mark, an **Add a device** button, the line *The
+device needs Decky Loader and the Decky Toolkit plugin installed* (the plugin name links to this repo) and
+**How pairing works**, which opens the *Connect a Decky device* walkthrough (install the plugin, add the
+device, approve it, open the screen). The welcome view and the Devices tree switch on the
+`decky-toolkit.hasDevices` context key, and the welcome view searches the network too while it is shown.
+
+#### Discovery
+
+Below the saved devices, an **On this network** group lists Decky Toolkit devices on the local network
+that are not saved yet, the way Moonlight finds its hosts. Each row shows the device's host name with
+`ip · vX.Y.Z` (`ip:port` when the port is not 8765) and the `vm` icon. Click it, or its plug icon,
+to save the device and connect; an unpaired device goes straight into [pairing](#pairing). The group's
+last row is **Add a device by address…**. While a search runs the group shows a spinner and
+`searching…`; afterwards `N found` or `none found`.
+
+How devices are found:
+
+- **mDNS / DNS-SD.** The plugin advertises `_decky-toolkit._tcp` through the device's avahi-daemon
+  (instance name = host name, TXT `api`, `version`, `id`). The extension asks for it on each of this
+  machine's network interfaces.
+- **Local subnet probe.** At the same time it asks `GET /health` on port 8765 of every address in this
+  machine's own subnets (only /22 or smaller, at most 1024 addresses, 128 at a time, 1.2 s timeout).
+  This also finds older plugin builds that do not advertise, and networks that filter multicast.
+  A /24 takes about 2.5 s.
+
+Only answers whose `/health` identifies Decky Toolkit (or its old name `decky-mcp`) are listed. Saved
+devices (same address or host name, and port) and a second address of the same device (`device_id`)
+are left out. Loopback, link-local, container, VM and VPN interfaces (`docker*`, `br-*`, `virbr*`,
+`veth*`, `tun*`, `wg*`, `tailscale*`, …) are skipped.
+
+Discovery covers the local network only: mDNS does not cross routers, and the probe never leaves
+this machine's subnets. Add a device on another network by its address (**Add device**). A search
+runs when the Devices view opens (at most once a minute) and when you click **Search network**;
+nothing scans in the background. Turn it off with `decky-toolkit.discovery.enabled`.
 
 ### Actions
 
@@ -399,6 +429,7 @@ All of these are also in the command palette under the `Decky:` category.
 | Decky: Enter token manually | Paste a token; it is checked with an MCP `tools/list` call |
 | Decky: Disconnect and forget token | Forgets the token for the active device |
 | Decky: Switch device / Add device… / Edit device / Remove device | Connect to another saved device, manage saved devices |
+| Decky: Search network | Look for unsaved Decky Toolkit devices on the local network ([Discovery](#discovery)) |
 | Decky: Change host | Changes the active device's host/port and writes the `decky-toolkit.host`/`port` settings |
 | Decky: Open screen | Live screen panel with sound; remote input, mute, stream settings, pause and snapshot as tab bar icons |
 | Decky: Snapshot to file | Saves the current `/frame.jpg` with a Save dialog |
@@ -438,6 +469,7 @@ All of these are also in the command palette under the `Decky:` category.
 | `decky-toolkit.pluginDirName` | (empty) | Target dir under `~/homebrew/plugins` for deploy; empty means the plugin folder's name |
 | `decky-toolkit.deploy.build` | `auto` | `auto`: build only when `src/` is newer than `dist/index.js`; `always`; `never` |
 | `decky-toolkit.deploy.onChange` | `false` | Fast-deploy (without building) when `dist/index.js`, `main.py` or `py_modules/**/*.py` change |
+| `decky-toolkit.discovery.enabled` | `true` | List unsaved Decky Toolkit devices on the local network under **On this network** (see [Discovery](#discovery)) |
 
 Saved devices live in VS Code's global state (`decky-toolkit.devices`), so all windows share them.
 Tokens are stored per `host:port` in secret storage.

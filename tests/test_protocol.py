@@ -67,7 +67,9 @@ def test_auth_and_origin():
         async with s.post(f"{base}/mcp", data=rpc("ping"), headers={**H, "Origin": "http://localhost:1234"}) as r:
             assert r.status == 200
         async with s.get(f"{base}/health") as r:
-            assert r.status == 200 and (await r.json())["ok"]
+            body = await r.json()
+            assert r.status == 200 and body["ok"]
+            assert {"hostname", "device_id", "os"} <= body.keys() and body["hostname"]
         async with s.get(f"{base}/mcp", headers=H) as r:
             assert r.status == 405
     asyncio.run(with_server(run))
@@ -101,3 +103,18 @@ def test_mcp_flow():
     asyncio.run(with_server(run))
 
 
+
+
+def test_identity_hides_machine_id(tmp_path):
+    from decky_toolkit.identity import device_id, os_name
+    mid = tmp_path / "machine-id"
+    mid.write_text("0123456789abcdef0123456789abcdef\n")
+    did = device_id(mid)
+    assert did and len(did) == 16 and did == device_id(mid) and "0123456789abcdef" not in did
+    assert device_id(tmp_path / "missing") is None
+    rel = tmp_path / "os-release"
+    rel.write_text('NAME="SteamOS"\nPRETTY_NAME="SteamOS"\nVARIANT_ID=steamdeck\n')
+    assert os_name(rel) == "SteamOS"
+    rel.write_text("NAME=Bazzite\n")
+    assert os_name(rel) == "Bazzite"
+    assert os_name(tmp_path / "missing") is None
