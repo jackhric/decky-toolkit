@@ -34,7 +34,7 @@ await esbuild.build({
 const calls = {
   treeViews: [], treeProviders: [], webviewProviders: [], commands: new Map(), context: new Map(), statusItems: [], executed: [],
   panels: [], progress: [], messages: [], statusMessages: [], clipboard: [], unexpectedErrors: [], opened: [], written: [], saveDialogs: [],
-  watchers: [], output: [], fsProviders: [], folderUpdates: [], docs: [], revealed: [],
+  watchers: [], output: [], fsProviders: [], folderUpdates: [], docs: [], revealed: [], decorations: [], channels: new Map(),
 };
 
 class EventEmitter {
@@ -61,6 +61,7 @@ for (const code of ['FileNotFound', 'FileExists', 'FileNotADirectory', 'FileIsAD
   FileSystemError[code] = m => new FileSystemError(m, code);
 }
 class ThemeColor { constructor(id) { this.id = id; } }
+class FileDecoration { constructor(badge, tooltip, color) { this.badge = badge; this.tooltip = tooltip; this.color = color; } }
 class MarkdownString { value = ''; appendMarkdown(s) { this.value += s; return this; } }
 class RelativePattern { constructor(base, pattern) { this.base = base; this.pattern = pattern; } }
 const Uri = {
@@ -92,7 +93,7 @@ const workspaceFolders = new EventEmitter();
 const noop = async () => undefined;
 const noopEvent = () => new Disposable();
 const vscode = {
-  EventEmitter, Disposable, TreeItem, ThemeIcon, ThemeColor, MarkdownString, Uri, RelativePattern,
+  EventEmitter, Disposable, TreeItem, ThemeIcon, ThemeColor, MarkdownString, Uri, RelativePattern, FileDecoration,
   TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
   StatusBarAlignment: { Left: 1, Right: 2 },
   ProgressLocation: { SourceControl: 1, Window: 10, Notification: 15 },
@@ -109,9 +110,13 @@ const vscode = {
       calls.statusItems.push(item);
       return item;
     },
-    createOutputChannel: name => ({
-      name, appendLine: l => { if (name === 'Decky') calls.output.push(l + '\n'); }, append: t => { if (name === 'Decky') calls.output.push(t); }, show() {}, dispose() {},
-    }),
+    createOutputChannel: name => {
+      const lines = [];
+      calls.channels.set(name, lines);
+      return {
+        name, appendLine: l => { lines.push(l); if (name === 'Decky') calls.output.push(l + '\n'); }, append: t => { if (name === 'Decky') calls.output.push(t); }, show() {}, dispose() {},
+      };
+    },
     createTreeView: (id, opts) => {
       const visibility = new EventEmitter();
       const view = {
@@ -126,7 +131,7 @@ const vscode = {
       const received = new EventEmitter();
       const posted = [];
       const panel = {
-        viewType, title, reveal() {}, dispose: () => dispose.fire(),
+        viewType, title, reveal() {}, dispose() { this.disposed = true; dispose.fire(); },
         onDidDispose: dispose.event, onDidChangeViewState: new EventEmitter().event,
         webview: { html: '', cspSource: 'vscode-resource:', asWebviewUri: u => u, postMessage: async m => { posted.push(m); return true; }, onDidReceiveMessage: received.event },
         _received: received, _posted: posted,
@@ -136,6 +141,7 @@ const vscode = {
     },
     registerTreeDataProvider: (id, provider) => { calls.treeProviders.push({ id, provider }); return new Disposable(); },
     registerWebviewViewProvider: (id, provider) => { calls.webviewProviders.push({ id, provider }); return new Disposable(); },
+    registerFileDecorationProvider: provider => { calls.decorations.push(provider); return new Disposable(); },
     showErrorMessage: say('error'),
     showWarningMessage: say('warning'),
     showInformationMessage: say('info'),
@@ -430,11 +436,12 @@ globalThis.fetch = async (url, init = {}) => {
     const next = device.pairQueue.shift() ?? 'pending';
     if (next === 'down') throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET', message: 'socket hang up' } });
     if (next === 'gone') return json({ error: 'unknown or expired pairing request' }, 404);
+    if (next === 'approved') device.rejectToken = false;
     if (next === 'approved') return json({ status: 'approved', token: 'fake-token', url: `http://${u.host}`, api_version: 1 });
     if (next === 'pending') await new Promise(r => setTimeout(r, 5));
     return json({ status: next });
   }
-  if (auth !== 'Bearer fake-token') return new Response('unauthorized', { status: 401 });
+  if (auth !== 'Bearer fake-token' || device.rejectToken) return new Response('unauthorized', { status: 401 });
   if (u.pathname === '/stream/stats') return json(stats);
   if (u.pathname === '/stream/settings') {
     if (device.streamSettingsMissing) return json({ error: 'capture not available' }, 404);
@@ -556,6 +563,7 @@ function evalWhen(expr, context) {
   assert.equal(i, toks.length, `could not parse when clause: ${expr}`);
   return v;
 }
+const welcomeFor = (view, context = calls.context) => pkg.contributes.viewsWelcome.filter(w => w.view === view && evalWhen(w.when, context)).map(w => w.contents);
 const visibleViews = (context = calls.context) => pkg.contributes.views['decky-toolkit'].filter(v => evalWhen(v.when, context)).map(v => v.id);
 const itemMenu = (view, viewItem, inline) => pkg.contributes.menus['view/item/context']
   .filter(m => (m.group ?? '').startsWith('inline') === inline)
@@ -582,6 +590,7 @@ const tokenKey = 'decky-toolkit.token:10.1.2.3:8765';
 const lastMessage = kind => calls.messages.filter(m => m.kind === kind).at(-1);
 
 ext.connectionTimings.healthPollMs = 40;
+ext.connectionTimings.retryMs = 20;
 ext.pairingTimings.retryMs = 20;
 ext.controllerTimings.pollMs = 40;
 
@@ -702,7 +711,7 @@ await check('package.json: container, activation, commands, menus, version', asy
   for (const glob of ['plugin.json', '*/plugin.json', '*/*/plugin.json']) assert.ok(pkg.activationEvents.includes(`workspaceContains:${glob}`), glob);
   assert.deepEqual(pkg.contributes.keybindings, [{ command: 'decky-toolkit.deploy', key: 'ctrl+alt+d', mac: 'cmd+alt+d' }]);
   for (const v of pkg.contributes.views['decky-toolkit']) {
-    const want = { 'decky-toolkit.welcome': '!decky-toolkit.hasDevices', 'decky-toolkit.devices': 'decky-toolkit.hasDevices' }[v.id] ?? 'decky-toolkit.connected';
+    const want = { 'decky-toolkit.welcome': '!decky-toolkit.hasDevices', 'decky-toolkit.devices': 'decky-toolkit.hasDevices' }[v.id] ?? 'decky-toolkit.link';
     assert.equal(v.when, want, `${v.id} when`);
   }
   const declared = new Set(pkg.contributes.commands.map(c => c.command));
@@ -713,13 +722,22 @@ await check('package.json: container, activation, commands, menus, version', asy
   for (const m of menus) assert.ok(declared.has(m.command), `menu refers to unknown command ${m.command}`);
   for (const m of menus) evalWhen(m.when, new Map());
   const whens = [...menus.map(m => m.when), ...pkg.contributes.views['decky-toolkit'].map(v => v.when), ...pkg.contributes.viewsWelcome.map(w => w.when)];
-  const allowedKeys = new Set(['view', 'viewItem', 'decky-toolkit.connected', 'false', 'activeWebviewPanelId',
+  const allowedKeys = new Set(['view', 'viewItem', 'decky-toolkit.connected', 'decky-toolkit.link', 'false', 'activeWebviewPanelId',
     'decky-toolkit.hasDevices', 'config.decky-toolkit.discovery.enabled',
-    'decky-toolkit.screen.input', 'decky-toolkit.screen.audio', 'decky-toolkit.screen.muted', 'decky-toolkit.screen.paused']);
+    'decky-toolkit.screen.live', 'decky-toolkit.screen.input', 'decky-toolkit.screen.audio', 'decky-toolkit.screen.muted', 'decky-toolkit.screen.paused']);
   for (const w of whens.filter(Boolean)) {
     for (const [, key] of w.replace(/\/(?:\\.|[^/])+\//g, '/re/').matchAll(/(?:^|&&|\|\||\(|!)\s*([A-Za-z][\w.-]*)/g)) assert.ok(allowedKeys.has(key), `context key ${key} in ${w}`);
   }
-  assert.deepEqual(pkg.contributes.viewsWelcome.map(w => w.view), ['decky-toolkit.controllers']);
+  const lostViews = ['decky-toolkit.actions', 'decky-toolkit.plugins', 'decky-toolkit.games', 'decky-toolkit.controllers'];
+  assert.deepEqual([...new Set(pkg.contributes.viewsWelcome.map(w => w.view))], ['decky-toolkit.controllers', ...lostViews.filter(v => !v.endsWith('controllers'))]);
+  for (const view of lostViews) {
+    for (const link of ['connecting', 'unreachable', 'rejected', 'disconnected']) {
+      const shown = welcomeFor(view, new Map([['decky-toolkit.link', link]]));
+      assert.equal(shown.length, 1, `${view} ${link}: exactly one welcome`);
+      if (link !== 'connecting') assert.match(shown[0], /\[(Reconnect|Reconnect now|Re-pair)\]\(command:decky-toolkit\.reconnect\)$/, `${view} ${link}`);
+    }
+    assert.deepEqual(welcomeFor(view, new Map([['decky-toolkit.link', 'connected']])).filter(t => /device/.test(t) && !/controllers/.test(t)), [], `${view} connected: no lost-connection text`);
+  }
   assert.deepEqual(Object.keys(pkg.contributes.configuration.properties).sort(),
     ['decky-toolkit.deploy.build', 'decky-toolkit.deploy.onChange', 'decky-toolkit.discovery.enabled', 'decky-toolkit.host', 'decky-toolkit.openScreenOnConnect', 'decky-toolkit.pluginDirName', 'decky-toolkit.port']);
   assert.deepEqual(pkg.contributes.configuration.properties['decky-toolkit.deploy.build'].enum, ['auto', 'always', 'never']);
@@ -755,8 +773,9 @@ await check('first activation seeds one saved device from the settings', async (
 
 await check('unpaired: only Devices visible, one row, Connect inline', async () => {
   assert.equal(calls.context.get('decky-toolkit.connected'), false);
-  assert.deepEqual([...calls.context.keys()].sort(), ['decky-toolkit.connected', 'decky-toolkit.hasDevices'], 'the only context keys');
+  assert.deepEqual([...calls.context.keys()].sort(), ['decky-toolkit.connected', 'decky-toolkit.hasDevices', 'decky-toolkit.link'], 'the only context keys');
   assert.equal(calls.context.get('decky-toolkit.hasDevices'), true, 'one saved device');
+  assert.equal(calls.context.get('decky-toolkit.link'), undefined, 'no link state before the first connect: only Devices shows');
   assert.deepEqual(visibleViews(), ['decky-toolkit.devices']);
   const rows = devicesProvider().getChildren();
   assert.equal(rows.length, 1);
@@ -777,7 +796,7 @@ await check('unpaired: only Devices visible, one row, Connect inline', async () 
 await check('fake client: plugin tree states, Actions Screen offline when unreachable', async () => {
   const fakeConn = (client, extra = {}) => ({
     devices: [], activeDevice: undefined, address: { host: 'h', port: 1 }, label: 'h', paired: !!client, tokenRejected: false,
-    connectedDevice: client ? { id: 'x', name: 'h', host: 'h', port: 1 } : undefined,
+    connectedDevice: client ? { id: 'x', name: 'h', host: 'h', port: 1 } : undefined, link: client ? 'connected' : undefined, linkLabel: 'h',
     health: { kind: 'ok', health }, onDidChange: new EventEmitter().event, onDidChangeTarget: new EventEmitter().event,
     authedClient: () => client, watchStats: () => new Disposable(), ...extra,
   });
@@ -791,23 +810,26 @@ await check('fake client: plugin tree states, Actions Screen offline when unreac
   assert.equal(p.command.command, 'decky-toolkit.refreshPlugins');
   const unpaired = new ext.PluginsTreeProvider(fakeConn(undefined));
   assert.deepEqual(await unpaired.getChildren(), []);
-  const down = new ext.ActionsTreeProvider(fakeConn({}, { health: { kind: 'unreachable', error: 'cannot reach the device' } }));
-  const roots = await down.getChildren();
-  assert.equal(roots[0].description, 'offline');
+  const down = new ext.ActionsTreeProvider(fakeConn({}, { health: { kind: 'unreachable', error: 'cannot reach the device' }, link: 'unreachable' }));
+  assert.deepEqual(await down.getChildren(), [], 'unreachable: empty, so the lost-connection welcome shows');
   down.dispose();
-  return 'list / empty / error placeholder / not connected / unreachable';
+  const downPlugins = new ext.PluginsTreeProvider(fakeConn({ listPlugins: async () => plugins }, { link: 'unreachable' }));
+  assert.deepEqual(await downPlugins.getChildren(), []);
+  return 'list / empty / error placeholder / not connected / unreachable → empty';
 });
 
 await check('preview webview: CSP and proxy URL, no token', async () => {
   const { provider } = calls.webviewProviders.find(w => w.id === 'decky-toolkit.preview');
   const messages = new EventEmitter();
-  const webview = { options: {}, html: '', cspSource: 'vscode-resource:', asWebviewUri: u => u, postMessage: async () => true, onDidReceiveMessage: messages.event };
+  const posted = [];
+  const webview = { options: {}, html: '', cspSource: 'vscode-resource:', asWebviewUri: u => u, postMessage: async m => { posted.push(m); return true; }, onDidReceiveMessage: messages.event, _posted: posted };
   const view = { webview, visible: true, onDidChangeVisibility: new EventEmitter().event, onDidDispose: () => new Disposable() };
   await provider.resolveWebviewView(view);
   calls.previewView = view;
   assert.match(webview.html, /default-src 'none'/);
   assert.match(webview.html, /img-src http:\/\/127\.0\.0\.1:\d+ blob:/);
-  assert.match(webview.html, /Open full screen view/);
+  assert.match(webview.html, /<button id="open" hidden>Open full screen view/, 'not connected yet: the button is hidden');
+  assert.match(webview.html, /data-live="false"/);
   assert.ok(!webview.html.includes('fake-token'));
   assert.equal(webview.options.enableScripts, true);
   return 'ok';
@@ -1156,7 +1178,7 @@ await check('Screen and MCP leaves: snapshot, MCP URL, token', async () => {
 });
 
 // The real media/screen.js in a minimal DOM: what the webview does with the extension's messages.
-function loadScreenJs() {
+function loadScreenJs({ live } = {}) {
   const src = readFileSync(path.join(root, 'media', 'screen.js'), 'utf8');
   const els = new Map();
   const el = id => {
@@ -1171,17 +1193,19 @@ function loadScreenJs() {
   };
   const listeners = {}, posted = [], sent = [], sockets = [];
   const fakeVscode = { postMessage: m => posted.push(m) };
-  const document = { getElementById: el, body: { dataset: { base: 'http://127.0.0.1:1/x' } }, addEventListener() {}, hasFocus: () => true };
+  const fetches = [];
+  const dataset = { base: 'http://127.0.0.1:1/x', ...(live === undefined ? {} : { live: String(live) }) };
+  const document = { getElementById: el, body: { dataset }, addEventListener() {}, hasFocus: () => true };
   const window = { addEventListener: (t, fn) => { (listeners[t] ??= []).push(fn); } };
-  class FakeWs { constructor(url) { this.url = url; this.readyState = 1; sockets.push(this); } send(d) { sent.push(JSON.parse(d)); } close() {} }
+  class FakeWs { constructor(url) { this.url = url; this.readyState = 1; sockets.push(this); } send(d) { sent.push(JSON.parse(d)); } close() { this.closed = true; } }
   FakeWs.OPEN = 1;
   const pads = { list: [] };
   const navigator = { getGamepads: () => pads.list };
   new Function('acquireVsCodeApi', 'document', 'window', 'fetch', 'WebSocket', 'requestAnimationFrame', 'navigator', src)(
-    () => fakeVscode, document, window, () => new Promise(() => {}), FakeWs, () => 0, navigator);
+    () => fakeVscode, document, window, url => { fetches.push(url); return new Promise(() => {}); }, FakeWs, () => 0, navigator);
   const post = data => listeners.message.forEach(fn => fn({ data }));
   const fire = t => (listeners[t] ?? []).forEach(fn => fn({}));
-  return { el, post, fire, posted, sent, sockets, pads };
+  return { el, post, fire, posted, sent, sockets, pads, fetches };
 }
 const titleActions = (panelId = 'decky-toolkit.screen') => pkg.contributes.menus['editor/title']
   .filter(m => evalWhen(m.when, new Map([...calls.context, ['activeWebviewPanelId', panelId]]))).map(m => m.command);
@@ -1342,7 +1366,7 @@ await check('screen panel: title actions and icons, stream settings QuickPick, m
 });
 
 await check('Controllers view with fake clients: empty, physical + virtual, 404, error', async () => {
-  const fakeConn = client => ({ connectedDevice: { id: 'x', name: 'h', host: 'h', port: 1 }, authedClient: () => client, onDidChangeTarget: new EventEmitter().event, label: 'h' });
+  const fakeConn = client => ({ connectedDevice: { id: 'x', name: 'h', host: 'h', port: 1 }, link: 'connected', authedClient: () => client, onDidChange: new EventEmitter().event, onDidChangeTarget: new EventEmitter().event, label: 'h' });
   const treeFor = controllers => new ext.ControllersTreeProvider(new ext.ControllerWatcher(fakeConn({ controllers }), async () => 'http://127.0.0.1:1/x'));
 
   assert.deepEqual(await treeFor(async () => ({ controllers: [], virtual: [], input_enabled: false })).getChildren(), [], 'empty → welcome');
@@ -1594,40 +1618,186 @@ await check('stats polling stops when the Actions view is hidden', async () => {
   return 'lease released on hide, re-acquired on show';
 });
 
-await check('connected: periodic /health flips to unreachable and back, token kept', async () => {
+const LOST_VIEWS = ['actions', 'plugins', 'games', 'controllers'];
+const lostNotes = () => (calls.channels.get('Decky Loader') ?? []).filter(l => l.startsWith('[decky-toolkit]'));
+
+await check('connection lost: views stay but go blank, screen panel / preview / logs / decky:// files say so, then recover by themselves', async () => {
+  await run('decky-toolkit.openScreen');
+  const panel = calls.panels.at(-1);
+  panel._received.fire({ type: 'ready' });
+  await run('decky-toolkit.loaderLogs');
+  await settle();
+  const linkMsg = () => panel._posted.filter(m => m.type === 'link').at(-1);
+  const previewState = () => calls.previewView.webview._posted.filter(m => m.type === 'state').at(-1);
+  assert.deepEqual(linkMsg(), { type: 'link', live: true, text: '' });
+  assert.deepEqual(previewState(), { type: 'state', live: true, text: '' });
+  assert.equal(panel.title, 'Screen: 10.1.2.3');
+  assert.equal(calls.context.get('decky-toolkit.screen.live'), true);
+  assert.ok(!titleActions().includes('decky-toolkit.reconnect'));
+  const deco = calls.decorations[0];
+  const file = ext.deckyUri({ host: '10.1.2.3', port: 8765 }, '/home/jackh/.local/share/VVVVVV/saves/tsave.vvv');
+  assert.equal(deco.provideFileDecoration(file), undefined);
+  const views = visibleViews();
+  assert.deepEqual(views, pkg.contributes.views['decky-toolkit'].map(v => v.id).filter(id => id !== 'decky-toolkit.welcome'));
+  const notesBefore = lostNotes().length;
+
   device.up = false;
   await settle(150);
   let [r] = devicesProvider().getChildren();
   assert.equal(r.description, 'unreachable');
   assert.equal(r.iconPath.id, 'warning');
-  assert.equal(calls.context.get('decky-toolkit.connected'), true, 'views stay while the session is unreachable');
-  assert.equal(tree('decky-toolkit.actions').view.description, '10.1.2.3 · unreachable');
-  assert.equal((await actionsProvider().getChildren())[0].description, 'offline');
-  assert.equal(status(), '$(warning) 10.1.2.3 (unreachable)');
+  assert.equal(calls.context.get('decky-toolkit.connected'), true, 'the session and its token stay');
+  assert.equal(calls.context.get('decky-toolkit.link'), 'unreachable');
+  assert.deepEqual(visibleViews(), views, 'no view disappears');
+  for (const id of LOST_VIEWS) {
+    assert.deepEqual(await tree(`decky-toolkit.${id}`).provider.getChildren(), [], `${id} is blank`);
+    assert.equal(tree(`decky-toolkit.${id}`).view.description, '10.1.2.3 · connection lost');
+    const [welcome, ...more] = welcomeFor(`decky-toolkit.${id}`);
+    assert.equal(more.length, 0, `${id}: one welcome`);
+    assert.match(welcome, /^Lost connection to the device\..*\n\[Reconnect now\]\(command:decky-toolkit\.reconnect\)$/s);
+  }
+  assert.equal(calls.previewView.description, '10.1.2.3 · connection lost');
+  assert.deepEqual(previewState(), { type: 'state', live: false, text: 'Lost connection to 10.1.2.3.\nReconnecting as soon as it answers again…' });
+  assert.equal(status(), '$(debug-disconnect) 10.1.2.3: connection lost');
+  assert.equal(calls.statusItems[0].backgroundColor.id, 'statusBarItem.warningBackground');
+  assert.equal(calls.statusItems[0].command, 'decky-toolkit.reconnect');
+  assert.equal(panel.title, 'Screen: 10.1.2.3 (connection lost)', 'the panel stays open and its tab says why');
+  assert.deepEqual(linkMsg(), { type: 'link', live: false, text: 'Lost connection to 10.1.2.3.\nReconnecting as soon as it answers again…' });
+  assert.equal(calls.context.get('decky-toolkit.screen.live'), false);
+  assert.deepEqual(titleActions(), ['decky-toolkit.reconnect', 'decky-toolkit.screen.mute', 'decky-toolkit.screen.pause'], 'device actions give way to Reconnect');
+  assert.equal(icon('decky-toolkit.reconnect'), '$(plug)');
+  const notes = lostNotes().slice(notesBefore);
+  assert.deepEqual(notes, ['[decky-toolkit] Lost connection to 10.1.2.3. Output resumes when it is connected again.'], 'the log channel says it once');
+  const d = deco.provideFileDecoration(file);
+  assert.equal(d.badge, '!');
+  assert.equal(d.color.id, 'list.warningForeground');
+  assert.match(d.tooltip, /Lost connection to 10\.1\.2\.3; files open and save again/);
   assert.equal(secrets.get(tokenKey), 'fake-token');
+
+  fetched.length = 0;
   device.up = true;
   await settle(150);
   [r] = devicesProvider().getChildren();
   assert.equal(r.description, 'connected');
+  assert.equal(calls.context.get('decky-toolkit.link'), 'connected');
   assert.equal(status(), '$(vm-connect) 10.1.2.3');
-  return 'connected → unreachable → connected';
+  assert.equal(calls.statusItems[0].backgroundColor, undefined);
+  assert.equal((await actionsProvider().getChildren()).length, 5, 'Actions fill again');
+  assert.ok(labels(await pluginsProvider().getChildren()).includes('Tender'), 'Plugins fill again');
+  assert.equal(tree('decky-toolkit.actions').view.description, '10.1.2.3');
+  assert.equal(panel.title, 'Screen: 10.1.2.3');
+  assert.deepEqual(linkMsg(), { type: 'link', live: true, text: '' });
+  assert.equal(calls.context.get('decky-toolkit.screen.live'), true);
+  assert.ok(fetched.includes('/stream/settings'), 'stream settings reloaded after the outage');
+  assert.deepEqual(previewState(), { type: 'state', live: true, text: '' });
+  assert.ok(lostNotes().slice(notesBefore).includes('[decky-toolkit] Connected to 10.1.2.3 again.'));
+  assert.equal(deco.provideFileDecoration(file), undefined);
+  assert.equal(panel.disposed, undefined, 'the screen panel was never closed');
+  return 'views kept + blank with "Lost connection" welcome; title "(connection lost)"; status warning; one log line; decky:// "!" badge; all back on recovery';
 });
 
-await check('paired but disconnected: Disconnect keeps the token, hides Actions / Plugins / Preview', async () => {
+await check('screen.js: a lost link stops the stream, input and audio and dims the last frame; recovery restarts them', async () => {
+  const w = loadScreenJs();
+  assert.equal(w.fetches.length, 1, 'stream started');
+  w.post({ type: 'input', state: { enabled: true } });
+  w.post({ type: 'audio', on: true, muted: false, volume: 0.8 });
+  const [input, audio] = ['/input', '/audio'].map(p => w.sockets.find(s => s.url.endsWith(p)));
+  assert.ok(input && audio);
+  w.post({ type: 'link', live: false, text: 'Lost connection to Deck.\nReconnecting as soon as it answers again…' });
+  assert.equal(w.el('msg').textContent, 'Lost connection to Deck.\nReconnecting as soon as it answers again…');
+  assert.equal(w.el('msg').hidden, false);
+  assert.ok(w.el('main').classList.contains('offline'), 'last frame dimmed');
+  assert.ok(input.closed && audio.closed, 'sockets closed');
+  w.post({ type: 'visible', visible: false });
+  w.post({ type: 'visible', visible: true });
+  w.post({ type: 'reconnect' });
+  w.post({ type: 'input', state: { enabled: true } });
+  assert.equal(w.fetches.length, 1, 'nothing fetched while offline');
+  assert.equal(w.sockets.length, 2, 'no socket opened while offline');
+  w.post({ type: 'link', live: true, text: '' });
+  assert.equal(w.fetches.length, 2, 'stream restarted');
+  assert.equal(w.el('msg').textContent, 'Connecting…');
+  assert.ok(!w.el('main').classList.contains('offline'));
+  assert.deepEqual(w.sockets.slice(2).map(s => s.url.split('/').pop()).sort(), ['audio', 'input']);
+  const cold = loadScreenJs({ live: false });
+  assert.equal(cold.fetches.length, 0, 'a panel opened while offline does not fetch');
+  return 'offline: msg + dimmed + sockets closed + no fetch; live again: stream, input and audio back';
+});
+
+await check('user Disconnect: views stay blank with "Disconnected" and Reconnect, screen panel stays open; Reconnect restores it', async () => {
+  const panel = calls.panels.at(-1);
+  const notesBefore = lostNotes().length;
   await run('decky-toolkit.disconnectDevice');
   await settle();
   assert.equal(calls.context.get('decky-toolkit.connected'), false);
-  assert.deepEqual(visibleViews(), ['decky-toolkit.devices']);
+  assert.equal(calls.context.get('decky-toolkit.link'), 'disconnected');
+  assert.deepEqual(visibleViews(), pkg.contributes.views['decky-toolkit'].map(v => v.id).filter(id => id !== 'decky-toolkit.welcome'), 'the layout does not jump');
+  for (const id of LOST_VIEWS) {
+    assert.deepEqual(await tree(`decky-toolkit.${id}`).provider.getChildren(), [], `${id} is blank`);
+    assert.deepEqual(welcomeFor(`decky-toolkit.${id}`), ['Disconnected from the device.\n[Reconnect](command:decky-toolkit.reconnect)']);
+    assert.equal(tree(`decky-toolkit.${id}`).view.description, '10.1.2.3 · disconnected');
+  }
   const [r] = devicesProvider().getChildren();
   assert.equal(r.description, 'paired');
   assert.equal(r.iconPath.id, 'vm');
   assert.equal(r.contextValue, 'deck.paired');
   assert.equal(r.command.command, 'decky-toolkit.connect');
   assert.deepEqual(itemMenu('decky-toolkit.devices', r.contextValue, true), ['decky-toolkit.connect', 'decky-toolkit.deviceActions']);
-  assert.deepEqual(await actionsProvider().getChildren(), []);
   assert.equal(secrets.get(tokenKey), 'fake-token');
   assert.equal(status(), '$(vm) Decky: not connected');
-  return `row "${r.label}" — "${r.description}" [$(vm)]`;
+  assert.equal(panel.disposed, undefined, 'not closed');
+  assert.equal(panel.title, 'Screen: 10.1.2.3 (disconnected)');
+  assert.match(panel._posted.filter(m => m.type === 'link').at(-1).text, /^Disconnected from 10\.1\.2\.3\./);
+  assert.deepEqual(lostNotes().slice(notesBefore), ['[decky-toolkit] Disconnected from 10.1.2.3. Output resumes when it is connected again.']);
+  const file = ext.deckyUri({ host: '10.1.2.3', port: 8765 }, '/home/jackh/.local/share/VVVVVV/saves/tsave.vvv');
+  assert.equal(calls.decorations[0].provideFileDecoration(file), undefined, 'decky:// still works with the stored token');
+
+  fetched.length = 0;
+  await run('decky-toolkit.reconnect');
+  await settle();
+  assert.equal(calls.context.get('decky-toolkit.link'), 'connected');
+  assert.ok(fetched.includes('/health') && !fetched.includes('/pair/request'));
+  assert.equal(panel.title, 'Screen: 10.1.2.3');
+  assert.ok(lostNotes().slice(notesBefore).includes('[decky-toolkit] Connected to 10.1.2.3 again.'));
+  assert.equal((await actionsProvider().getChildren()).length, 5);
+  panel.dispose();
+  await run('decky-toolkit.disconnectDevice');
+  await settle();
+  return `row "${r.label}" — "${r.description}" [$(vm)]; welcome "Disconnected from the device." + Reconnect`;
+});
+
+await check('token rejected mid-session: views blank with Re-pair, status bar and device row say so, re-pairing restores', async () => {
+  await run('decky-toolkit.connect', seedId());
+  await settle();
+  // Without a stats lease the /health poll checks the token itself (stats polling would take 5 s).
+  const actions = tree('decky-toolkit.actions').view;
+  actions.visible = false;
+  actions._visibility.fire({ visible: false });
+  device.rejectToken = true;
+  await settle(150);
+  assert.equal(calls.context.get('decky-toolkit.link'), 'rejected');
+  for (const id of LOST_VIEWS) {
+    assert.deepEqual(await tree(`decky-toolkit.${id}`).provider.getChildren(), []);
+    assert.match(welcomeFor(`decky-toolkit.${id}`)[0], /rejected the stored token.*\n\[Re-pair\]\(command:decky-toolkit\.reconnect\)$/s);
+  }
+  assert.equal(status(), '$(key) 10.1.2.3: token rejected');
+  assert.equal(calls.statusItems[0].backgroundColor.id, 'statusBarItem.errorBackground');
+  const [r] = devicesProvider().getChildren();
+  assert.equal(r.description, 'token rejected');
+  const file = ext.deckyUri({ host: '10.1.2.3', port: 8765 }, '/home/jackh/.local/share/VVVVVV/saves/tsave.vvv');
+  assert.equal(calls.decorations[0].provideFileDecoration(file).color.id, 'list.errorForeground');
+  device.pairQueue = ['approved'];
+  fetched.length = 0;
+  await run('decky-toolkit.reconnect');
+  await settle();
+  assert.ok(fetched.includes('/pair/request'), 'Re-pair runs pairing');
+  assert.equal(calls.context.get('decky-toolkit.link'), 'connected');
+  assert.equal(status(), '$(vm-connect) 10.1.2.3');
+  actions.visible = true;
+  actions._visibility.fire({ visible: true });
+  await run('decky-toolkit.disconnectDevice');
+  await settle();
+  return 'rejected → Re-pair → connected';
 });
 
 await check('Connect with a stored token checks /health and connects without pairing', async () => {
@@ -1638,7 +1808,7 @@ await check('Connect with a stored token checks /health and connects without pai
   assert.ok(!fetched.includes('/pair/request'));
   assert.equal(calls.context.get('decky-toolkit.connected'), true);
   assert.match(calls.statusMessages.at(-1), /Connected to 10\.1\.2\.3/);
-  assert.equal(calls.panels.length, 1, 'screen opens only after the first connect of a session');
+  assert.equal(calls.panels.filter(x => !x.disposed).length, 0, 'screen opens only after the first connect of a session');
   await run('decky-toolkit.disconnectDevice');
   return `requests: ${[...new Set(fetched)].join(', ')}`;
 });
@@ -1793,7 +1963,7 @@ await check('the … overflow menu', async () => {
 
 await check('Games view with fake clients: Proton title with saves, native title, shortcut, 404 device, errors', async () => {
   const device = { id: 'g', name: 'Deck', host: '10.0.70.18', port: 8765 };
-  const fakeConn = client => ({ connectedDevice: device, authedClient: () => client, onDidChangeTarget: new EventEmitter().event, label: 'Deck' });
+  const fakeConn = client => ({ connectedDevice: device, link: 'connected', authedClient: () => client, onDidChangeTarget: new EventEmitter().event, label: 'Deck' });
   const listings = {
     [`${CT_USER}/AppData/Local/ChainedTogether/Saved/SaveGames`]: [
       { path: 'Save.sav', type: 'file', size: 2348, mtime: ago(20000) }, { path: 'Backup', type: 'dir', size: 0, mtime: ago(20000) },
@@ -1874,7 +2044,7 @@ await check('Games view with fake clients: Proton title with saves, native title
   assert.equal(e.command.command, 'decky-toolkit.refreshGames');
   fail = false;
   assert.deepEqual(labels(await flaky.getChildren()), ['No installed games'], 'an error is not cached');
-  const unpaired = new ext.GamesTreeProvider({ ...fakeConn(undefined), connectedDevice: undefined });
+  const unpaired = new ext.GamesTreeProvider({ ...fakeConn(undefined), connectedDevice: undefined, link: undefined });
   assert.deepEqual(await unpaired.getChildren(), []);
   return `${rows.map(r => `${r.label} — ${r.description}`).join(' | ')}; Proton children ${proton.map(c => c.label).join(', ')}`;
 });
@@ -2208,6 +2378,35 @@ await check('discovery: hasDevices stays true while only found devices are liste
   assert.match(lastMessage('info').m, /network discovery is turned off/);
   assert.equal(groupNode(), undefined);
   return 'hasDevices true → false';
+});
+
+await check('decky:// reports reachability to the connection; decorations mark files of a device that cannot serve them', async () => {
+  const zed = { id: 'z', name: 'Zed', host: '10.9.9.9', port: 8765 };
+  const notes = [];
+  const fs = new ext.DeckyFileSystemProvider({ devices: [zed], tokenFor: async () => 't', noteReachable: (d, ok) => notes.push([d.id, ok]) });
+  const err = await fs.readFile(ext.deckyUri(zed, '/home/x')).catch(e => e);
+  assert.equal(err.code, 'Unavailable');
+  assert.deepEqual(notes, [['z', false]]);
+  let status = 'unreachable';
+  const statusChanged = new EventEmitter();
+  const state = { devices: [zed], connectedDevice: undefined, tokenRejected: false, statusOf: () => status, onDidChangeStatus: statusChanged.event };
+  const deco = new ext.DeckyFileDecorations(state);
+  let fired = 0;
+  deco.onDidChangeFileDecorations(() => fired++);
+  const uri = ext.deckyUri(zed, '/home/x');
+  const lost = deco.provideFileDecoration(uri);
+  assert.deepEqual([lost.badge, lost.color.id], ['!', 'list.warningForeground']);
+  assert.match(lost.tooltip, /^Lost connection to Zed/);
+  status = 'disconnected';
+  statusChanged.fire();
+  assert.equal(fired, 1, 'a status change redraws the decorations');
+  assert.equal(deco.provideFileDecoration(uri), undefined, 'paired and reachable: no mark, even without a session');
+  status = 'unpaired';
+  assert.match(deco.provideFileDecoration(uri).tooltip, /^Not paired with Zed/);
+  assert.match(deco.provideFileDecoration(ext.deckyUri({ host: '10.4.4.4', port: 8765 }, '/a')).tooltip, /^No saved Decky device 10\.4\.4\.4/);
+  assert.equal(deco.provideFileDecoration(Uri.from({ scheme: 'file', path: '/a' })), undefined);
+  deco.dispose();
+  return 'connection error → noteReachable(false); unreachable / unpaired / unknown device marked, reachable not';
 });
 
 await check('no unexpected error messages', async () => {

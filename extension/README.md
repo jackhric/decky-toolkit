@@ -41,12 +41,17 @@ The Decky Toolkit plugin must already be installed and enabled on the device.
    pairing.
 
 The status bar shows `$(vm-connect) <name>` while connected and `$(vm) Decky: not connected`
-otherwise. Click it to connect, switch device, disconnect, open the screen or add a device.
+otherwise. Click it to connect, switch device, disconnect, open the screen or add a device. When the
+device stops answering it turns into `$(debug-disconnect) <name>: connection lost` on a warning
+background (`$(key) <name>: token rejected` on an error background when the device refuses the
+token), and a click reconnects; see [Losing the connection](#losing-the-connection).
 
 ## Sidebar
 
 Before you connect, the sidebar shows only **Devices**. After you connect, **Actions**, **Plugins**,
-**Controllers** and **Preview** appear below it, all for the connected device.
+**Games**, **Controllers** and **Preview** appear below it, all for the connected device. They stay
+there for the rest of the window, also after a disconnect, so the layout never jumps; while the
+device is not connected they are empty and say why (see [Losing the connection](#losing-the-connection)).
 
 ### Devices
 
@@ -61,6 +66,7 @@ row shows the host once and the state as the description; otherwise the descript
 | connecting / pairing | spinner | `connecting…` / `waiting for approval · code 4821` | none | none |
 | connected | `vm-connect` (green) | `connected` | none | Disconnect, `…` |
 | unreachable | `warning` (yellow) | `unreachable` | connect (retries) | Connect, `…` |
+| connected, token rejected | `key` (red) | `token rejected` | none | Disconnect, `…` (Re-pair) |
 
 The `…` icon and the right-click menu hold the rest: **Re-pair** (only for a paired device),
 **Enter token manually**, **Edit** and **Remove**. A connected device never
@@ -352,6 +358,7 @@ panel is the active editor of its group:
 | `$(settings-gear)` | Stream settings… | QuickPick, see below |
 | `$(debug-pause)` / `$(play)` | Pause / Resume | Freezes the picture; the stream stays connected |
 | `$(device-camera)` | Snapshot to file | Saves the current `/frame.jpg` with a Save dialog |
+| `$(plug)` | Reconnect | Only while not connected, in place of input, settings and snapshot; see [Losing the connection](#losing-the-connection) |
 
 **Stream settings…** lists:
 
@@ -415,7 +422,39 @@ name (press Enter to use the host). The port is 8765. A picker then offers **Con
   unreachable but stays the connected device, with its token; when it answers again it is connected
   again. Commands such as Deploy need a connected device; if there is none they offer to connect.
 - **Reconnect.** The connected device is remembered. After a window reload the extension reconnects to
-  it silently if it answers and the token is still valid.
+  it silently if it answers and the token is still valid; if it does not answer yet, it reconnects as
+  soon as it does (saved devices that do not answer are probed every 15 s).
+
+### Losing the connection
+
+Nothing closes when the connection goes. Every surface stays where it is, says what happened, and
+fills again by itself when the device answers. The state (context key `decky-toolkit.link`) is one of:
+
+| State | When | Recovers |
+| --- | --- | --- |
+| `connection lost` | `/health` fails (device asleep, network gone, Decky Loader restarting), or the screen stream drops and an immediate `/health` check fails | by itself: `/health` is retried every 2 s while lost |
+| `token rejected` | an authenticated request answers 401 (the `/input/settings` check after each `/health`, or the stats poll) | **Re-pair** |
+| `disconnected` | you clicked Disconnect (or removed / switched the device) | **Reconnect** |
+| `connecting…` | a connect or pairing is running | by itself |
+
+- **Actions, Plugins, Games, Controllers**: stay visible but empty, with a welcome message for the
+  state (*Lost connection to the device. …* with **Reconnect now**, *The device rejected the stored
+  token …* with **Re-pair**, *Disconnected from the device.* with **Reconnect**). The view title
+  description says `<name> · connection lost` (or `token rejected`, `disconnected`).
+- **Preview**: stops fetching, hides its button and shows the same explanation as the screen panel.
+- **Screen panel**: stays open. The tab title becomes `Screen: <name> (connection lost)` (or
+  `(token rejected)`, `(disconnected)`), the last frame stays dimmed behind a message such as *Lost
+  connection to <name>. Reconnecting as soon as it answers again…*, the stream, input and audio
+  sockets close, and the tab bar swaps remote input, stream settings and snapshot for a
+  `$(plug)` **Reconnect** action (mute and pause stay). On recovery the stream, input and audio come
+  back and the title loses its suffix.
+- **Log channels** (loader and plugin logs): one line, e.g. `[decky-toolkit] Lost connection to
+  <name>. Output resumes when it is connected again.`, then `[decky-toolkit] Connected to <name>
+  again.` when it resumes; no error line per retry. After a Disconnect the log stream stops too.
+- **`decky://` files and folders**: editors stay open. While the device does not answer (or is not
+  paired, or rejected the token) their tab and Explorer entry get a `!` badge in the warning colour
+  with a tooltip saying why saving fails; it clears when the device answers. A Disconnect does not
+  mark them, since `decky://` keeps working with the stored token.
 
 ## Commands
 
@@ -425,6 +464,7 @@ All of these are also in the command palette under the `Decky:` category.
 | --- | --- |
 | Decky: Connect | Connects to a device; pairs first when there is no valid token |
 | Decky: Disconnect | Ends the session; keeps the token |
+| Decky: Reconnect | Connects to the device of the last session again (pairs again when its token was rejected) |
 | Decky: Re-pair | Runs pairing again for a device |
 | Decky: Enter token manually | Paste a token; it is checked with an MCP `tools/list` call |
 | Decky: Disconnect and forget token | Forgets the token for the active device |
@@ -538,7 +578,11 @@ install (loader restart), fast deploy (`restart=plugin`), debug-flagged deploy (
 full restart, a failing build and auto-deploy on change. It also checks that Connect on an unpaired device files a pairing request
 (name, kind, the waiting message and the row's code, then approval), a denied request with Try
 again, waiting through a lost connection and a forgotten request (new code) and Cancel sending
-`DELETE`, the "Update Decky Toolkit" path for an older device, the reachability error with Retry, the 15 s health check going unreachable and back, Add device, snapshot, Copy MCP URL /
+`DELETE`, the "Update Decky Toolkit" path for an older device, the reachability error with Retry, the 15 s health check going unreachable and back (views kept but
+empty with their welcome text, view descriptions, status bar, screen panel title and `link` message,
+preview state, one log line each way, the `decky://` decoration, everything back on recovery), a
+Disconnect and Reconnect, a token rejected mid-session and re-paired, `media/screen.js` stopping and
+restarting stream, input and audio on the link state, Add device, snapshot, Copy MCP URL /
 token, and the remote input toggle (title action and its icon, palette command, status bar
 indicator, unavailable and unsupported devices), and the screen panel's controls: which tab bar
 actions show with which icons for each state, mute and pause flipping their icon, the stream

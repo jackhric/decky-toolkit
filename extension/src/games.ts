@@ -177,7 +177,7 @@ export class GamesTreeProvider implements vscode.TreeDataProvider<GameNode>, vsc
   }
 
   private get client(): DeckyClient | undefined {
-    return (this.conn.connectedDevice && this.conn.authedClient()) || undefined;
+    return (this.conn.link === 'connected' && this.conn.authedClient()) || undefined;
   }
 
   getTreeItem(n: GameNode): vscode.TreeItem {

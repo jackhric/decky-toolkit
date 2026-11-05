@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
-import { Connection, externalProxyBase } from './connection';
+import { Connection, externalProxyBase, linkMessage } from './connection';
 
 export class PreviewViewProvider implements vscode.WebviewViewProvider {
   static readonly viewId = 'decky-toolkit.preview';
@@ -22,9 +22,15 @@ export class PreviewViewProvider implements vscode.WebviewViewProvider {
     view.webview.options = { enableScripts: true, localResourceRoots: [media] };
     const { external } = await externalProxyBase(this.conn);
     view.webview.html = this.html(view.webview, media, external);
+    let sent = JSON.stringify(this.state());
+    const sendState = () => {
+      const json = JSON.stringify(this.state());
+      if (json !== sent) void view.webview.postMessage({ type: 'state', ...this.state() });
+      sent = json;
+    };
     const subs = [
       view.onDidChangeVisibility(() => void view.webview.postMessage({ type: 'visible', visible: view.visible })),
-      this.conn.onDidChangeTarget(() => void view.webview.postMessage({ type: 'state', paired: this.conn.paired })),
+      this.conn.onDidChange(sendState),
       view.webview.onDidReceiveMessage(m => {
         if (m?.type === 'open') void vscode.commands.executeCommand('decky-toolkit.openScreen');
       }),
@@ -33,6 +39,11 @@ export class PreviewViewProvider implements vscode.WebviewViewProvider {
       subs.forEach(s => s.dispose());
       if (this.view === view) this.view = undefined;
     });
+  }
+
+  private state(): { live: boolean; text: string } {
+    const live = this.conn.paired && this.conn.link === 'connected';
+    return { live, text: live ? '' : linkMessage(this.conn) };
   }
 
   private html(webview: vscode.Webview, media: vscode.Uri, external: string): string {
@@ -46,7 +57,8 @@ export class PreviewViewProvider implements vscode.WebviewViewProvider {
       `style-src ${webview.cspSource}`,
       `script-src 'nonce-${nonce}'`,
     ].join('; ');
-    const attr = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+    const attr = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/\n/g, '&#10;');
+    const state = this.state();
     return `<!doctype html>
 <html lang="en">
 <head>
@@ -56,9 +68,9 @@ export class PreviewViewProvider implements vscode.WebviewViewProvider {
 <link rel="stylesheet" href="${uri('preview.css')}">
 <title>Device preview</title>
 </head>
-<body data-base="${attr(external)}" data-paired="${this.conn.paired}">
+<body data-base="${attr(external)}" data-live="${state.live}" data-text="${attr(state.text)}">
 <div class="frame"><img id="img" alt="Device display"><div id="msg">Loading…</div></div>
-<button id="open">Open full screen view</button>
+<button id="open"${state.live ? '' : ' hidden'}>Open full screen view</button>
 <script nonce="${nonce}" src="${uri('preview.js')}"></script>
 </body>
 </html>`;
