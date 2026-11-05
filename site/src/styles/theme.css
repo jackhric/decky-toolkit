@@ -1,26 +1,27 @@
+/* Deck palette: navy-tinted neutrals and one Steam-blue accent, used only on primary buttons, focus/selection and
+   feature icons. No glows or gradients. */
 :root {
-  --hue: 262;
   --radius: 0.625rem;
 
   --icon-vscode: #23a9f2;
   --icon-vscodium: #2f80ed;
 
-  --background: #f5f5f5;
-  --foreground: #111113;
+  --background: oklch(0.975 0.004 240);
+  --foreground: oklch(0.2 0.02 245);
   --card: #ffffff;
   --card-foreground: var(--foreground);
   --popover: #ffffff;
   --popover-foreground: var(--foreground);
-  --primary: hsl(var(--hue) 62% 52%);
+  --primary: oklch(0.55 0.13 240);
   --primary-foreground: #ffffff;
-  --primary-accent: hsl(var(--hue) 62% 45%);
-  --secondary: #e4e4e7;
+  --primary-accent: oklch(0.49 0.13 240);
+  --secondary: oklch(0.92 0.008 240);
   --secondary-foreground: var(--foreground);
   --secondary-accent: var(--foreground);
-  --muted: #f0f0f1;
-  --muted-foreground: #52525b;
-  --accent: hsl(var(--hue) 40% 94%);
-  --accent-foreground: hsl(var(--hue) 50% 30%);
+  --muted: oklch(0.955 0.005 240);
+  --muted-foreground: oklch(0.48 0.02 245);
+  --accent: oklch(0.94 0.02 240);
+  --accent-foreground: oklch(0.4 0.1 240);
   --info: #7dd3fc;
   --info-foreground: #082f49;
   --success: #86efac;
@@ -29,37 +30,37 @@
   --warning-foreground: #451a03;
   --error: #b91c1c;
   --error-foreground: #fafafa;
-  --border: #e4e4e7;
-  --input: #e4e4e7;
-  --outline: hsl(var(--hue) 40% 60%);
+  --border: oklch(0.9 0.008 240);
+  --input: oklch(0.9 0.008 240);
+  --outline: oklch(0.62 0.12 240);
 
-  --selection-bg: hsl(var(--hue) 70% 60% / 0.35);
+  --selection-bg: oklch(0.7 0.12 240 / 0.3);
   --selection-text: inherit;
 
-  --hero-bg: #0b0b0c;
-  --hero-text: #fafafa;
-  --hero-muted: #a1a1aa;
-  --hero-glow: hsl(var(--hue) 80% 60% / 0.14);
+  --hero-bg: oklch(0.17 0.025 250);
+  --hero-text: oklch(0.97 0.005 240);
+  --hero-muted: oklch(0.72 0.02 245);
+  --hero-glow: transparent;
   --steam: rgb(255 255 255 / 0.5);
 
-  --tile-sat: 48%;
-  --tile-light: 34%;
-  --tile-dark: 16%;
-  --tile-surface: hsl(var(--hue) 12% 8%);
-  --tile-border: hsl(var(--hue) 14% 18%);
-  --tile-log: hsl(var(--hue) 70% 84%);
-  --tile-code: hsl(var(--hue) 85% 88%);
-  --tile-comment: hsl(var(--hue) 8% 50%);
+  --tile-surface: oklch(0.21 0.025 250);
+  --tile-border: oklch(0.29 0.025 250);
+  --tile-feature-bg: oklch(0.25 0.03 250);
+  --tile-feature-border: oklch(0.33 0.03 250);
+  --tile-icon: oklch(0.75 0.12 235);
+  --tile-log: oklch(0.82 0.04 240);
+  --tile-code: oklch(0.88 0.03 240);
+  --tile-comment: oklch(0.55 0.02 245);
 
   --feature-mark-bg: var(--muted);
-  --feature-mark-fg: #3f3f46;
-  --feature-flow: #71717a;
-  --feature-arrow: #a1a1aa;
-  --feature-panel-bg: #f4f4f5;
-  --feature-panel-border: #e4e4e7;
-  --feature-panel-text: #3f3f46;
-  --feature-panel-dim: #a1a1aa;
-  --feature-panel-accent: hsl(var(--hue) 22% 40%);
+  --feature-mark-fg: oklch(0.36 0.02 245);
+  --feature-flow: oklch(0.55 0.02 245);
+  --feature-arrow: oklch(0.7 0.015 245);
+  --feature-panel-bg: oklch(0.96 0.005 240);
+  --feature-panel-border: var(--border);
+  --feature-panel-text: oklch(0.36 0.02 245);
+  --feature-panel-dim: oklch(0.7 0.015 245);
+  --feature-panel-accent: oklch(0.45 0.08 240);
   --feature-hover-ring: rgb(0 0 0 / 0.1);
   --feature-hover-shadow: rgb(0 0 0 / 0.14);
 
@@ -68,30 +69,30 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0b0b0c;
-    --foreground: #f4f4f5;
-    --card: #161618;
-    --popover: #161618;
-    --primary: hsl(var(--hue) 78% 68%);
-    --primary-foreground: #0b0b0c;
-    --primary-accent: hsl(var(--hue) 85% 76%);
-    --secondary: #27272a;
-    --muted: #1d1d20;
-    --muted-foreground: #a1a1aa;
-    --accent: hsl(var(--hue) 25% 18%);
-    --accent-foreground: hsl(var(--hue) 80% 88%);
+    --background: oklch(0.16 0.02 250);
+    --foreground: oklch(0.96 0.005 240);
+    --card: oklch(0.2 0.022 250);
+    --popover: oklch(0.2 0.022 250);
+    --primary: oklch(0.72 0.12 235);
+    --primary-foreground: oklch(0.16 0.02 250);
+    --primary-accent: oklch(0.78 0.11 235);
+    --secondary: oklch(0.26 0.02 250);
+    --muted: oklch(0.22 0.02 250);
+    --muted-foreground: oklch(0.7 0.015 245);
+    --accent: oklch(0.27 0.04 245);
+    --accent-foreground: oklch(0.88 0.05 240);
     --error: #991b1b;
-    --border: #27272a;
-    --input: #3f3f46;
-    --outline: hsl(var(--hue) 50% 65%);
-    --feature-mark-fg: #d4d4d8;
-    --feature-flow: #a1a1aa;
-    --feature-arrow: #71717a;
-    --feature-panel-bg: #1c1c1f;
-    --feature-panel-border: #2a2a2e;
-    --feature-panel-text: #d4d4d8;
-    --feature-panel-dim: #71717a;
-    --feature-panel-accent: hsl(var(--hue) 25% 76%);
+    --border: oklch(0.28 0.02 250);
+    --input: oklch(0.33 0.02 250);
+    --outline: oklch(0.68 0.11 235);
+    --feature-mark-fg: oklch(0.86 0.01 240);
+    --feature-flow: oklch(0.7 0.015 245);
+    --feature-arrow: oklch(0.5 0.02 250);
+    --feature-panel-bg: oklch(0.21 0.02 250);
+    --feature-panel-border: oklch(0.28 0.02 250);
+    --feature-panel-text: oklch(0.86 0.01 240);
+    --feature-panel-dim: oklch(0.5 0.02 250);
+    --feature-panel-accent: oklch(0.8 0.07 240);
     --feature-hover-ring: rgb(255 255 255 / 0.12);
     --feature-hover-shadow: rgb(0 0 0 / 0.45);
     color-scheme: dark;

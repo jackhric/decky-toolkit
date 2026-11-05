@@ -1,20 +1,43 @@
 @import '@fontsource-variable/plus-jakarta-sans';
 @import './theme.css';
 
-/* Starlight's own styles are layered, so these unlayered overrides must be scoped per theme or they leak into the other one. */
+/* Starlight's own styles are layered, so these unlayered overrides must be scoped per theme or they leak into the other one.
+   Starlight's scale runs from --sl-color-white (text) through gray-1..6 to --sl-color-black (page); light mode inverts it. */
 :root {
   --sl-font: 'Plus Jakarta Sans Variable', system-ui, -apple-system, 'Segoe UI', Roboto, Ubuntu, sans-serif;
 }
 
 :root[data-theme='dark'] {
-  --sl-color-accent-low: hsl(var(--hue) 40% 18%);
-  --sl-color-accent: hsl(var(--hue) 72% 64%);
-  --sl-color-accent-high: hsl(var(--hue) 85% 86%);
-  --sl-color-black: #0b0b0c;
+  --sl-color-accent-low: oklch(0.3 0.06 245);
+  --sl-color-accent: oklch(0.72 0.12 235);
+  --sl-color-accent-high: oklch(0.9 0.05 235);
+  --sl-color-white: oklch(0.97 0.005 240);
+  --sl-color-gray-1: oklch(0.92 0.01 245);
+  --sl-color-gray-2: oklch(0.82 0.015 245);
+  --sl-color-gray-3: oklch(0.68 0.02 245);
+  --sl-color-gray-4: oklch(0.48 0.025 250);
+  --sl-color-gray-5: oklch(0.33 0.025 250);
+  --sl-color-gray-6: oklch(0.22 0.025 250);
+  --sl-color-black: oklch(0.17 0.025 250);
 }
 
 :root[data-theme='light'] {
-  --sl-color-accent-low: hsl(var(--hue) 70% 92%);
-  --sl-color-accent: hsl(var(--hue) 62% 50%);
-  --sl-color-accent-high: hsl(var(--hue) 60% 26%);
+  --sl-color-accent-low: oklch(0.93 0.03 240);
+  --sl-color-accent: oklch(0.52 0.13 240);
+  --sl-color-accent-high: oklch(0.33 0.09 245);
+  --sl-color-white: oklch(0.2 0.02 245);
+  --sl-color-gray-1: oklch(0.26 0.02 245);
+  --sl-color-gray-2: oklch(0.35 0.02 245);
+  --sl-color-gray-3: oklch(0.5 0.02 245);
+  --sl-color-gray-4: oklch(0.66 0.015 245);
+  --sl-color-gray-5: oklch(0.82 0.01 240);
+  --sl-color-gray-6: oklch(0.93 0.006 240);
+  --sl-color-gray-7: oklch(0.965 0.004 240);
+  --sl-color-black: oklch(0.99 0.002 240);
+}
+
+/* Starlight cycles card icons through orange/purple/green; keep them on the single accent. */
+.card {
+  --sl-card-border: var(--sl-color-accent);
+  --sl-card-bg: var(--sl-color-accent-low);
 }

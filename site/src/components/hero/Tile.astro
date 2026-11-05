@@ -1,41 +1,46 @@
 ---
 import type { Tile } from './tiles';
 
-interface Props { tile: Tile; size?: 'sm' | 'md' | 'lg' }
-const { tile, size = 'md' } = Astro.props;
+interface Props { tile: Tile; size?: 'sm' | 'md' | 'lg'; cell?: string }
+const { tile, size = 'md', cell = '' } = Astro.props;
 
 const glyphs: Record<string, string> = {
   deploy: 'M12 3v12M7 8l5-5 5 5M4 15v4h16v-4',
+  reload: 'M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5',
   screen: 'M3 5h18v11H3zM8 20h8M12 16v4',
+  input: 'M3 6h18v12H3zM7 10h.01M11 10h.01M15 10h.01M7 14h10',
+  pad: 'M6 9h12a4 4 0 0 1 4 4v1a3 3 0 0 1-5 2l-2-2H9l-2 2a3 3 0 0 1-5-2v-1a4 4 0 0 1 4-4zM8 11v4M6 13h4M16 12h.01M18 14h.01',
+  navigate: 'M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18zM15.5 8.5l-2 5-5 2 2-5z',
+  panel: 'M14 3h6v18h-6zM3 7h8M3 12h8M3 17h5',
   logs: 'M4 6h16M4 10h12M4 14h16M4 18h9',
   console: 'M4 7l5 5-5 5M11 17h9',
-  pad: 'M6 9h12a4 4 0 0 1 4 4v1a3 3 0 0 1-5 2l-2-2H9l-2 2a3 3 0 0 1-5-2v-1a4 4 0 0 1 4-4zM8 11v4M6 13h4M16 12h.01M18 14h.01',
+  play: 'M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18zM10 8.5v7l6-3.5z',
+  folder: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
   api: 'M8 4C6 4 5 5 5 7v2l-2 3 2 3v2c0 2 1 3 3 3M16 4c2 0 3 1 3 3v2l2 3-2 3v2c0 2-1 3-3 3',
-  reload: 'M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5',
-  audio: 'M3 12h2M7 8v8M11 5v14M15 9v6M19 11v2',
-  panel: 'M14 3h6v18h-6zM3 7h8M3 12h8M3 17h5',
+  lock: 'M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3',
+  discover: 'M4.5 9.5a11 11 0 0 1 15 0M7.5 12.5a6.5 6.5 0 0 1 9 0M12 16.5h.01',
 };
 ---
 
 {tile.kind === 'feature' && (
-  <div class={`tile feature ${size}`} style={`--t:${tile.tone}`}>
+  <div class={`tile feature ready ${size}`} style={`--t:${tile.tone};${cell}`}>
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d={glyphs[tile.glyph]} /></svg>
     <strong>{tile.title}</strong>
     <span>{tile.sub}</span>
   </div>
 )}
 {tile.kind === 'log' && (
-  <div class={`tile log ${size}`} aria-hidden="true">
+  <div class={`tile log ready ${size}`} style={cell} aria-hidden="true">
     {tile.lines.map((l, i) => <code style={`opacity:${1 - i * 0.12}`}>{l}</code>)}
   </div>
 )}
 {tile.kind === 'code' && (
-  <div class={`tile code ${size}`} aria-hidden="true">
+  <div class={`tile code ready ${size}`} style={cell} aria-hidden="true">
     {tile.lines.map(l => <code>{l}</code>)}
   </div>
 )}
 {tile.kind === 'clip' && (
-  <div class={`tile screen ${size}`} aria-hidden="true">
+  <div class={`tile screen ${size}`} style={cell} aria-hidden="true">
     <video muted loop playsinline preload="none" poster={tile.poster} data-webm={tile.webm} data-mp4={tile.mp4}></video>
   </div>
 )}
@@ -43,17 +48,16 @@ const glyphs: Record<string, string> = {
 <style>
   .tile {
     flex: none; width: 240px; height: 136px; border-radius: 12px; overflow: hidden; position: relative;
-    box-shadow: 0 6px 20px rgb(0 0 0 / 0.28);
   }
   .tile.sm { width: 180px; height: 102px; }
   .tile.lg { width: 300px; height: 170px; }
   .feature {
     display: flex; flex-direction: column; justify-content: flex-end; gap: 2px; padding: 14px 16px; color: var(--hero-text);
-    background: linear-gradient(135deg, hsl(var(--hue) var(--tile-sat) calc(var(--tile-light) + var(--t) * 5%)), hsl(var(--hue) calc(var(--tile-sat) + 12%) calc(var(--tile-dark) + var(--t) * 3%)));
-    border: 1px solid rgb(255 255 255 / 0.08);
+    background: var(--tile-feature-bg);
+    border: 1px solid var(--tile-feature-border);
   }
   .feature svg {
-    position: absolute; top: 12px; left: 14px; width: 30px; height: 30px; fill: none; stroke: var(--hero-text);
+    position: absolute; top: 12px; left: 14px; width: 30px; height: 30px; fill: none; stroke: var(--tile-icon);
     stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; opacity: 0.95;
   }
   .feature strong { font-size: 1rem; line-height: 1.2; }

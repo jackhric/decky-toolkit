@@ -1,14 +1,6 @@
-import searchWebm from '../../assets/clips/search.webm?url';
-import searchMp4 from '../../assets/clips/search.mp4?url';
-import searchPoster from '../../assets/clips/search.webp?url';
-import installWebm from '../../assets/clips/install.webm?url';
-import installMp4 from '../../assets/clips/install.mp4?url';
-import installPoster from '../../assets/clips/install.webp?url';
-import devicesWebm from '../../assets/clips/devices.webm?url';
-import devicesMp4 from '../../assets/clips/devices.mp4?url';
-import devicesPoster from '../../assets/clips/devices.webp?url';
-
-export type Glyph = 'deploy' | 'screen' | 'logs' | 'console' | 'pad' | 'api' | 'reload' | 'audio' | 'panel';
+export type Glyph =
+  | 'deploy' | 'reload' | 'screen' | 'input' | 'pad' | 'navigate' | 'panel' | 'logs' | 'console' | 'play' | 'folder' | 'api'
+  | 'lock' | 'discover';
 
 export type Tile =
   | { kind: 'feature'; title: string; sub: string; glyph: Glyph; tone: number }
@@ -16,34 +8,57 @@ export type Tile =
   | { kind: 'code'; lines: string[] }
   | { kind: 'clip'; webm: string; mp4: string; poster: string };
 
+// Every clip in assets/clips joins the hero: <name>.webm + <name>.mp4 + <name>.webp (poster).
+const files = import.meta.glob<string>('../../assets/clips/*.{webm,mp4,webp}', { query: '?url', import: 'default', eager: true });
+const byName = new Map<string, Record<string, string>>();
+for (const [path, url] of Object.entries(files)) {
+  const m = /([^/]+)\.(webm|mp4|webp)$/.exec(path)!;
+  byName.set(m[1], { ...byName.get(m[1]), [m[2]]: url });
+}
+const named = [...byName].filter(([, f]) => f.webm && f.mp4 && f.webp).sort(([a], [b]) => a.localeCompare(b));
+// Full-workspace clips (ws-*) alternate with close-ups so neighbouring tiles differ.
+const wide = named.filter(([n]) => n.startsWith('ws-'));
+const close = named.filter(([n]) => !n.startsWith('ws-'));
+const order: typeof named = [];
+for (let i = 0; i < Math.max(wide.length, close.length * 0.5); i++) {
+  if (wide.length) order.push(wide[i % wide.length]);
+  if (close.length) order.push(close[(2 * i) % close.length], close[(2 * i + 1) % close.length]);
+}
+const clips: Tile[] = order.map(([, f]) => ({ kind: 'clip', webm: f.webm, mp4: f.mp4, poster: f.webp }));
+
+// One card per feature.
 const features: Tile[] = [
-  { kind: 'feature', title: 'Deploy on save', sub: 'or Ctrl+Alt+D', glyph: 'deploy', tone: 3 },
-  { kind: 'feature', title: 'Live screen', sub: '60 fps, with sound', glyph: 'screen', tone: 1 },
-  { kind: 'feature', title: 'Plugin logs', sub: 'Streamed to your editor', glyph: 'logs', tone: 2 },
-  { kind: 'feature', title: 'Steam console', sub: 'SharedJSContext', glyph: 'console', tone: 0 },
-  { kind: 'feature', title: 'Your gamepad', sub: 'Plus virtual pads', glyph: 'pad', tone: 3 },
-  { kind: 'feature', title: 'HTTP + MCP', sub: 'Script everything', glyph: 'api', tone: 1 },
-  { kind: 'feature', title: 'Hot reload', sub: 'No loader restart', glyph: 'reload', tone: 2 },
-  { kind: 'feature', title: 'Deck audio', sub: 'Streams with the screen', glyph: 'audio', tone: 0 },
-  { kind: 'feature', title: 'Quick Access', sub: 'Jump to your panel', glyph: 'panel', tone: 2 },
+  { kind: 'feature', title: 'One-click deploy', sub: 'Reloads just your plugin', glyph: 'deploy', tone: 3 },
+  { kind: 'feature', title: 'Hot reload', sub: 'Your device follows every save', glyph: 'reload', tone: 1 },
+  { kind: 'feature', title: 'Live screen', sub: '60 fps, inside your editor', glyph: 'screen', tone: 2 },
+  { kind: 'feature', title: 'Remote input', sub: 'Keyboard, mouse and gamepad', glyph: 'input', tone: 0 },
+  { kind: 'feature', title: 'Virtual controllers', sub: 'Managed through Steam Input', glyph: 'pad', tone: 3 },
+  { kind: 'feature', title: 'Jump anywhere', sub: 'Any Steam page in one step', glyph: 'navigate', tone: 1 },
+  { kind: 'feature', title: 'Quick Access', sub: "Open your plugin's panel", glyph: 'panel', tone: 2 },
+  { kind: 'feature', title: 'Live logs', sub: 'Loader and plugin, streamed', glyph: 'logs', tone: 0 },
+  { kind: 'feature', title: 'Steam console', sub: 'JS in SharedJSContext', glyph: 'console', tone: 3 },
+  { kind: 'feature', title: 'Games', sub: 'Launch and stop from VS Code', glyph: 'play', tone: 1 },
+  { kind: 'feature', title: 'Saves and prefixes', sub: 'Browse them over decky://', glyph: 'folder', tone: 2 },
+  { kind: 'feature', title: 'HTTP + MCP', sub: 'For your tools and agents', glyph: 'api', tone: 0 },
+  { kind: 'feature', title: 'Secure pairing', sub: 'Approved on the device', glyph: 'lock', tone: 3 },
+  { kind: 'feature', title: 'Device discovery', sub: 'Finds SteamOS devices on your network', glyph: 'discover', tone: 1 },
 ];
 
 const extras: Tile[] = [
   { kind: 'log', lines: ['[decky] loading plugin', '[decky] Decky Toolkit 0.2.1', '[toolkit] MCP on :8765', '[toolkit] paired 10.0.1.50'] },
-  { kind: 'code', lines: ['@callable', 'async def greet(self):', '    return "hi Deck"'] },
-  { kind: 'clip', webm: installWebm, mp4: installMp4, poster: installPoster },
+  { kind: 'code', lines: ['@callable', 'async def greet(self):', '    return "hi SteamOS"'] },
   { kind: 'log', lines: ['pnpm run build', 'deploy Example Plugin', 'reloaded Example Plugin', 'no loader restart'] },
-  { kind: 'clip', webm: searchWebm, mp4: searchMp4, poster: searchPoster },
-  { kind: 'code', lines: ["call('get_settings')", '  .then(setState)', '// live on the Deck'] },
-  { kind: 'clip', webm: devicesWebm, mp4: devicesMp4, poster: devicesPoster },
+  { kind: 'code', lines: ["call('get_settings')", '  .then(setState)', '// live on the device'] },
 ];
 
-export function tileSet(seed = 0): Tile[] {
+/** Two of every three tiles are clips; features cycle through the rest so every one shows, with a few log/code cards. */
+export function heroTiles(count: number, cols = 6): Tile[] {
   const out: Tile[] = [];
-  let f = seed % features.length;
-  let e = seed % extras.length;
-  for (let i = 0; i < 16; i++) {
-    if (i % 3 === 2) out.push(extras[e++ % extras.length]);
+  let c = 0, f = 0, e = 0, other = 0;
+  for (let i = 0; i < count; i++) {
+    // Shifting by row runs the non-clip cards diagonally instead of in fixed columns.
+    if ((i + Math.floor(i / cols)) % 3 !== 0 && clips.length) out.push(clips[c++ % clips.length]);
+    else if (other++ % 6 === 3) out.push(extras[e++ % extras.length]);
     else out.push(features[f++ % features.length]);
   }
   return out;
