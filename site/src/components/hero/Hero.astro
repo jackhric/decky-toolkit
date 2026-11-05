@@ -16,7 +16,7 @@ const navIcons = [
   { name: 'github', href: repo, label: 'GitHub' },
 ] as const;
 const iconButton = 'text-(--hero-text) rounded-lg hover:bg-(--hero-text)/8 hover:text-(--hero-text) select-none';
-const docsButton = 'docs text-(--hero-text) rounded-lg border border-(--hero-text)/20 hover:bg-(--hero-text)/8 hover:text-(--hero-text) select-none';
+const docsButton = `docs text-base ${iconButton}`;
 const tiles = heroTiles(72);
 const COLS = 6;
 // Deterministic per-cell noise, so server renders match and the scroll loop's two halves line up.
