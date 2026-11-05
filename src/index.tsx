@@ -19,7 +19,6 @@ type Status = {
   token: string;
   ip: string;
   url: string;
-  viewer_url: string;
   pair_requests: number;
   stream: { running: boolean; fps: number; subscribers: number; available: boolean; error: string | null } | null;
   input: InputSettings | null;
@@ -205,9 +204,9 @@ function Content() {
             </ButtonItem>
           </PanelSectionRow>
           <PanelSectionRow>
-            <Field label="Viewer URL and token" focusable onClick={() => setShowToken((s) => !s)}>
+            <Field label="Token" focusable onClick={() => setShowToken((s) => !s)}>
               <span style={{ fontFamily: "monospace", fontSize: "0.8em", wordBreak: "break-all" }}>
-                {showToken ? status.viewer_url : "•••••••• (click to reveal)"}
+                {showToken ? status.token : "•••••••• (click to reveal)"}
               </span>
             </Field>
           </PanelSectionRow>

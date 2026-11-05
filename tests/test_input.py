@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
 from aiohttp import ClientSession, ClientTimeout, WSMsgType, WSServerHandshakeError, web  # noqa: E402
 
-from decky_toolkit.auth import TOKEN_COOKIE, TokenAuth  # noqa: E402
+from decky_toolkit.auth import TokenAuth  # noqa: E402
 from decky_toolkit.http import Api  # noqa: E402
 from decky_toolkit.input import keymap, uinput  # noqa: E402
 from decky_toolkit.input.service import InputDisabled, InputService, InputUnavailable, pad_values  # noqa: E402
@@ -267,7 +267,7 @@ def test_gamepad_removed_after_idle(tmp_path):
 
 
 async def with_server(fn, svc):
-    api = Api(auth=TokenAuth(TOKEN), mcp=McpServer(ToolRegistry(), LOG), capturer=None, static_dir=None, logger=LOG,
+    api = Api(auth=TokenAuth(TOKEN), mcp=McpServer(ToolRegistry(), LOG), capturer=None, logger=LOG,
               input_service=svc)
     runner = web.AppRunner(api.build_app())
     await runner.setup()
@@ -280,7 +280,7 @@ async def with_server(fn, svc):
         await runner.cleanup()
 
 
-def test_input_settings_bearer_and_cookie(tmp_path):
+def test_input_settings_bearer_only(tmp_path):
     svc = make_service(tmp_path, enabled=False)
 
     async def run(s, base):
@@ -288,17 +288,19 @@ def test_input_settings_bearer_and_cookie(tmp_path):
             assert r.status == 401
         async with s.get(f"{base}/input/settings", headers=H) as r:
             assert await r.json() == {"enabled": False, "backend": "ei", "available": True, "reason": None}
-        async with s.put(f"{base}/input/settings", json={"enabled": True}, cookies={TOKEN_COOKIE: TOKEN}) as r:
+        async with s.put(f"{base}/input/settings", json={"enabled": True}, cookies={"decky_toolkit_token": TOKEN}) as r:
+            assert r.status == 401, "the old viewer cookie authorises nothing"
+        async with s.put(f"{base}/input/settings", json={"enabled": True}, headers=H) as r:
             assert r.status == 200 and (await r.json())["enabled"] is True
-        async with s.get(f"{base}/input/settings", cookies={TOKEN_COOKIE: TOKEN}) as r:
+        async with s.get(f"{base}/input/settings", headers=H) as r:
             assert (await r.json())["enabled"] is True
         async with s.put(f"{base}/input/settings", json={"enabled": False}, headers=H) as r:
             assert (await r.json())["enabled"] is False
         for bad in ({"enabled": "yes"}, {}, {"enabled": True, "x": 1}, [True]):
             async with s.put(f"{base}/input/settings", json=bad, headers=H) as r:
                 assert r.status == 400, bad
-        async with s.put(f"{base}/input/settings", json={"enabled": True}, cookies={TOKEN_COOKIE: TOKEN},
-                         headers={"Origin": "http://evil.example"}) as r:
+        async with s.put(f"{base}/input/settings", json={"enabled": True},
+                         headers={**H, "Origin": "http://evil.example"}) as r:
             assert r.status == 403
         assert svc.t.settings.input_enabled is False
     asyncio.run(with_server(run, svc))
@@ -328,7 +330,7 @@ def test_input_ws_state_events_and_release(tmp_path):
     svc = make_service(tmp_path)
 
     async def run(s, base):
-        async with s.ws_connect(f"{base}/input", headers={"Cookie": f"{TOKEN_COOKIE}={TOKEN}"}) as ws:
+        async with s.ws_connect(f"{base}/input", headers=H) as ws:
             assert await ws.receive_json() == {"type": "state", "enabled": True, "backend": "ei", "focus_size": [1280, 800]}
             await ws.send_json({"type": "key", "key": "ShiftLeft", "down": True})
             await ws.send_json({"type": "bogus"})

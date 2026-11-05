@@ -1,4 +1,4 @@
-"""The aiohttp application: REST/viewer routes plus the mounted MCP endpoint."""
+"""The aiohttp application: REST routes plus the mounted MCP endpoint."""
 import asyncio
 import json
 import logging
@@ -38,15 +38,13 @@ def _error(status: int, message: str) -> web.Response:
 
 
 class Api:
-    def __init__(self, *, auth: TokenAuth, mcp: McpServer, capturer: ScreenCapturer | None, static_dir: str | None,
-                 logger: logging.Logger, pairing: PairingRequests | None = None, base_url: BaseUrl | None = None, log_keepalive: float = LOG_KEEPALIVE_SECONDS,
+    def __init__(self, *, auth: TokenAuth, mcp: McpServer, capturer: ScreenCapturer | None, logger: logging.Logger, pairing: PairingRequests | None = None, base_url: BaseUrl | None = None, log_keepalive: float = LOG_KEEPALIVE_SECONDS,
                  input_service: InputService | None = None, audio: AudioCapturer | None = None,
                  controllers: ControllerService | None = None, ui: UiNavigator | None = None,
                  console: ConsoleCollector | None = None):
         self.auth = auth
         self.mcp = mcp
         self.capturer = capturer
-        self.static_dir = static_dir
         self.log = logger
         self.pairing = pairing or PairingRequests()
         self.base_url = base_url
@@ -67,7 +65,6 @@ class Api:
             web.get("/pair/request/{id}", self.handle_pair_poll),
             web.delete("/pair/request/{id}", self.handle_pair_cancel),
             web.get("/pair/requests", self.handle_pair_list),
-            web.get("/viewer", self.handle_viewer),
             web.get("/stream.mjpeg", self.handle_stream),
             web.get("/frame.jpg", self.handle_frame),
             web.get("/stream/stats", self.handle_stream_stats),
@@ -111,7 +108,7 @@ class Api:
     # ---- public ----
 
     async def handle_root(self, _request: web.Request) -> web.Response:
-        raise web.HTTPFound("/viewer")
+        return web.Response(text="Decky Toolkit is running. Connect with the Decky Toolkit extension for VS Code / VSCodium.\n")
 
     async def handle_health(self, _request: web.Request) -> web.Response:
         return web.json_response({"ok": True, **SERVER_INFO, "api_version": API_VERSION, "tools": len(self.mcp.tools)})
@@ -160,12 +157,6 @@ class Api:
         if req is None:
             return _error(404, "unknown or expired pairing request")
         no_store = {"Cache-Control": "no-store"}
-        if request.query.get("cookie") == "1" and req.status == "approved":
-            if not self.pairing.claim_cookie(req):
-                return _error(410, "this approval was already used to set a cookie")
-            res = web.HTTPFound("/viewer", headers=no_store)
-            self.auth.grant_cookie(res)
-            raise res
         if self.pairing.claim_token(req):
             self.log.info("pairing: delivered token to %s (%s)", req.remote, req.client_name)
             url = self.base_url() if self.base_url else f"{request.scheme}://{request.host}"
@@ -182,27 +173,6 @@ class Api:
 
     async def handle_pair_list(self, _request: web.Request) -> web.Response:
         return web.json_response(self.pairing.list())
-
-    # ---- viewer ----
-
-    async def handle_viewer(self, request: web.Request) -> web.StreamResponse:
-        presented = request.query.get("token")
-        if presented is not None:
-            if not self.auth.token_matches(presented):
-                return web.Response(status=401, text="Bad token")
-            # Move the token out of the address bar and into an HttpOnly cookie.
-            res = web.HTTPFound("/viewer")
-            self.auth.grant_cookie(res)
-            raise res
-        if self.auth.check(request):
-            # Same URL either way, so a bookmark keeps working once this browser has been approved.
-            if self.static_dir:
-                return web.FileResponse(os.path.join(self.static_dir, "pair.html"), status=401,
-                                        headers={"Cache-Control": "no-store"})
-            return web.Response(status=401, text="Unauthorized: open /viewer?token=<token> or request access")
-        if not self.static_dir:
-            return web.Response(status=404, text="viewer not bundled")
-        return web.FileResponse(os.path.join(self.static_dir, "viewer.html"))
 
     async def handle_stream(self, request: web.Request) -> web.StreamResponse:
         if self.capturer is None:
@@ -241,7 +211,6 @@ class Api:
             return web.json_response({"available": False, "error": "capture not available"})
         return web.json_response(self.capturer.stats())
 
-    # Cookie auth is enough here (the viewer changes these), and the setting is non-destructive.
     async def handle_stream_settings_get(self, _request: web.Request) -> web.Response:
         if self.capturer is None:
             return _error(404, "capture not available")
@@ -311,7 +280,6 @@ class Api:
 
     # ---- input ----
 
-    # Cookie auth is accepted on purpose: toggling input from the viewer should be one click.
     async def handle_input_settings_get(self, _request: web.Request) -> web.Response:
         if self.input is None:
             return _error(404, "input not available")
@@ -393,7 +361,6 @@ class Api:
 
     # ---- controllers ----
 
-    # Cookie auth is accepted on purpose (the viewer manages pads); a virtual pad sends nothing by itself.
     async def handle_controllers(self, _request: web.Request) -> web.Response:
         if self.controllers is None:
             return _error(404, "controllers not available")
@@ -474,18 +441,10 @@ class Api:
 
     # ---- plugins ----
 
-    def _require_bearer(self, request: web.Request) -> web.Response | None:
-        # State-changing routes refuse the viewer cookie so a browser can never be steered into them.
-        if self.auth.has_bearer(request):
-            return None
-        return web.Response(status=401, text="Bearer token required", headers={"WWW-Authenticate": 'Bearer realm="decky-toolkit"'})
-
     async def handle_plugins(self, _request: web.Request) -> web.Response:
         return web.json_response(await list_plugins())
 
     async def handle_plugin_install(self, request: web.Request) -> web.Response:
-        if denied := self._require_bearer(request):
-            return denied
         restart = request.query.get("restart", "loader")
         if restart not in plugins.RESTART_MODES:
             return _error(400, f"restart must be one of {', '.join(plugins.RESTART_MODES)}")
@@ -513,8 +472,6 @@ class Api:
         return web.json_response(result)
 
     async def handle_plugin_reload(self, request: web.Request) -> web.Response:
-        if denied := self._require_bearer(request):
-            return denied
         try:
             return web.json_response(await plugins.reload_plugin(request.match_info["dir"]))
         except ValueError as e:
@@ -525,8 +482,6 @@ class Api:
             return _error(502, str(e))
 
     async def handle_loader_restart(self, request: web.Request) -> web.Response:
-        if denied := self._require_bearer(request):
-            return denied
         await schedule_loader_restart()
         return web.json_response({"restarting": True, "delay_s": 1})
 
@@ -699,7 +654,6 @@ class Api:
             return await asyncio.to_thread(games.fs_list, path, depth, request.query.get("glob") or None)
         return await self._library_call(listing)
 
-    # Bearer-only: these read raw bytes or change files, so the viewer cookie never reaches them.
     @staticmethod
     def _fs_roots() -> tuple[list[tuple[str, int]], list[tuple[str, int]], list[str]]:
         root = games.steam_root()
@@ -708,8 +662,6 @@ class Api:
         return games.write_roots(root, libs, runtime), games.delete_roots(root, libs, runtime), games.installed_name_keys(libs)
 
     async def _fs_call(self, request: web.Request, fn) -> web.Response:
-        if denied := self._require_bearer(request):
-            return denied
         try:
             result = await asyncio.to_thread(fn)
         except (games.SensitivePath, PermissionError) as e:
@@ -738,16 +690,12 @@ class Api:
         return default if raw is None else raw not in ("0", "false", "")
 
     async def handle_fs_read(self, request: web.Request) -> web.Response:
-        if denied := self._require_bearer(request):
-            return denied
         path = request.query.get("path")
         if not path:
             return _error(400, "path is required")
         return await self._fs_call(request, lambda: games.fs_read(path))
 
     async def handle_fs_write(self, request: web.Request) -> web.Response:
-        if denied := self._require_bearer(request):
-            return denied
         path = request.query.get("path")
         if not path:
             return _error(400, "path is required")
@@ -771,8 +719,6 @@ class Api:
         return body
 
     async def handle_fs_mkdir(self, request: web.Request) -> web.Response:
-        if denied := self._require_bearer(request):
-            return denied
         try:
             body = await self._fs_body(request)
         except ValueError as e:
@@ -788,8 +734,6 @@ class Api:
         return await self._fs_call(request, mkdir)
 
     async def handle_fs_rename(self, request: web.Request) -> web.Response:
-        if denied := self._require_bearer(request):
-            return denied
         try:
             body = await self._fs_body(request)
         except ValueError as e:
@@ -805,8 +749,6 @@ class Api:
         return await self._fs_call(request, rename)
 
     async def handle_fs_delete(self, request: web.Request) -> web.Response:
-        if denied := self._require_bearer(request):
-            return denied
         path = request.query.get("path")
         if not path:
             return _error(400, "path is required")

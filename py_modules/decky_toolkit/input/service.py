@@ -574,8 +574,8 @@ class InputService:
         if not self.enabled:
             if releasing:
                 return
-            raise InputDisabled("remote input is disabled; enable it in the Decky Toolkit panel, the viewer, "
-                                "PUT /input/settings or the set_input_enabled tool")
+            raise InputDisabled("remote input is disabled; enable it in the Decky Toolkit panel, the VS Code "
+                                "screen panel, PUT /input/settings or the set_input_enabled tool")
         if not releasing:
             now = time.monotonic()
             self._tokens = min(float(self.rate), self._tokens + (now - self._tokens_at) * self.rate)

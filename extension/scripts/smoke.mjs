@@ -597,7 +597,7 @@ const dupes = list => list.filter((x, i) => list.indexOf(x) !== i);
 
 const EXPECTED_ACTIONS = {
   Screen: ['device-desktop', 2, [
-    ['Open screen panel', 'decky-toolkit.openScreen'], ['Open viewer in browser', 'decky-toolkit.openViewer'], ['Snapshot to file', 'decky-toolkit.snapshot']]],
+    ['Open screen panel', 'decky-toolkit.openScreen'], ['Snapshot to file', 'decky-toolkit.snapshot']]],
   Plugin: ['package', 2, [
     ['Deploy', 'decky-toolkit.deploy'], ['Deploy (full restart)', 'decky-toolkit.deployFull'], ['Reload backend', 'decky-toolkit.reloadPlugin'],
     ['Show plugin logs', 'decky-toolkit.pluginLogs'], ['Auto-deploy on change: Off', 'decky-toolkit.toggleAutoDeploy']]],
@@ -676,7 +676,8 @@ await check('package.json: container, activation, commands, menus, version', asy
   for (const m of menus) assert.ok(declared.has(m.command), `menu refers to unknown command ${m.command}`);
   for (const m of menus) evalWhen(m.when, new Map());
   const whens = [...menus.map(m => m.when), ...pkg.contributes.views['decky-toolkit'].map(v => v.when), ...pkg.contributes.viewsWelcome.map(w => w.when)];
-  const allowedKeys = new Set(['view', 'viewItem', 'decky-toolkit.connected', 'false']);
+  const allowedKeys = new Set(['view', 'viewItem', 'decky-toolkit.connected', 'false', 'activeWebviewPanelId',
+    'decky-toolkit.screen.input', 'decky-toolkit.screen.audio', 'decky-toolkit.screen.muted', 'decky-toolkit.screen.paused']);
   for (const w of whens.filter(Boolean)) {
     for (const [, key] of w.replace(/\/(?:\\.|[^/])+\//g, '/re/').matchAll(/(?:^|&&|\|\||\(|!)\s*([A-Za-z][\w.-]*)/g)) assert.ok(allowedKeys.has(key), `context key ${key} in ${w}`);
   }
@@ -827,9 +828,7 @@ await check('connected, no plugin.json: Actions roots Screen / Plugin / Loader /
   const { roots, kids } = await actionsTree();
   const [screen, plugin] = roots;
   assert.equal(screen.description, '30 fps · 19.5 Mbps', 'stats polled because the Actions view is visible');
-  assert.match(kids.Screen[1].tooltip, /http:\/\/10\.1\.2\.3:8765\/viewer/);
-  assert.match(kids.Screen[1].tooltip, /asks for access/);
-  assert.match(kids.Screen[1].tooltip, /cookie/);
+  assert.match(kids.Screen[1].tooltip, /frame\.jpg/);
   assert.equal(plugin.description, 'no plugin.json in workspace');
   for (const c of kids.Plugin) {
     assert.equal(c.description, 'needs a plugin folder');
@@ -1067,9 +1066,7 @@ await check('decky-toolkit.pluginDirName overrides the deploy dir', async () => 
   return 'tooltip names other-dir; closing the folder hides the button';
 });
 
-await check('Screen and MCP leaves: viewer, snapshot, MCP URL, token', async () => {
-  await run('decky-toolkit.openViewer');
-  assert.equal(calls.opened.at(-1), 'http://10.1.2.3:8765/viewer');
+await check('Screen and MCP leaves: snapshot, MCP URL, token', async () => {
   ui.saveDialog = opts => opts.defaultUri;
   await run('decky-toolkit.snapshot');
   const dlg = calls.saveDialogs.at(-1);
@@ -1083,31 +1080,77 @@ await check('Screen and MCP leaves: viewer, snapshot, MCP URL, token', async () 
   await run('decky-toolkit.copyToken');
   assert.equal(calls.clipboard.at(-1), 'fake-token');
   assert.match(lastMessage('warning').m, /secret/);
-  return `opened ${calls.opened.at(-1)}; snapshot → ${dlg.defaultUri.path.split('/').pop()} (${w.data.length} B); token warning "${lastMessage('warning').m}"`;
+  return `snapshot → ${dlg.defaultUri.path.split('/').pop()} (${w.data.length} B); token warning "${lastMessage('warning').m}"`;
 });
 
-await check('remote input: screen panel toggle, toggle command, status bar, unavailable / unsupported', async () => {
+// The real media/screen.js in a minimal DOM: what the webview does with the extension's messages.
+function loadScreenJs() {
+  const src = readFileSync(path.join(root, 'media', 'screen.js'), 'utf8');
+  const els = new Map();
+  const el = id => {
+    if (!els.has(id)) {
+      const classes = new Set();
+      els.set(id, {
+        id, textContent: '', hidden: id === 'hint', addEventListener() {}, focus() {}, getBoundingClientRect: () => ({ left: 0, top: 0, width: 1920, height: 1080 }),
+        classList: { add: c => classes.add(c), remove: c => classes.delete(c), contains: c => classes.has(c), toggle: (c, on) => ((on ?? !classes.has(c)) ? classes.add(c) : classes.delete(c), classes.has(c)) },
+      });
+    }
+    return els.get(id);
+  };
+  const listeners = {}, posted = [], sent = [], sockets = [];
+  const fakeVscode = { postMessage: m => posted.push(m) };
+  const document = { getElementById: el, body: { dataset: { base: 'http://127.0.0.1:1/x' } }, addEventListener() {}, hasFocus: () => true };
+  const window = { addEventListener: (t, fn) => { (listeners[t] ??= []).push(fn); } };
+  class FakeWs { constructor(url) { this.url = url; this.readyState = 1; sockets.push(this); } send(d) { sent.push(JSON.parse(d)); } close() {} }
+  FakeWs.OPEN = 1;
+  const pads = { list: [] };
+  const navigator = { getGamepads: () => pads.list };
+  new Function('acquireVsCodeApi', 'document', 'window', 'fetch', 'WebSocket', 'requestAnimationFrame', 'navigator', src)(
+    () => fakeVscode, document, window, () => new Promise(() => {}), FakeWs, () => 0, navigator);
+  const post = data => listeners.message.forEach(fn => fn({ data }));
+  const fire = t => (listeners[t] ?? []).forEach(fn => fn({}));
+  return { el, post, fire, posted, sent, sockets, pads };
+}
+const titleActions = (panelId = 'decky-toolkit.screen') => pkg.contributes.menus['editor/title']
+  .filter(m => evalWhen(m.when, new Map([...calls.context, ['activeWebviewPanelId', panelId]]))).map(m => m.command);
+const icon = id => pkg.contributes.commands.find(c => c.command === id).icon;
+// Answers QuickPicks in order by label (prefix match); records what was offered.
+function answerPicks(...labels) {
+  const offered = [];
+  ui.quickPick = (items, opts) => {
+    offered.push({ labels: items.map(i => i.label), descriptions: items.map(i => i.description), opts });
+    const want = labels.shift();
+    return want === undefined ? undefined : items.find(i => i.label === want || i.label.endsWith(' ' + want));
+  };
+  return offered;
+}
+
+await check('remote input: title action, toggle command, status bar, unavailable / unsupported', async () => {
   const panel = calls.panels[0];
   const lastState = () => panel._posted.filter(m => m.type === 'input').at(-1)?.state;
   assert.match(panel.webview.html, /connect-src http:\/\/127\.0\.0\.1:(\d+) ws:\/\/127\.0\.0\.1:\1;/);
-  assert.match(panel.webview.html, /<button id="inp"[^>]*>Input<\/button>/);
-  assert.doesNotMatch(panel.webview.html, /id="mode|>Game<|ointer lock/i, 'no UI/Game switch, no pointer lock');
+  assert.doesNotMatch(panel.webview.html, /<header|<button|<select|<input/, 'no controls inside the page');
   assert.equal(pkg.contributes.commands.find(c => c.command === 'decky-toolkit.toggleInput').title, 'Toggle remote input');
   assert.ok(!(await actionsTree()).kids.Screen.some(c => /input/i.test(c.label)), 'no input leaf in the Actions view');
 
   panel._posted.length = 0;
   panel._received.fire({ type: 'ready' });
   await settle();
-  assert.deepEqual(lastState(), { supported: true, enabled: false, available: true, backend: 'libei', reason: null });
+  assert.deepEqual(lastState(), { enabled: false });
+  assert.equal(calls.context.get('decky-toolkit.screen.input'), 'off');
+  assert.ok(titleActions().includes('decky-toolkit.screen.inputOn'));
+  assert.equal(icon('decky-toolkit.screen.inputOn'), '$(keyboard)');
   assert.equal(status(), '$(vm-connect) 10.1.2.3');
 
-  // The panel's Input button goes through the extension, which answers with the new state.
   fetched.length = 0;
-  panel._received.fire({ type: 'setInput', enabled: true });
+  await run('decky-toolkit.screen.inputOn');
   await settle();
   assert.deepEqual(fetched.filter(f => f === '/input/settings').length, 2, 'GET then PUT');
   assert.equal(device.input.enabled, true);
-  assert.equal(lastState().enabled, true);
+  assert.deepEqual(lastState(), { enabled: true });
+  assert.equal(calls.context.get('decky-toolkit.screen.input'), 'on');
+  assert.ok(titleActions().includes('decky-toolkit.screen.inputOff') && !titleActions().includes('decky-toolkit.screen.inputOn'));
+  assert.equal(icon('decky-toolkit.screen.inputOff'), '$(record-keys)');
   assert.equal(status(), '$(vm-connect) 10.1.2.3 $(keyboard)');
   assert.match(calls.statusItems[0].tooltip, /remote input on/);
   assert.match(calls.statusMessages.at(-1), /remote input on \(libei\)/);
@@ -1115,130 +1158,115 @@ await check('remote input: screen panel toggle, toggle command, status bar, unav
   await run('decky-toolkit.toggleInput');
   await settle();
   assert.equal(device.input.enabled, false);
-  assert.equal(lastState().enabled, false, 'the panel follows a toggle from the palette');
-  assert.equal(status(), '$(vm-connect) 10.1.2.3');
+  assert.deepEqual(lastState(), { enabled: false }, 'the panel follows a toggle from the palette');
+  assert.equal(calls.context.get('decky-toolkit.screen.input'), 'off');
 
   device.input = { enabled: false, backend: null, available: false, reason: 'no libei socket and /dev/uinput is not writable' };
-  panel._received.fire({ type: 'setInput', enabled: true });
+  await run('decky-toolkit.screen.inputOn');
   await settle();
   assert.match(lastMessage('warning').m, /remote input is unavailable on 10\.1\.2\.3: no libei socket/);
   assert.equal(device.input.enabled, false, 'nothing PUT while unavailable');
-  assert.deepEqual(lastState(), { supported: true, enabled: false, available: false, backend: '', reason: device.input.reason });
 
   device.inputSupported = false;
   await run('decky-toolkit.toggleInput');
   assert.match(lastMessage('warning').m, /not supported by this device version/);
   await settle();
-  assert.deepEqual(lastState(), { supported: false, enabled: false, available: false, backend: null, reason: 'not supported by this device version' });
+  assert.equal(lastState(), null);
 
   device.inputSupported = true;
   device.input = { enabled: false, backend: 'ei', available: true, reason: null };
   await run('decky-toolkit.refresh');
   await settle(100);
-  assert.equal(lastState().available, true);
-  return 'panel Input on → $(keyboard) in status bar → palette toggle off → unavailable warning → 404 → "not supported by this device version"';
+  assert.deepEqual(lastState(), { enabled: false });
+  assert.deepEqual(titleActions('markdown.preview'), [], 'actions only on the screen panel');
+
+  // screen.js opens /input only while input is on; a 4003 close asks the extension for the state again.
+  const w = loadScreenJs();
+  w.post({ type: 'input', state: { enabled: true } });
+  const sock = w.sockets.find(s => s.url.endsWith('/input'));
+  assert.ok(sock, '/input socket opened');
+  sock.onclose({ code: 4003, reason: 'remote input is disabled' });
+  assert.deepEqual(w.posted.at(-1), { type: 'refreshInput' });
+  assert.equal(w.el('hint').textContent, 'remote input is disabled');
+  return 'title keyboard → record-keys while on, $(keyboard) in status bar, palette toggle off, unavailable warning, 404 → no state';
 });
 
-await check('screen panel: stream settings popover, audio controls, mute/volume in screen.js', async () => {
+await check('screen panel: title actions and icons, stream settings QuickPick, mute / volume / pause', async () => {
   const panel = calls.panels[0];
-  const html = panel.webview.html;
-  for (const id of ['gear', 's-fps', 's-quality', 's-width', 's-audio', 'mute', 'vol', 'a-hint', 'akbps', 'full']) assert.match(html, new RegExp(`id="${id}"`), id);
-  assert.match(html, /<option value="24">24 fps<\/option>/);
-  assert.match(html, /<option value="640">640 px<\/option>/);
-  assert.match(html, /script-src 'nonce-[^']+' blob:; worker-src blob:/);
-  const streamMsgs = () => panel._posted.filter(m => m.type === 'stream');
-
-  // ready → GET /stream/settings → settings posted (with audio).
+  const audioMsgs = () => panel._posted.filter(m => m.type === 'audio');
   panel._posted.length = 0; fetched.length = 0;
   panel._received.fire({ type: 'ready' });
   await settle();
   assert.ok(fetched.includes('/stream/settings'));
-  assert.deepEqual(streamMsgs().at(-1).settings, { fps: 30, quality: 70, width: 0, audio: true, limits: streamLimits });
+  assert.deepEqual(audioMsgs().at(-1), { type: 'audio', on: true, muted: false, volume: 0.8 });
+  assert.deepEqual(titleActions(), ['decky-toolkit.screen.inputOn', 'decky-toolkit.screen.mute', 'decky-toolkit.screen.settings', 'decky-toolkit.screen.pause', 'decky-toolkit.snapshot']);
+  assert.deepEqual(titleActions().map(icon), ['$(keyboard)', '$(unmute)', '$(settings-gear)', '$(debug-pause)', '$(device-camera)']);
+  assert.ok(pkg.contributes.menus['editor/title'].every(m => m.group.startsWith('navigation@')), 'all inline in the tab bar');
 
-  // setStream goes through the extension (PUT); unknown or ill-typed fields are dropped.
-  panel._posted.length = 0;
-  panel._received.fire({ type: 'setStream', patch: { fps: 60, audio: false, bitrate: 9, quality: '80' } });
+  await run('decky-toolkit.screen.mute');
+  assert.deepEqual(audioMsgs().at(-1), { type: 'audio', on: true, muted: true, volume: 0.8 });
+  assert.equal(globalState.get('decky-toolkit.screen.muted'), true, 'mute is remembered');
+  await run('decky-toolkit.screen.pause');
+  assert.deepEqual(panel._posted.filter(m => m.type === 'paused').at(-1), { type: 'paused', paused: true });
+  assert.deepEqual(titleActions().map(icon), ['$(keyboard)', '$(mute)', '$(settings-gear)', '$(play)', '$(device-camera)']);
+  await run('decky-toolkit.screen.resume');
+
+  let offered = answerPicks('Frame rate', '60 fps');
+  await run('decky-toolkit.screen.settings');
   await settle();
-  assert.deepEqual(device.streamPuts.at(-1), { fps: 60, audio: false });
-  const reply = streamMsgs().at(-1);
-  assert.deepEqual(reply.applied, ['fps', 'audio']);
-  assert.equal(reply.settings.fps, 60);
-  assert.equal(reply.settings.audio, false);
+  assert.deepEqual(offered[0].labels.map(l => l.replace(/^\$\([^)]+\) /, '')),
+    ['Stream · every client', 'Frame rate', 'JPEG quality', 'Size', 'Audio', 'This computer', 'Volume', 'Gamepad goes to']);
+  assert.deepEqual(offered[0].descriptions.filter(Boolean), ['30 fps', '70', 'Native', 'On', '80% (muted)', 'Auto']);
+  assert.equal(offered[1].descriptions[offered[1].labels.indexOf('30 fps')], 'current');
+  assert.deepEqual(device.streamPuts.at(-1), { fps: 60 });
+  assert.equal(panel._posted.at(-1).type, 'applying', 'the webview shows "Applying" until the new pipeline sends a frame');
+
+  answerPicks('Volume', '40%');
+  await run('decky-toolkit.screen.settings');
+  await settle();
+  assert.deepEqual(audioMsgs().at(-1), { type: 'audio', on: true, muted: false, volume: 0.4 }, 'a volume pick unmutes');
+  assert.equal(globalState.get('decky-toolkit.screen.volume'), 0.4);
+
+  answerPicks('Audio');
+  await run('decky-toolkit.screen.settings');
+  await settle();
+  assert.deepEqual(device.streamPuts.at(-1), { audio: false });
+  assert.equal(audioMsgs().at(-1).on, false);
+  assert.ok(!titleActions().includes('decky-toolkit.screen.mute'), 'no mute action while the device sends no audio');
+  offered = answerPicks();
+  await run('decky-toolkit.screen.settings');
+  assert.ok(!offered[0].labels.some(l => /Volume/.test(l)));
 
   // A change made elsewhere arrives with the stats tick.
   stats.settings = { ...stats.settings, audio: true };
-  panel._posted.length = 0;
   await run('decky-toolkit.refresh');
   await settle(100);
-  assert.ok(streamMsgs().some(m => m.settings?.audio === true && !m.applied), 'tick posted the new audio flag');
+  assert.equal(audioMsgs().at(-1).on, true);
+  assert.equal(calls.context.get('decky-toolkit.screen.audio'), true);
 
-  // 404 hides the popover.
+  // A device without stream settings: only this computer's choices.
   device.streamSettingsMissing = true;
-  panel._posted.length = 0;
   panel._received.fire({ type: 'ready' });
   await settle();
-  assert.equal(streamMsgs().at(-1).settings, null);
+  offered = answerPicks();
+  await run('decky-toolkit.screen.settings');
+  assert.deepEqual(offered[0].labels.map(l => l.replace(/^\$\([^)]+\) /, '')), ['This computer', 'Gamepad goes to']);
   device.streamSettingsMissing = false;
   stats.settings = { fps: 30, quality: 70, width: 0, audio: true };
+  panel._received.fire({ type: 'ready' });
+  await settle();
 
-  // The real media/screen.js in a minimal DOM: mute and volume are local, settings go out as setStream.
-  const src = readFileSync(path.join(root, 'media', 'screen.js'), 'utf8');
-  const els = new Map();
-  const el = id => {
-    if (!els.has(id)) {
-      const classes = new Set();
-      els.set(id, {
-        id, textContent: '', hidden: false, value: '', checked: false, disabled: false, title: '',
-        addEventListener() {}, setAttribute() {}, focus() {},
-        classList: { add: c => classes.add(c), remove: c => classes.delete(c), contains: c => classes.has(c), toggle: (c, on) => ((on ?? !classes.has(c)) ? classes.add(c) : classes.delete(c), classes.has(c)) },
-      });
-    }
-    return els.get(id);
-  };
-  const listeners = [], posted = [];
-  let state;
-  const fakeVscode = { postMessage: m => posted.push(m), getState: () => state, setState: s => { state = s; } };
-  const document = { getElementById: el, body: { dataset: { base: 'http://127.0.0.1:1/x' } }, addEventListener() {} };
-  const window = { addEventListener: (t, fn) => { if (t === 'message') listeners.push(fn); } };
-  const fakeFetch = () => new Promise(() => {});
-  class FakeWs { constructor(url) { this.url = url; FakeWs.opened.push(url); } close() {} }
-  FakeWs.opened = [];
-  new Function('acquireVsCodeApi', 'document', 'window', 'fetch', 'WebSocket', 'requestAnimationFrame', src)(
-    () => fakeVscode, document, window, fakeFetch, FakeWs, () => 0);
-  const post = data => listeners.forEach(fn => fn({ data }));
-  assert.deepEqual(posted.at(-1), { type: 'ready' });
-  assert.equal(el('audio-ctl').hidden, true, 'audio controls hidden until the device says audio is on');
-  post({ type: 'stream', settings: { fps: 30, quality: 70, width: 0, audio: true } });
-  assert.equal(el('settings').hidden, false);
-  assert.equal(el('s-fps').value, '30');
-  assert.equal(el('s-audio').checked, true);
-  assert.equal(el('audio-ctl').hidden, false);
-  assert.equal(el('a-hint').hidden, false, 'no running AudioContext yet → "click to enable audio"');
-  assert.ok(FakeWs.opened.some(u => u.endsWith('/audio')), 'audio socket opened');
-  assert.equal(el('mute').textContent, '🔊', 'unmuted by default');
-  el('mute').onclick();
-  assert.equal(el('mute').textContent, '🔇');
-  assert.equal(state.muted, true);
-  el('vol').value = 35; el('vol').oninput();
-  assert.equal(el('mute').textContent, '🔊', 'moving the volume unmutes');
-  assert.deepEqual({ muted: state.muted, volume: state.volume }, { muted: false, volume: 0.35 });
-  el('s-width').value = '960'; el('s-width').onchange();
-  assert.deepEqual(posted.at(-1), { type: 'setStream', patch: { width: 960 } });
-  assert.equal(el('s-fps').disabled, true);
-  assert.equal(el('s-note').textContent, 'Applying…');
-  post({ type: 'stream', settings: { fps: 30, quality: 70, width: 0, audio: true } });
-  assert.equal(el('s-width').value, '960', 'stale tick ignored while applying');
-  post({ type: 'stream', settings: { fps: 30, quality: 70, width: 960, audio: true }, applied: ['width'] });
-  el('s-audio').checked = false; el('s-audio').onchange();
-  assert.deepEqual(posted.at(-1), { type: 'setStream', patch: { audio: false } });
-  post({ type: 'stream', settings: { fps: 30, quality: 70, width: 960, audio: false }, applied: ['audio'] });
-  assert.equal(el('audio-ctl').hidden, true, 'device-wide off hides the local controls');
-  assert.equal(el('s-fps').disabled, false);
-  post({ type: 'stream', error: 'boom' });
-  assert.equal(el('s-note').textContent, 'Failed: boom');
-  post({ type: 'stream', settings: null });
-  assert.equal(el('settings').hidden, true, '404 hides the Stream button');
-  return 'ready → GET, setStream → PUT {fps, audio} only, tick mirrors, 404 → hidden; screen.js: mute 🔇/🔊, volume 0.35 saved, Applying… → done, audio off hides controls';
+  const w = loadScreenJs();
+  assert.deepEqual(w.posted.at(-1), { type: 'ready' });
+  w.post({ type: 'audio', on: true, muted: true, volume: 0.5 });
+  assert.ok(w.sockets.some(s => s.url.endsWith('/audio')), 'audio socket opened');
+  assert.equal(w.el('hint').hidden, false);
+  assert.equal(w.el('hint').textContent, 'Click the picture to enable audio', 'no running AudioContext yet');
+  w.post({ type: 'audio', on: false, muted: true, volume: 0.5 });
+  assert.equal(w.el('hint').hidden, true, 'device audio off: no hint');
+  w.post({ type: 'paused', paused: true });
+  w.post({ type: 'applying' });
+  return 'title: keyboard, unmute, settings-gear, debug-pause, device-camera; mute → $(mute), pause → $(play); fps 60 PUT; volume 40% unmutes; audio off hides mute';
 });
 
 await check('Controllers view with fake clients: empty, physical + virtual, 404, error', async () => {
@@ -1365,94 +1393,55 @@ await check('Controllers view live: SSE through the proxy, add / remove, 409 and
   return `SSE update, add "Virtual pad 1" (slot 3), remove inline + palette, refusal and 409 as-is, poll fallback, 404 → "${rows[0].description}"`;
 });
 
-await check('screen panel: "Forward to" select (pads message, addPad, pad field on gamepad messages)', async () => {
+await check('screen panel: "Gamepad goes to" QuickPick, new pad, removed pad → Auto, pad field on gamepad messages', async () => {
   const panel = calls.panels[0];
-  assert.match(panel.webview.html, /<select id="pad-target"[^>]*><option value="">Auto<\/option><\/select>/);
-  const padMsgs = () => panel._posted.filter(m => m.type === 'pads');
+  const targets = () => panel._posted.filter(m => m.type === 'padTarget').map(m => m.id);
   panel._posted.length = 0;
   panel._received.fire({ type: 'ready' });
   await settle();
-  assert.deepEqual(padMsgs().at(-1), { type: 'pads', pads: [] }, 'the auto pad is "Auto", not a choice');
+  assert.deepEqual(targets(), ['']);
   ui.inputBox = () => 'Couch';
-  panel._received.fire({ type: 'addPad' });
+  answerPicks('Gamepad goes to', 'New virtual pad…');
+  await run('decky-toolkit.screen.settings');
   await settle(100);
   const id = ctl.virtual.find(v => v.name === 'Couch').id;
-  assert.deepEqual(padMsgs().at(-1), { type: 'pads', pads: [{ id, name: 'Couch' }], select: id }, 'the new pad is selected');
+  assert.equal(targets().at(-1), id, 'the new pad becomes the target');
+  const offered = answerPicks('Gamepad goes to');
+  await run('decky-toolkit.screen.settings');
+  assert.equal(offered[0].descriptions.at(-1), 'Couch');
+  assert.deepEqual(offered[1].labels, ['Auto', 'Couch', '$(add) New virtual pad…'], 'the auto pad is "Auto", not a choice');
+  assert.equal(offered[1].descriptions[1], 'current');
+  await run('decky-toolkit.removeVirtualController', id);
+  await run('decky-toolkit.refreshControllers');
+  await settle(100);
+  assert.equal(targets().at(-1), '', 'a removed target falls back to Auto');
   ctl.missing = true;
   await run('decky-toolkit.refreshControllers');
   await settle();
-  assert.deepEqual(padMsgs().at(-1), { type: 'pads', pads: null }, '404 hides the select');
+  const older = answerPicks();
+  await run('decky-toolkit.screen.settings');
+  assert.ok(!older[0].labels.some(l => /Gamepad/.test(l)), 'older device: no choice');
   ctl.missing = false;
   await run('decky-toolkit.refreshControllers');
   await settle();
-  await run('decky-toolkit.removeVirtualController', id);
 
-  // The real media/screen.js: the chosen id goes into the `pad` field.
-  const src = readFileSync(path.join(root, 'media', 'screen.js'), 'utf8');
-  const els = new Map();
-  const el = eid => {
-    if (!els.has(eid)) {
-      const classes = new Set();
-      const options = [];
-      els.set(eid, {
-        id: eid, textContent: '', hidden: eid === 'pad-ind' || eid === 'pad-fwd', value: '', checked: false, disabled: false, title: '', options,
-        add: o => options.push(o), remove: i => options.splice(i, 1),
-        addEventListener() {}, setAttribute() {}, focus() {},
-        classList: { add: c => classes.add(c), remove: c => classes.delete(c), contains: c => classes.has(c), toggle: (c, on) => ((on ?? !classes.has(c)) ? classes.add(c) : classes.delete(c), classes.has(c)) },
-      });
-    }
-    return els.get(eid);
-  };
-  const listeners = {}, posted = [], sent = [];
-  let state;
-  const fakeVscode = { postMessage: m => posted.push(m), getState: () => state, setState: s => { state = s; } };
-  const document = { getElementById: el, body: { dataset: { base: 'http://127.0.0.1:1/x' } }, addEventListener() {}, hasFocus: () => true };
-  const window = { addEventListener: (t, fn) => { (listeners[t] ??= []).push(fn); } };
-  class FakeWs { constructor(url) { this.url = url; this.readyState = 1; FakeWs.last = this; } send(d) { sent.push(JSON.parse(d)); } close() {} }
-  FakeWs.OPEN = 1;
-  class Option { constructor(text, value) { this.text = text; this.value = value; } }
-  let gamepads = [];
-  const navigator = { getGamepads: () => gamepads };
-  new Function('acquireVsCodeApi', 'document', 'window', 'fetch', 'WebSocket', 'requestAnimationFrame', 'Option', 'navigator', src)(
-    () => fakeVscode, document, window, () => new Promise(() => {}), FakeWs, () => 0, Option, navigator);
-  const post = data => listeners.message.forEach(fn => fn({ data }));
-  const fire = t => listeners[t].forEach(fn => fn({}));
-  post({ type: 'input', state: { supported: true, enabled: true, available: true, backend: 'libei', reason: null } });
-  FakeWs.last.onopen();
-  post({ type: 'pads', pads: [{ id: 'v1', name: 'Virtual pad 1' }, { id: 'v2', name: 'Couch' }] });
-  const sel = el('pad-target');
-  assert.deepEqual(sel.options.map(o => [o.value, o.text]), [['', 'Auto'], ['v1', 'Virtual pad 1'], ['v2', 'Couch'], ['__add__', 'New virtual pad…']]);
-  assert.equal(sel.value, '');
-  assert.equal(el('pad-fwd').hidden, true, 'hidden until a gamepad shows up');
-
+  const w = loadScreenJs();
+  w.post({ type: 'input', state: { enabled: true } });
+  w.sockets[0].onopen?.();
   const pressed = i => ({ pressed: i === 0, value: i === 0 ? 1 : 0 });
-  gamepads = [{ connected: true, mapping: 'standard', buttons: Array.from({ length: 17 }, (_, i) => pressed(i)), axes: [0, 0, 0, 0] }];
-  fire('gamepadconnected');
-  assert.equal(el('pad-fwd').hidden, false);
-  const pads = () => sent.filter(m => m.type === 'gamepad');
-  assert.equal(pads().at(-1).buttons.a, true);
-  assert.equal('pad' in pads().at(-1), false, 'Auto sends no pad field');
-
-  sel.value = 'v2'; sel.onchange();
-  assert.deepEqual([pads().at(-1).buttons.a, 'pad' in pads().at(-1)], [false, false], 'Auto got a neutral state first');
-  fire('gamepadconnected');
-  assert.deepEqual([pads().at(-1).buttons.a, pads().at(-1).pad], [true, 'v2']);
-  assert.equal(state.padTarget, 'v2', 'choice kept in the webview state');
-
-  sel.value = '__add__'; sel.onchange();
-  assert.deepEqual(posted.at(-1), { type: 'addPad' });
-  assert.equal(sel.value, 'v2', 'the select goes back to the current target');
-  post({ type: 'pads', pads: [{ id: 'v1', name: 'Virtual pad 1' }, { id: 'v2', name: 'Couch' }, { id: 'v3', name: 'New' }], select: 'v3' });
-  assert.equal(sel.value, 'v3');
-  fire('gamepadconnected');
-  assert.equal(pads().at(-1).pad, 'v3');
-  post({ type: 'pads', pads: [{ id: 'v1', name: 'Virtual pad 1' }] });
-  assert.equal(sel.value, '', 'a removed target falls back to Auto');
-  post({ type: 'pads', pads: null });
-  assert.equal(el('pad-fwd').hidden, true, 'older device: no select');
-  gamepads = [];
-  fire('gamepaddisconnected');
-  return `options Auto / Virtual pad 1 / Couch / New virtual pad…; Auto → no pad field, Couch → pad "v2", New virtual pad… → addPad, removed → Auto, 404 → hidden`;
+  w.pads.list = [{ connected: true, mapping: 'standard', buttons: Array.from({ length: 17 }, (_, i) => pressed(i)), axes: [0, 0, 0, 0] }];
+  w.fire('gamepadconnected');
+  assert.equal(w.el('hint').textContent, 'Gamepad connected');
+  const gp = () => w.sent.filter(m => m.type === 'gamepad');
+  assert.equal(gp().at(-1).buttons.a, true);
+  assert.equal('pad' in gp().at(-1), false, 'Auto sends no pad field');
+  w.post({ type: 'padTarget', id: 'v2' });
+  assert.deepEqual([gp().at(-1).buttons.a, 'pad' in gp().at(-1)], [false, false], 'Auto got a neutral state first');
+  w.fire('gamepadconnected');
+  assert.deepEqual([gp().at(-1).buttons.a, gp().at(-1).pad], [true, 'v2']);
+  w.pads.list = [];
+  w.fire('gamepaddisconnected');
+  return 'New virtual pad… → target, list Auto / Couch / New virtual pad…, removed → Auto, 404 → no choice; Auto → no pad field, v2 → pad "v2"';
 });
 
 await check('Steam UI navigation: Navigate to… QuickPick, template prompt, plugin panel, back / Quick Access / close menus, 400, 404', async () => {
@@ -1722,83 +1711,12 @@ await check('status bar QuickPick: connect/switch, disconnect, open screen, add'
   return offered.labels.filter(Boolean).join(' | ');
 });
 
-await check('Copy viewer URL and the … overflow menu', async () => {
-  await run('decky-toolkit.copyViewerUrl', seedId());
-  assert.equal(calls.clipboard.at(-1), 'http://10.1.2.3:8765/viewer');
+await check('the … overflow menu', async () => {
   let offered;
   ui.quickPick = items => { offered = items.map(i => i.label); };
   await run('decky-toolkit.deviceActions', seedId());
-  assert.deepEqual(offered.map(l => l.replace(/^\$\([^)]+\) /, '')), ['Re-pair', 'Enter token manually', 'Edit', 'Copy viewer URL', 'Remove']);
+  assert.deepEqual(offered.map(l => l.replace(/^\$\([^)]+\) /, '')), ['Re-pair', 'Enter token manually', 'Edit', 'Remove']);
   return offered.join(' | ');
-});
-
-await check('browser viewer (static/viewer.html): Controllers popover, live updates, add / refusal, 404 hides it', async () => {
-  const html = readFileSync(path.join(root, '..', 'static', 'viewer.html'), 'utf8');
-  const src = html.match(/<script>([\s\S]*)<\/script>/)[1];
-  for (const id of ['ctl-wrap', 'ctl-btn', 'ctl-pop', 'ctl-list', 'ctl-add', 'ctl-name', 'pad-fwd', 'pad-target']) assert.ok(html.includes(`id="${id}"`), id);
-  const els = new Map();
-  const mk = (tag = 'div') => {
-    const classes = new Set();
-    const listeners = {};
-    return {
-      tag, textContent: '', hidden: false, value: '', disabled: false, title: '', placeholder: '', className: '', children: [], options: [],
-      append(...c) { this.children.push(...c); }, replaceChildren(...c) { this.children = [...c]; if (this.tag === 'select') this.options = [...c]; },
-      addEventListener(t, fn) { (listeners[t] ??= []).push(fn); }, setAttribute() {}, focus() {},
-      classList: { add: c => classes.add(c), remove: c => classes.delete(c), contains: c => classes.has(c), toggle: (c, on) => ((on ?? !classes.has(c)) ? classes.add(c) : classes.delete(c), classes.has(c)) },
-      _listeners: listeners,
-    };
-  };
-  const initiallyHidden = ['ctl-wrap', 'ctl-pop', 'pad-fwd', 'pad-ind', 'input-ctl', 'settings', 'pop', 'audio-ctl', 'a-hint', 'a-stat'];
-  const el = id => { if (!els.has(id)) { const e = mk(id === 'pad-target' ? 'select' : 'div'); e.hidden = initiallyHidden.includes(id); els.set(id, e); } return els.get(id); };
-  const document = { getElementById: el, createElement: mk, querySelectorAll: () => [], addEventListener() {}, hasFocus: () => true, hidden: false, activeElement: null };
-  class Option { constructor(text, value) { this.text = text; this.value = value; } }
-  const dev = { missing: false, refuse: null, list: { controllers: [steamDeck], virtual: [{ id: 'auto0', name: 'Decky Toolkit pad', auto: true }], input_enabled: false } };
-  const requests = [];
-  const reply = (b, status = 200) => ({ ok: status < 400, status, json: async () => b, text: async () => JSON.stringify(b) });
-  const viewerFetch = async (url, init = {}) => {
-    requests.push(`${init.method ?? 'GET'} ${url}`);
-    if (url.startsWith('/controllers') && dev.missing) return reply({}, 404);
-    if (url === '/controllers') return reply(dev.list);
-    if (url === '/controllers/virtual') {
-      if (dev.refuse) return reply({ error: dev.refuse }, 422);
-      const { name } = JSON.parse(init.body);
-      dev.list.virtual.push({ id: 'v1', name, auto: false });
-      return reply({ id: 'v1', name, type: 'x360' }, 201);
-    }
-    return new Promise(() => {});
-  };
-  const sources = [];
-  class EventSource { constructor(u) { this.u = u; sources.push(this); } close() { this.closed = true; } }
-  new Function('document', 'window', 'fetch', 'EventSource', 'Option', 'localStorage', 'navigator', 'WebSocket', 'requestAnimationFrame', src)(
-    document, { addEventListener() {}, open() {}, EventSource }, viewerFetch, EventSource, Option, { getItem: () => null, setItem() {} }, {}, class {}, () => 0);
-  await settle(10);
-  assert.equal(el('ctl-wrap').hidden, false, 'button shown when /controllers answers');
-  el('ctl-btn').onclick({ stopPropagation() {} });
-  await settle(10);
-  assert.equal(el('ctl-pop').hidden, false);
-  assert.deepEqual(sources.map(s => s.u), ['/controllers/events'], 'live while open');
-  const rowText = () => el('ctl-list').children.filter(r => r.className.startsWith('ctl-row')).map(r => r.children[0].children.map(c => c.textContent).join(' | '));
-  assert.deepEqual(rowText(), ['1. Steam Deck | physical · Steam Input: steamdeck · Slot 1', '🎮 Decky Toolkit pad (virtual) | virtual · not seen by Steam Input · auto']);
-  assert.equal(el('ctl-name').placeholder, 'Virtual pad 1');
-  await el('ctl-add').onsubmit({ preventDefault() {} });
-  assert.ok(requests.includes('POST /controllers/virtual'));
-  assert.equal(el('ctl-note').textContent, 'Virtual controller added and recognised by Steam Input');
-  assert.deepEqual(el('pad-target').options.map(o => o.text), ['Auto', 'Virtual pad 1', 'New virtual pad…'], '"Forward to" follows the list');
-  sources[0].onmessage({ data: JSON.stringify({ type: 'controllers', controllers: [], virtual: [] }) });
-  assert.deepEqual(rowText(), [], 'SSE update applied');
-  assert.equal(el('ctl-list').children[0].textContent, 'No controllers seen by Steam Input.');
-  dev.refuse = 'Steam Input did not pick up the new pad';
-  await el('ctl-add').onsubmit({ preventDefault() {} });
-  assert.equal(el('ctl-note').textContent, 'Steam Input did not pick up the new pad', 'refusal shown as-is');
-  sources[0].onerror();
-  assert.equal(sources[0].closed, true, 'stream failure → poll');
-  el('ctl-btn').onclick({ stopPropagation() {} });
-  assert.equal(el('ctl-pop').hidden, true);
-  dev.missing = true;
-  await el('pad-target')._listeners.focus[0]();
-  assert.equal(el('ctl-wrap').hidden, true, '404 hides the button');
-  assert.equal(el('pad-fwd').hidden, true, '404 hides "Forward to"');
-  return requests.filter(r => r.includes('controllers')).join(', ');
 });
 
 await check('Games view with fake clients: Proton title with saves, native title, shortcut, 404 device, errors', async () => {

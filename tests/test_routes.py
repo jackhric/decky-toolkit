@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
 from aiohttp import ClientSession, ClientTimeout, CookieJar, FormData, web  # noqa: E402
 
-from decky_toolkit.auth import TOKEN_COOKIE, TokenAuth  # noqa: E402
+from decky_toolkit.auth import TokenAuth  # noqa: E402
 from decky_toolkit.capture import ScreenCapturer  # noqa: E402
 from decky_toolkit.http import Api  # noqa: E402
 from decky_toolkit.pairing import PairingRequests  # noqa: E402
@@ -35,11 +35,7 @@ def decky_home(tmp_path, monkeypatch):
     return tmp_path
 
 
-STATIC = str(Path(__file__).resolve().parents[1] / "static")
-
-
 async def with_server(fn, capturer=None, **api_kwargs):
-    api_kwargs.setdefault("static_dir", None)
     api = Api(auth=TokenAuth(TOKEN), mcp=McpServer(ToolRegistry(), LOG), capturer=capturer, logger=LOG,
               base_url=lambda: "http://10.1.2.3:8765", **api_kwargs)
     runner = web.AppRunner(api.build_app())
@@ -119,8 +115,6 @@ def test_pair_request_deny_cancel_and_limits():
         pairing.deny(rid)
         async with await asyncio.wait_for(poll, 2) as r:
             assert await r.json() == {"status": "denied"}
-        async with s.get(f"{base}/pair/request/{rid}?cookie=1", allow_redirects=False) as r:
-            assert await r.json() == {"status": "denied"}
 
         async with s.post(f"{base}/pair/request", json=VS) as r:
             rid = (await r.json())["id"]
@@ -145,28 +139,14 @@ def test_pair_request_deny_cancel_and_limits():
     asyncio.run(with_server(run, pairing=pairing))
 
 
-def test_pair_request_page_and_cookie_redirect():
-    pairing = PairingRequests()
-
+def test_root_is_plain_text_and_viewer_is_gone():
     async def run(s, base):
-        async with s.get(f"{base}/viewer") as r:
-            assert r.status == 401
-            page = await r.text()
-        assert "/pair/request" in page and "<form" in page
-        async with s.post(f"{base}/pair/request", json={"client_name": "Firefox on Linux", "client_kind": "browser"}) as r:
-            rid = (await r.json())["id"]
-        async with s.get(f"{base}/pair/request/{rid}?cookie=1", allow_redirects=False) as r:
-            assert await r.json() == {"status": "pending"}
-        pairing.approve(rid)
-        async with s.get(f"{base}/pair/request/{rid}?cookie=1", allow_redirects=False) as r:
-            assert r.status == 302 and r.headers["Location"] == "/viewer"
-            assert TOKEN_COOKIE in r.headers.get("Set-Cookie", "")
-        async with s.get(f"{base}/viewer") as r:
-            assert r.status == 200 and "Decky Toolkit Screen" in await r.text()
-        s.cookie_jar.clear()
-        async with s.get(f"{base}/pair/request/{rid}?cookie=1", allow_redirects=False) as r:
-            assert r.status == 410, "an approval sets a cookie only once"
-    asyncio.run(with_server(run, pairing=pairing, static_dir=STATIC))
+        async with s.get(base + "/") as r:
+            assert r.status == 200 and "VS Code" in await r.text()
+        for path in ("/viewer", "/viewer?token=" + TOKEN):
+            async with s.get(base + path, allow_redirects=False) as r:
+                assert r.status == 404 and "Set-Cookie" not in r.headers, path
+    asyncio.run(with_server(run))
 
 
 def test_logs_tail_plugin(decky_home):
@@ -252,7 +232,7 @@ def test_plugins_install_list_and_bearer_only(decky_home):
         return f
 
     async def run(s, base):
-        async with s.post(f"{base}/plugins/install?restart=none", data=form(), cookies={TOKEN_COOKIE: TOKEN}) as r:
+        async with s.post(f"{base}/plugins/install?restart=none", data=form(), cookies={"decky_toolkit_token": TOKEN}) as r:
             assert r.status == 401
         async with s.post(f"{base}/plugins/install?restart=bogus", data=form(), headers=H) as r:
             assert r.status == 400
@@ -325,17 +305,18 @@ def test_stream_settings_get_put_and_clamp():
     asyncio.run(with_server(run, capturer=cap))
 
 
-def test_stream_settings_cookie_auth_and_origin():
+def test_stream_settings_bearer_only_and_origin():
     cap = FakeCapturer(running=False)
 
     async def run(s, base):
-        cookies = {TOKEN_COOKIE: TOKEN}
-        async with s.get(f"{base}/stream/settings", cookies=cookies) as r:
+        async with s.get(f"{base}/stream/settings", cookies={"decky_toolkit_token": TOKEN}) as r:
+            assert r.status == 401, "the old viewer cookie authorises nothing"
+        async with s.get(f"{base}/stream/settings", headers=H) as r:
             assert r.status == 200
-        async with s.put(f"{base}/stream/settings", json={"fps": 15}, cookies=cookies) as r:
+        async with s.put(f"{base}/stream/settings", json={"fps": 15}, headers=H) as r:
             assert r.status == 200 and (await r.json())["fps"] == 15
-        async with s.put(f"{base}/stream/settings", json={"fps": 20}, cookies=cookies,
-                         headers={"Origin": "http://evil.example"}) as r:
+        async with s.put(f"{base}/stream/settings", json={"fps": 20},
+                         headers={**H, "Origin": "http://evil.example"}) as r:
             assert r.status == 403
         assert cap.settings.stream_fps == 15
     asyncio.run(with_server(run, capturer=cap))

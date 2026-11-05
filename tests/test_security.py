@@ -148,7 +148,7 @@ def test_audit_log_lines_over_http(caplog):
         return []
 
     async def run():
-        api = Api(auth=TokenAuth(TOKEN), mcp=McpServer(reg, log), capturer=None, static_dir=None, logger=log)
+        api = Api(auth=TokenAuth(TOKEN), mcp=McpServer(reg, log), capturer=None, logger=log)
         runner = web.AppRunner(api.build_app())
         await runner.setup()
         await web.TCPSite(runner, "127.0.0.1", 0).start()

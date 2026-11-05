@@ -1,9 +1,10 @@
 import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
+import type { StreamSettings } from './api';
 import { HttpError, describeError } from './client';
 import { Connection, ConnectionState, InputState, externalProxyBase } from './connection';
 import { ControllerWatcher, addVirtualController, isList } from './controllers';
-import { INPUT_UNSUPPORTED, inputBackendLabel, inputOn, toggleInput } from './input';
+import { inputOn } from './input';
 
 export class StatusBar implements vscode.Disposable {
   private readonly item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
@@ -36,130 +37,233 @@ export class StatusBar implements vscode.Disposable {
   }
 }
 
+const MUTED_KEY = 'decky-toolkit.screen.muted';
+const VOLUME_KEY = 'decky-toolkit.screen.volume';
+const FPS = [15, 24, 30, 60];
+const QUALITY = [50, 60, 70, 80, 90];
+const WIDTHS = [0, 1600, 1280, 960, 640];
+const VOLUMES = [100, 80, 60, 40, 20, 10];
+
+type StreamPatch = { fps?: number; quality?: number; width?: number; audio?: boolean };
+type Choice<T> = vscode.QuickPickItem & { value?: T; run?: () => Promise<void> };
+
+const widthLabel = (w: number) => (w ? `${w} px wide` : 'Native');
+
+/**
+ * The live screen. The webview only draws the picture; every control is a native editor title action
+ * whose icon follows the `decky-toolkit.screen.*` context keys set here.
+ */
 export class ScreenPanel {
   private static current?: ScreenPanel;
   private readonly disposables: vscode.Disposable[] = [];
+  private paused = false;
+  private muted: boolean;
+  private volume: number;
+  private padTarget = '';
+  /** undefined until loaded, null on a device without stream settings. */
+  private stream?: StreamSettings | null;
 
   static async show(ctx: vscode.ExtensionContext, conn: Connection, controllers: ControllerWatcher): Promise<void> {
     if (ScreenPanel.current) {
       ScreenPanel.current.panel.reveal();
       return;
     }
-    const { base, external } = await externalProxyBase(conn);
+    const { external } = await externalProxyBase(conn);
     const panel = vscode.window.createWebviewPanel('decky-toolkit.screen', `Screen: ${conn.label}`, vscode.ViewColumn.Beside, {
       enableScripts: true,
       retainContextWhenHidden: true,
       localResourceRoots: [vscode.Uri.joinPath(ctx.extensionUri, 'media')],
     });
-    ScreenPanel.current = new ScreenPanel(ctx, conn, controllers, panel, base, external);
+    ScreenPanel.current = new ScreenPanel(ctx, conn, controllers, panel, external);
   }
 
+  static pause(paused: boolean): void { ScreenPanel.current?.setPaused(paused); }
+  static mute(muted: boolean): void { ScreenPanel.current?.setMuted(muted); }
+  static async settings(): Promise<void> { await ScreenPanel.current?.showSettings(); }
+
   private constructor(
-    ctx: vscode.ExtensionContext,
-    conn: Connection,
-    controllers: ControllerWatcher,
+    private readonly ctx: vscode.ExtensionContext,
+    private readonly conn: Connection,
+    private readonly controllers: ControllerWatcher,
     private readonly panel: vscode.WebviewPanel,
-    private readonly base: string,
     external: string,
   ) {
-    panel.webview.html = this.html(ctx, external);
+    this.muted = ctx.globalState.get<boolean>(MUTED_KEY, false);
+    this.volume = ctx.globalState.get<number>(VOLUME_KEY, 0.8);
+    panel.webview.html = this.html(external);
     panel.onDidDispose(() => this.dispose(), null, this.disposables);
-    panel.onDidChangeViewState(e => void panel.webview.postMessage({ type: 'visible', visible: e.webviewPanel.visible }), null, this.disposables);
+    panel.onDidChangeViewState(e => void this.post({ type: 'visible', visible: e.webviewPanel.visible }), null, this.disposables);
     let sentInput: string | undefined;
     const sendInput = (force = false) => {
       const state = webviewInputState(conn.input);
       const json = JSON.stringify(state);
       if (!force && json === sentInput) return;
       sentInput = json;
-      void panel.webview.postMessage({ type: 'input', state });
+      void this.post({ type: 'input', state });
+      void setContext('input', state?.enabled ? 'on' : 'off');
     };
-    let sentStream: string | undefined;
-    const postStream = (msg: { settings?: StreamSettingsView | null; applied?: string[]; error?: string }) => {
-      if (msg.settings !== undefined && !msg.applied) {
-        const json = JSON.stringify(msg.settings);
-        if (json === sentStream) return;
-        sentStream = json;
-      }
-      void panel.webview.postMessage({ type: 'stream', ...msg });
-    };
-    const loadStream = async () => {
-      const client = conn.authedClient();
-      if (!client) return;
-      try {
-        postStream({ settings: await client.getStreamSettings() });
-      } catch (e) {
-        if (e instanceof HttpError && e.status === 404) postStream({ settings: null });
-      }
-    };
-    // The "Forward to" choices: the explicit virtual pads ("Auto" is the server's implicit one).
-    let sentPads: string | undefined;
-    const sendPads = (force = false, select?: string) => {
-      const s = controllers.state;
-      if (s === undefined || (!isList(s) && s !== 'unsupported')) return;
-      const pads = isList(s) ? s.virtual.filter(v => !v.auto).map(v => ({ id: v.id, name: v.name })) : null;
-      const json = JSON.stringify(pads);
-      if (!force && select === undefined && json === sentPads) return;
-      sentPads = json;
-      void panel.webview.postMessage({ type: 'pads', pads, ...(select !== undefined ? { select } : {}) });
-    };
-    controllers.onDidChange(() => sendPads(), null, this.disposables);
+    controllers.onDidChange(() => this.checkPadTarget(), null, this.disposables);
     this.disposables.push(controllers.watch());
-    panel.webview.onDidReceiveMessage(async m => {
-      if (m?.type === 'ready') sendPads(true);
-      if (m?.type === 'addPad') {
-        const id = await addVirtualController(conn, controllers);
-        await controllers.refresh();
-        sendPads(true, id);
-      }
-      if (m?.type === 'ready') { sentStream = undefined; void loadStream(); }
-      // Same rule as input: the extension owns device-wide settings, the webview only asks.
-      if (m?.type === 'setStream') {
-        const patch = pickStreamPatch(m.patch);
-        try {
-          const client = conn.authedClient();
-          if (!client) throw new Error('not paired');
-          const settings = await client.setStreamSettings(patch);
-          sentStream = JSON.stringify(settings);
-          postStream({ settings, applied: Object.keys(patch) });
-        } catch (e) {
-          postStream({ error: describeError(e) });
-          sentStream = undefined;
-          void loadStream();
-        }
-      }
-      if (m?.type === 'snapshot') void vscode.env.openExternal(vscode.Uri.parse(`${this.base}/frame.jpg?t=${Date.now()}`));
-      if (m?.type === 'ready') sendInput(true);
-      if (m?.type === 'ready' || m?.type === 'refreshInput') void conn.refreshInput();
-      // The webview never talks to /input/settings itself; the extension owns the device-wide flag.
-      if (m?.type === 'setInput') {
-        try {
-          await toggleInput(conn, !!m.enabled);
-        } catch (e) {
-          void vscode.window.showErrorMessage(`Decky Toolkit: ${describeError(e)}`);
-        }
+    panel.webview.onDidReceiveMessage(m => {
+      if (m?.type === 'ready') {
         sendInput(true);
+        this.sendAudio();
+        void this.post({ type: 'paused', paused: this.paused });
+        void this.post({ type: 'padTarget', id: this.padTarget });
+        void this.loadStream();
       }
+      if (m?.type === 'ready' || m?.type === 'refreshInput') void conn.refreshInput();
     }, null, this.disposables);
     conn.onDidChange(() => {
       sendInput();
       // The 5 s stats tick carries the settings, so changes from other clients reach the panel.
       const st = conn.stats?.settings;
-      if (st) postStream({ settings: { ...st } });
+      if (st && this.stream) this.setStream({ ...this.stream, ...st });
     }, null, this.disposables);
     conn.onDidChangeTarget(() => {
       panel.title = `Screen: ${conn.label}`;
-      void panel.webview.postMessage({ type: 'reconnect' });
-      sentStream = undefined;
-      void loadStream();
+      void this.post({ type: 'reconnect' });
+      this.stream = undefined;
+      void this.loadStream();
     }, null, this.disposables);
     this.disposables.push(conn.watchStats());
+    void setContext('paused', false);
+    void setContext('muted', this.muted);
+    void setContext('audio', false);
   }
 
-  private html(ctx: vscode.ExtensionContext, external: string): string {
+  private post(m: Record<string, unknown>): Thenable<boolean> {
+    return this.panel.webview.postMessage(m);
+  }
+
+  private async loadStream(): Promise<void> {
+    const client = this.conn.authedClient();
+    if (!client) return;
+    try {
+      this.setStream(await client.getStreamSettings());
+    } catch (e) {
+      if (e instanceof HttpError && e.status === 404) this.setStream(null);
+    }
+  }
+
+  private setStream(s: StreamSettings | null): void {
+    const audioBefore = this.stream?.audio;
+    this.stream = s;
+    if (s?.audio !== audioBefore) this.sendAudio();
+  }
+
+  private sendAudio(): void {
+    const on = this.stream?.audio === true;
+    void setContext('audio', on);
+    void this.post({ type: 'audio', on, muted: this.muted, volume: this.volume });
+  }
+
+  private setPaused(paused: boolean): void {
+    this.paused = paused;
+    void setContext('paused', paused);
+    void this.post({ type: 'paused', paused });
+  }
+
+  private setMuted(muted: boolean): void {
+    this.muted = muted;
+    void this.ctx.globalState.update(MUTED_KEY, muted);
+    void setContext('muted', muted);
+    this.sendAudio();
+  }
+
+  private setVolume(volume: number): void {
+    this.volume = volume;
+    void this.ctx.globalState.update(VOLUME_KEY, volume);
+    if (this.muted) this.setMuted(false); else this.sendAudio();
+  }
+
+  private virtualPads(): { id: string; name: string }[] | null {
+    const s = this.controllers.state;
+    return isList(s) ? s.virtual.filter(v => !v.auto).map(v => ({ id: v.id, name: v.name })) : null;
+  }
+
+  /** A removed pad falls back to Auto, the pad the device creates on its own. */
+  private checkPadTarget(): void {
+    const pads = this.virtualPads();
+    if (this.padTarget && pads && !pads.some(p => p.id === this.padTarget)) this.setPadTarget('');
+  }
+
+  private setPadTarget(id: string): void {
+    this.padTarget = id;
+    void this.post({ type: 'padTarget', id });
+  }
+
+  private async applyStream(patch: StreamPatch): Promise<void> {
+    try {
+      const client = this.conn.authedClient();
+      if (!client) throw new Error('not paired');
+      this.setStream(await client.setStreamSettings(patch));
+      // The video pipeline has restarted by the time PUT returns, so the next frame is from the new one.
+      if (Object.keys(patch).some(k => k !== 'audio')) void this.post({ type: 'applying' });
+    } catch (e) {
+      void vscode.window.showErrorMessage(`Decky Toolkit: stream settings: ${describeError(e)}`);
+      void this.loadStream();
+    }
+  }
+
+  private async showSettings(): Promise<void> {
+    const s = this.stream;
+    const section = (label: string): Choice<never> => ({ label, kind: vscode.QuickPickItemKind.Separator });
+    const items: Choice<never>[] = [];
+    if (s) {
+      items.push(
+        section('Stream · every client'),
+        { label: '$(dashboard) Frame rate', description: `${s.fps} fps`, run: () => this.choose('Frame rate', FPS, s.fps, v => `${v} fps`, fps => this.applyStream({ fps })) },
+        { label: '$(symbol-color) JPEG quality', description: String(s.quality), run: () => this.choose('JPEG quality', QUALITY, s.quality, String, quality => this.applyStream({ quality })) },
+        { label: '$(screen-full) Size', description: widthLabel(s.width), run: () => this.choose('Size', WIDTHS, s.width, widthLabel, width => this.applyStream({ width })) },
+      );
+      if (typeof s.audio === 'boolean') {
+        items.push({ label: '$(unmute) Audio', description: s.audio ? 'On' : 'Off', run: () => this.applyStream({ audio: !s.audio }) });
+      }
+    }
+    items.push(section('This computer'));
+    if (s?.audio) {
+      const pct = Math.round(this.volume * 100);
+      items.push({ label: '$(unmute) Volume', description: this.muted ? `${pct}% (muted)` : `${pct}%`,
+        run: () => this.choose('Volume on this computer', VOLUMES, pct, v => `${v}%`, async v => this.setVolume(v / 100)) });
+    }
+    const pads = this.virtualPads();
+    if (pads) {
+      const current = pads.find(p => p.id === this.padTarget)?.name ?? 'Auto';
+      items.push({ label: '$(game) Gamepad goes to', description: current, run: () => this.choosePad(pads) });
+    }
+    const pick = await vscode.window.showQuickPick(items, { title: `Screen: ${this.conn.label}`, placeHolder: 'Stream settings' });
+    await pick?.run?.();
+  }
+
+  private async choose<T>(title: string, values: T[], current: T, label: (v: T) => string, apply: (v: T) => Promise<void>): Promise<void> {
+    const all = values.includes(current) ? values : [...values, current];
+    const pick = await vscode.window.showQuickPick(all.map((v): Choice<T> => ({
+      label: label(v), value: v, description: v === current ? 'current' : undefined,
+    })), { title, placeHolder: label(current) });
+    if (pick && pick.value !== current) await apply(pick.value as T);
+  }
+
+  private async choosePad(pads: { id: string; name: string }[]): Promise<void> {
+    const items: Choice<string>[] = [
+      { label: 'Auto', detail: 'The pad the device creates for forwarded input on its own', value: '' },
+      ...pads.map(p => ({ label: p.name, value: p.id })),
+      { label: '$(add) New virtual pad…', run: async () => {
+        const id = await addVirtualController(this.conn, this.controllers);
+        if (id) { await this.controllers.refresh(); this.setPadTarget(id); }
+      } },
+    ];
+    for (const i of items) if (i.value === this.padTarget) i.description = 'current';
+    const pick = await vscode.window.showQuickPick(items, { title: 'Gamepad goes to', placeHolder: 'Which controller on the device receives your gamepad' });
+    if (!pick) return;
+    if (pick.run) await pick.run(); else this.setPadTarget(pick.value ?? '');
+  }
+
+  private html(external: string): string {
     const webview = this.panel.webview;
     const origin = new URL(external).origin;
     const nonce = randomBytes(16).toString('base64');
-    const media = (f: string) => webview.asWebviewUri(vscode.Uri.joinPath(ctx.extensionUri, 'media', f));
+    const media = (f: string) => webview.asWebviewUri(vscode.Uri.joinPath(this.ctx.extensionUri, 'media', f));
     const csp = [
       "default-src 'none'",
       `img-src ${origin} blob:`,
@@ -181,47 +285,10 @@ export class ScreenPanel {
 <title>Device screen</title>
 </head>
 <body data-base="${attr(external)}">
-<header>
-  <b><span class="dot" id="dot"></span>Device</b>
-  <span class="stat">fps <span id="fps">–</span></span>
-  <span class="stat">Mbps <span id="mbps">–</span></span>
-  <span class="stat">res <span id="res">–</span></span>
-  <span class="stat">frames <span id="frames">0</span></span>
-  <span class="stat" id="a-stat" hidden>audio kbps <span id="akbps">–</span></span>
-  <span class="spacer"></span>
-  <span class="settings" id="settings" hidden>
-    <button id="gear" title="Stream settings (device-wide)" aria-expanded="false">Stream</button>
-    <div id="pop" hidden>
-      <label for="s-fps">Frame rate</label>
-      <select id="s-fps"><option value="15">15 fps</option><option value="24">24 fps</option><option value="30">30 fps</option><option value="60">60 fps</option></select>
-      <label for="s-quality">JPEG quality</label>
-      <select id="s-quality"><option value="50">50</option><option value="60">60</option><option value="70">70</option><option value="80">80</option><option value="90">90</option></select>
-      <label for="s-width">Size</label>
-      <select id="s-width"><option value="0">Native</option><option value="1600">1600 px</option><option value="1280">1280 px</option><option value="960">960 px</option><option value="640">640 px</option></select>
-      <label for="s-audio" id="s-audio-label" hidden>Audio</label>
-      <input type="checkbox" id="s-audio" title="Stream what the device is playing (device-wide)" hidden>
-      <span class="note" id="s-note">Applies to every viewer.</span>
-    </div>
-  </span>
-  <span class="input-ctl" id="input-ctl" hidden>
-    <span id="pad-ind" hidden>Gamepad connected</span>
-    <label id="pad-fwd" hidden>Forward to <select id="pad-target" title="Which controller on the device receives this gamepad. Auto: the pad the device creates on its own."><option value="">Auto</option></select></label>
-    <span id="inp-note"></span>
-    <button id="inp" title="Remote keyboard, mouse and gamepad input (device-wide)">Input</button>
-  </span>
-  <span class="audio-ctl" id="audio-ctl" hidden>
-    <span id="a-hint" hidden>Click anywhere to enable audio</span>
-    <button id="mute" title="Mute audio on this computer">🔊</button>
-    <input type="range" id="vol" min="0" max="100" value="80" title="Volume on this computer">
-  </span>
-  <button id="pause">Pause</button>
-  <button id="fit" class="on">Fit</button>
-  <button id="snap">Snapshot</button>
-  <button id="full" hidden>Fullscreen</button>
-</header>
 <main id="main" tabindex="-1">
   <img id="img" alt="Device display">
   <div id="msg">Connecting…</div>
+  <div id="hint" hidden></div>
 </main>
 <script nonce="${nonce}" src="${media('screen.js')}"></script>
 </body>
@@ -234,20 +301,12 @@ export class ScreenPanel {
   }
 }
 
-/** What media/screen.js needs to draw the Input button; null until the first answer. */
-function webviewInputState(input: InputState | undefined) {
-  if (!input) return null;
-  if (input === 'unsupported') return { supported: false, enabled: false, available: false, backend: null, reason: INPUT_UNSUPPORTED };
-  return { supported: true, enabled: input.enabled, available: input.available, backend: inputBackendLabel(input.backend), reason: input.reason };
+function setContext(key: string, value: unknown): Thenable<unknown> {
+  return vscode.commands.executeCommand('setContext', `decky-toolkit.screen.${key}`, value);
 }
 
-type StreamSettingsView = { fps?: number; quality?: number; width?: number; audio?: boolean };
-
-/** Only the known fields of a webview request, with the types the device expects. */
-function pickStreamPatch(raw: unknown): StreamSettingsView {
-  const p = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-  const out: StreamSettingsView = {};
-  for (const k of ['fps', 'quality', 'width'] as const) if (typeof p[k] === 'number' && Number.isFinite(p[k])) out[k] = p[k] as number;
-  if (typeof p.audio === 'boolean') out.audio = p.audio;
-  return out;
+/** What media/screen.js needs for remote input; null until the first answer. */
+function webviewInputState(input: InputState | undefined) {
+  if (!input || input === 'unsupported') return null;
+  return { enabled: input.enabled };
 }

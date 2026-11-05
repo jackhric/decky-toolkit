@@ -138,12 +138,6 @@
         "icon": "$(device-desktop)"
       },
       {
-        "command": "decky-toolkit.openViewer",
-        "title": "Open viewer in browser",
-        "category": "Decky",
-        "icon": "$(link-external)"
-      },
-      {
         "command": "decky-toolkit.snapshot",
         "title": "Snapshot to file",
         "category": "Decky",
@@ -154,6 +148,48 @@
         "title": "Toggle remote input",
         "category": "Decky",
         "icon": "$(keyboard)"
+      },
+      {
+        "command": "decky-toolkit.screen.inputOn",
+        "title": "Turn on remote input",
+        "category": "Decky",
+        "icon": "$(keyboard)"
+      },
+      {
+        "command": "decky-toolkit.screen.inputOff",
+        "title": "Turn off remote input",
+        "category": "Decky",
+        "icon": "$(record-keys)"
+      },
+      {
+        "command": "decky-toolkit.screen.mute",
+        "title": "Mute",
+        "category": "Decky",
+        "icon": "$(unmute)"
+      },
+      {
+        "command": "decky-toolkit.screen.unmute",
+        "title": "Unmute",
+        "category": "Decky",
+        "icon": "$(mute)"
+      },
+      {
+        "command": "decky-toolkit.screen.settings",
+        "title": "Stream settings…",
+        "category": "Decky",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "decky-toolkit.screen.pause",
+        "title": "Pause",
+        "category": "Decky",
+        "icon": "$(debug-pause)"
+      },
+      {
+        "command": "decky-toolkit.screen.resume",
+        "title": "Resume",
+        "category": "Decky",
+        "icon": "$(play)"
       },
       {
         "command": "decky-toolkit.addVirtualController",
@@ -337,12 +373,6 @@
         "title": "Re-pair",
         "category": "Decky",
         "icon": "$(key)"
-      },
-      {
-        "command": "decky-toolkit.copyViewerUrl",
-        "title": "Copy viewer URL",
-        "category": "Decky",
-        "icon": "$(copy)"
       },
       {
         "command": "decky-toolkit.deviceActions",
@@ -597,11 +627,6 @@
           "group": "3_device@1"
         },
         {
-          "command": "decky-toolkit.copyViewerUrl",
-          "when": "view == decky-toolkit.devices && viewItem =~ /^deck\\./",
-          "group": "3_device@2"
-        },
-        {
           "command": "decky-toolkit.removeDevice",
           "when": "view == decky-toolkit.devices && viewItem =~ /^deck\\.(unpaired|paired|session)$/",
           "group": "3_device@3"
@@ -674,6 +699,76 @@
         {
           "command": "decky-toolkit.copyDeckyPath",
           "when": "false"
+        },
+        {
+          "command": "decky-toolkit.screen.inputOn",
+          "when": "false"
+        },
+        {
+          "command": "decky-toolkit.screen.inputOff",
+          "when": "false"
+        },
+        {
+          "command": "decky-toolkit.screen.mute",
+          "when": "activeWebviewPanelId == 'decky-toolkit.screen'"
+        },
+        {
+          "command": "decky-toolkit.screen.unmute",
+          "when": "activeWebviewPanelId == 'decky-toolkit.screen'"
+        },
+        {
+          "command": "decky-toolkit.screen.settings",
+          "when": "activeWebviewPanelId == 'decky-toolkit.screen'"
+        },
+        {
+          "command": "decky-toolkit.screen.pause",
+          "when": "activeWebviewPanelId == 'decky-toolkit.screen'"
+        },
+        {
+          "command": "decky-toolkit.screen.resume",
+          "when": "activeWebviewPanelId == 'decky-toolkit.screen'"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "decky-toolkit.screen.inputOn",
+          "when": "activeWebviewPanelId == 'decky-toolkit.screen' && decky-toolkit.screen.input != 'on'",
+          "group": "navigation@1"
+        },
+        {
+          "command": "decky-toolkit.screen.inputOff",
+          "when": "activeWebviewPanelId == 'decky-toolkit.screen' && decky-toolkit.screen.input == 'on'",
+          "group": "navigation@1"
+        },
+        {
+          "command": "decky-toolkit.screen.mute",
+          "when": "activeWebviewPanelId == 'decky-toolkit.screen' && decky-toolkit.screen.audio && !decky-toolkit.screen.muted",
+          "group": "navigation@2"
+        },
+        {
+          "command": "decky-toolkit.screen.unmute",
+          "when": "activeWebviewPanelId == 'decky-toolkit.screen' && decky-toolkit.screen.audio && decky-toolkit.screen.muted",
+          "group": "navigation@2"
+        },
+        {
+          "command": "decky-toolkit.screen.settings",
+          "when": "activeWebviewPanelId == 'decky-toolkit.screen'",
+          "group": "navigation@3"
+        },
+        {
+          "command": "decky-toolkit.screen.pause",
+          "when": "activeWebviewPanelId == 'decky-toolkit.screen' && !decky-toolkit.screen.paused",
+          "group": "navigation@4"
+        },
+        {
+          "command": "decky-toolkit.screen.resume",
+          "when": "activeWebviewPanelId == 'decky-toolkit.screen' && decky-toolkit.screen.paused",
+          "group": "navigation@4"
+        },
+        {
+          "command": "decky-toolkit.snapshot",
+          "when": "activeWebviewPanelId == 'decky-toolkit.screen'",
+          "group": "navigation@5"
         }
       ]
     }

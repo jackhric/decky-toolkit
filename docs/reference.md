@@ -1,11 +1,11 @@
 # Decky Toolkit reference
 
-Detailed reference for the plugin: tools, pairing, the screen viewer, audio, remote input,
+Detailed reference for the plugin: tools, pairing, the screen panel, audio, remote input,
 controllers, UI navigation, HTTP routes and internals. For setup see the [README](../README.md).
 
 The plugin runs an HTTP server on the device (`http://<deck-ip>:8765`, protected by a token that
-clients get by [pairing](#pairing)). The VS Code extension, the browser viewer and your own scripts
-all talk to it. The same server also speaks MCP Streamable HTTP on `/mcp`, so any MCP client can
+clients get by [pairing](#pairing)). The VS Code extension and your own scripts all talk to
+it. The same server also speaks MCP Streamable HTTP on `/mcp`, so any MCP client can
 use the tools below.
 
 ## MCP tools
@@ -70,16 +70,7 @@ From the VS Code extension (see [extension/README.md](../extension/README.md#pai
 4. The extension stores the token and connects. Deny shows *Pairing denied on <device>* with
    **Try again**; Cancel in the editor withdraws the request.
 
-From a browser:
-
-1. Open `http://<deck-ip>:8765/viewer`. Without the cookie you get a **Request access** page with a
-   name field (prefilled with your browser and OS, e.g. *Firefox on Linux*).
-2. Press **Request access**. The page shows *Waiting for approval on the device · code 4821*.
-3. Approve it on the device as above. The page sets an HttpOnly cookie and opens the viewer. A denied
-   request says so and offers **Retry**.
-
-Alternatively open `/viewer?token=<token>` once (the token is in the Decky Toolkit panel); the token
-moves into the same cookie. Other clients (scripts, CLI agents) use the same routes:
+Other clients (scripts, CLI agents) use the same routes:
 `POST /pair/request`, then long-poll `GET /pair/request/{id}?wait=25` until it returns the token;
 see [docs/api.md](api.md#pairing). Pending requests expire 60 s after their client stops
 polling, at most 10 can be pending (2 per address), and the toast and code let you spot a request
@@ -87,85 +78,83 @@ you did not make.
 
 The normal panel is deliberately minimal: the device's IP address in large type ("port 8765"
 below it), which is all the extension's Add device needs, and one server status line. Everything
-else (server and remote input toggles, restart, regenerate token, viewer URL and token) is under
+else (server and remote input toggles, restart, regenerate token, the token itself) is under
 **Advanced**.
 
-## Live screen viewer
+## Screen panel
 
-Open `http://<deck-ip>:8765/viewer` in a paired browser (see [Pairing](#pairing)). The page shows the full display at 30 fps (1080p, roughly 50 Mbit/s at the default JPEG
-quality 70) with fps, bitrate and resolution readouts, pause, fit/actual size, snapshot and
-fullscreen. The **⚙ Stream** button opens frame rate (15/24/30/60 fps), JPEG quality and size
-(native, 1600, 1280, 960, 640 px wide) controls and the device-wide audio switch; a change applies
-within a fraction of a second without dropping the connection. Sound is on by default (see Audio). Other endpoints, all behind the same token: `/stream.mjpeg`
-(multipart MJPEG), `/frame.jpg` (one current frame), `/stream/stats` (JSON), `/stream/settings`
-(`GET`/`PUT` JSON) and `/audio` (PCM over WebSocket).
+The live screen is only in the VS Code extension: **Open screen** in the Actions view (or the
+Preview view) opens it beside your editor. There is no browser viewer. The panel shows the full
+display at 30 fps (1080p, roughly 50 Mbit/s at the default JPEG quality 70) and nothing else; its
+controls are icons in the editor tab bar:
 
-The **🎮 Controllers** button lists every controller on the device as Steam Input sees it
-(`physical · Steam Input: steamdeck (slot 0)`, `virtual · not seen by Steam Input`, …). Type a
-name (or leave the field empty for `Virtual pad N`) and click **Add virtual** to create a virtual
-Xbox 360 pad; virtual pads have a **Remove** button. The list updates live while the popover is
-open (`/controllers/events`). If the device refuses a pad (all 4 slots used, or Steam Input did not
-pick it up) its message is shown as it is. Next to *🎮 connected* a **Forward to** select picks
-which pad your local gamepad drives: **Auto** (the pad the device creates on its own) or one of the
-virtual pads. The button and the select are hidden on a device whose plugin predates controller
-management. Steam UI navigation is not in the viewer; it is a development action, available in the
-VS Code extension and over `POST /ui/navigate`.
+| Icon | Action |
+| --- | --- |
+| `$(keyboard)` / `$(record-keys)` | Turn remote input on / off (device-wide, see [Remote input](#remote-input)) |
+| `$(unmute)` / `$(mute)` | Mute / unmute sound on this computer; shown while the device streams audio |
+| `$(settings-gear)` | Stream settings: frame rate (15/24/30/60 fps), JPEG quality, size (native, 1600, 1280, 960, 640 px wide) and audio for every client; volume and the gamepad target for this computer |
+| `$(debug-pause)` / `$(play)` | Pause / resume the picture |
+| `$(device-camera)` | Save the current frame as a JPEG |
+
+A settings change applies within a fraction of a second without dropping the connection. The
+stream routes are behind the same token: `/stream.mjpeg` (multipart MJPEG), `/frame.jpg` (one
+current frame), `/stream/stats` (JSON), `/stream/settings` (`GET`/`PUT` JSON) and `/audio` (PCM
+over WebSocket). The extension reaches them through a loopback proxy that adds the token, so the
+webview never holds it.
 
 Stream settings are device-wide; the last change wins. There is one capture pipeline, and every
-viewer, MCP tool call and editor panel shares it, so changing the frame rate in one browser changes
-it for everybody.
+editor panel, recording and MCP tool call shares it, so changing the frame rate in one window
+changes it for everybody.
 
 Capture comes from gamescope's own PipeWire `Video/Source` node, read by a `gst-launch-1.0`
 subprocess (`pipewiresrc ! videoconvert ! videorate ! jpegenc ! multipartmux`). Every element is
 part of the stock Bazzite and SteamOS 3.8 images, so there is nothing to install. The pipeline only
-runs while a viewer or tool call is consuming frames and stops 10 s after the last one leaves.
+runs while a panel, recording or tool call is consuming frames and stops 10 s after the last one leaves.
 
 gamescope only pushes a frame when it repaints, so the plugin nudges it with
 `gamescopectl debug_force_repaint` when a stream starts, and `pipewiresrc keepalive-time=100`
 re-emits the last frame so static screens still stream. Frame rate, JPEG quality and output width
 are stored in `settings.json` (`stream_fps`, `stream_quality`, `stream_width`) and can be changed
-from the viewer, `PUT /stream/settings` or the `set_stream_settings` tool. Measured on the BC-250
+from the screen panel, `PUT /stream/settings` or the `set_stream_settings` tool. Measured on the BC-250
 at 1080p, JPEG quality 70, with a changing screen: 60 fps costs about 33-40 % of one CPU core and
 30-100 Mbit/s depending on content; 30 fps about 23 % and up to ~50 Mbit/s. On Wi-Fi, lower the
 width or quality.
 
 ## Audio
 
-The stream has sound. It is **on by default**: the viewer (and the editor panel) plays what the
-Deck is playing, taken from the default audio output's monitor. Audio goes as raw 16-bit 48 kHz
-stereo PCM over a WebSocket (`/audio`), about 1.5 Mbit/s, which is small next to the video. The
-capture costs well under 1 % of one CPU core (`gst-launch-1.0 pipewiresrc ! audioconvert`) and only
-runs while someone listens.
+The stream has sound. It is **on by default**: the screen panel plays what the Deck is playing,
+taken from the default audio output's monitor. Audio goes as raw 16-bit 48 kHz stereo PCM over a
+WebSocket (`/audio`), about 1.5 Mbit/s, which is small next to the video. The capture costs well
+under 1 % of one CPU core (`gst-launch-1.0 pipewiresrc ! audioconvert`) and only runs while someone
+listens.
 
-- **🔊 / 🔇** in the toolbar mutes this browser only; the slider next to it sets the local volume.
-  The Deck itself keeps playing, and other viewers are not affected. Mute and volume are
-  remembered per browser.
-- Browsers start sound only after a user action, so the toolbar says *Click anywhere to enable
-  audio* until you click or press a key on the page.
-- **Audio** in the **⚙ Stream** popover turns the audio stream on or off for every client
-  (device-wide, stored as `audio_enabled` in `settings.json`; also `PUT /stream/settings` with
-  `{"audio": false}` or the `set_stream_settings` tool). Turning it off closes every audio socket.
-- Playback keeps about 120 ms of sound buffered and drops back to that when it falls more than
-  300 ms behind, so sound and picture stay together. Over plain `http://` on the LAN the browser has
-  no AudioWorklet (it needs a secure context), so the viewer schedules short audio buffers instead,
-  with the same buffer budget.
+- The mute icon and **Volume** in the stream settings act on this computer only; the Deck keeps
+  playing and other clients are not affected. Both are remembered.
+- Webviews start sound only after a user action, so the panel shows *Click the picture to enable
+  audio* until you click or press a key in it.
+- **Audio** in the stream settings turns the audio stream on or off for every client (device-wide,
+  stored as `audio_enabled` in `settings.json`; also `PUT /stream/settings` with `{"audio": false}`
+  or the `set_stream_settings` tool). Turning it off closes every audio socket.
+- Playback runs in an AudioWorklet that keeps about 120 ms of sound buffered and drops back to that
+  when it falls more than 300 ms behind, so sound and picture stay together.
 
 ## Remote input
 
-The viewer and MCP clients can drive the Deck with keyboard, mouse and gamepad input. It is **off
-by default**. Turn it on with the **Allow remote input** toggle in the Decky Toolkit panel, the
-**⌨ Input** button in the viewer, `PUT /input/settings` or the `set_input_enabled` tool. The setting
+The screen panel and MCP clients can drive the Deck with keyboard, mouse and gamepad input. It is
+**off by default**. Turn it on with the **Allow remote input** toggle in the Decky Toolkit panel, the
+keyboard icon in the screen panel's tab bar, `PUT /input/settings` or the `set_input_enabled` tool. The setting
 is stored in `settings.json` and applies to every client.
 
-In the viewer, with input on:
+In the screen panel, with input on:
 
 - **Mouse and keyboard**: click the picture to capture the keyboard (a blue outline shows it).
   Mouse moves, clicks and the wheel land on the matching spot of the Deck screen, and keys are sent
-  by physical position (`KeyboardEvent.code`). Clicking the toolbar, switching tabs or leaving the
-  window releases every held key.
-- **Gamepad**: a controller plugged into the viewer machine is forwarded about 60 times a second
-  while the page has focus ("🎮 connected" in the toolbar). It shows up on the Deck as an Xbox 360
-  pad, and the pad is removed 60 s after the last input.
+  by physical position (`KeyboardEvent.code`). Clicking outside the picture, switching tabs or
+  leaving the window releases every held key.
+- **Gamepad**: a controller plugged into your computer is forwarded about 60 times a second while
+  the panel has focus (the panel briefly shows *Gamepad connected*). By default it drives a pad the
+  Deck creates on its own (an Xbox 360 pad, removed 60 s after the last input); **Gamepad goes to**
+  in the stream settings sends it to one of your virtual pads instead, or creates one.
 
 Keyboard and mouse go through gamescope's own libei input server, so a pointer position lands 1:1
 on the Steam UI (verified to the pixel) and a key press works like a real keyboard. If gamescope
@@ -176,7 +165,7 @@ install.
 Security notes for input:
 
 - Input is full control of the device: store purchases, Desktop Mode, a terminal. It needs the
-  token (bearer or the viewer cookie) and passes the same `Origin` check as the other routes.
+  bearer token and passes the same `Origin` check as the other routes.
 - Input is off until you turn it on.
 - The Deck shows a toast "Remote input from <ip>" when a client starts sending input, and every
   input session is written to the plugin log.
