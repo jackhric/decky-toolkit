@@ -74,18 +74,35 @@ export class ScreenPanel {
   /** undefined until loaded, null on a device without stream settings. */
   private stream?: StreamSettings | null;
 
-  static async show(ctx: vscode.ExtensionContext, conn: Connection, controllers: ControllerWatcher): Promise<void> {
+  static async show(
+    ctx: vscode.ExtensionContext, conn: Connection, controllers: ControllerWatcher,
+    where: { viewColumn: vscode.ViewColumn; preserveFocus?: boolean } = { viewColumn: vscode.ViewColumn.Beside },
+  ): Promise<void> {
     if (ScreenPanel.current) {
       ScreenPanel.current.panel.reveal();
       return;
     }
     const { external } = await externalProxyBase(conn);
-    const panel = vscode.window.createWebviewPanel('decky-toolkit.screen', screenTitle(conn), vscode.ViewColumn.Beside, {
-      enableScripts: true,
+    const panel = vscode.window.createWebviewPanel('decky-toolkit.screen', screenTitle(conn), where, {
+      ...webviewOptions(ctx),
       retainContextWhenHidden: true,
-      localResourceRoots: [vscode.Uri.joinPath(ctx.extensionUri, 'media')],
     });
     ScreenPanel.current = new ScreenPanel(ctx, conn, controllers, panel, external);
+  }
+
+  /**
+   * Replaces a screen tab left by an earlier extension host. VS Code restarts the extension host when the first
+   * workspace folder changes or a folder window becomes a workspace (opening a decky:// folder does); the tab
+   * survives without its proxy or message handler and never recovers, and serializers are not asked to revive it.
+   */
+  static async replaceOrphan(ctx: vscode.ExtensionContext, conn: Connection, controllers: ControllerWatcher): Promise<void> {
+    const orphan = vscode.window.tabGroups.all.flatMap(g => g.tabs)
+      .find(t => t.input instanceof vscode.TabInputWebview && t.input.viewType.endsWith('decky-toolkit.screen'));
+    if (!orphan || ScreenPanel.current) return;
+    const focused = orphan.isActive && orphan.group.isActive;
+    // Opened before the old tab closes, so a group holding only the screen stays where it is.
+    await ScreenPanel.show(ctx, conn, controllers, { viewColumn: orphan.group.viewColumn, preserveFocus: !focused });
+    await vscode.window.tabGroups.close(orphan, true);
   }
 
   static pause(paused: boolean): void { ScreenPanel.current?.setPaused(paused); }
@@ -328,6 +345,10 @@ export class ScreenPanel {
     ScreenPanel.current = undefined;
     this.disposables.forEach(d => d.dispose());
   }
+}
+
+function webviewOptions(ctx: vscode.ExtensionContext): vscode.WebviewOptions {
+  return { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(ctx.extensionUri, 'media')] };
 }
 
 function esc(s: string): string {
