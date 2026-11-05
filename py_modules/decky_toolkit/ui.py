@@ -239,3 +239,223 @@ class UiNavigator:
         await self._eval(_nav_js(body))
         await asyncio.sleep(self.settle)
         return {"ok": True, **await self.state()}
+
+
+TargetEvaluate = Callable[[str, str], Awaitable[Any]]
+QUERY_TARGET = "Steam Big Picture Mode"
+SIDE_MENU_TARGETS = {"quick_access": "QuickAccess", "main": "MainMenu"}
+MAX_LIMIT = 200
+MAX_TEXT = 160
+
+# Viewport geometry plus a raw element record. Popup windows (QuickAccess, MainMenu) sit at
+# screenX/screenY on the display, in CSS px of the same devicePixelRatio as the Big Picture tab.
+_ELEMENT_JS = """const __vp = {w: innerWidth, h: innerHeight, sx: screenX, sy: screenY, sw: screen.width, sh: screen.height,
+  dpr: devicePixelRatio};
+const __shown = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 &&
+  (el.checkVisibility ? el.checkVisibility({opacityProperty: true, visibilityProperty: true}) : true); };
+const __el = (el) => { const r = el.getBoundingClientRect();
+  return {tag: el.tagName.toLowerCase(), id: el.id || null, classes: [...el.classList],
+    text: String(el.innerText ?? el.textContent ?? '').slice(0, 2000), label: el.getAttribute('aria-label'),
+    rect: [r.x, r.y, r.width, r.height], shown: __shown(el),
+    focused: el.classList.contains('gpfocus') || el === document.activeElement}; };
+"""
+
+_QUERY_JS = """(() => { %s
+  const sel = %s, needle = %s, limit = %d;
+  let els = null;
+  if (sel) { try { els = [...document.querySelectorAll(sel)]; } catch (e) { throw new Error('DMCP: invalid selector: ' + e.message); } }
+  let exact = new Set();
+  if (needle) {
+    const n = needle.toLowerCase();
+    const own = (el) => (el.getAttribute('aria-label') || '').toLowerCase();
+    const hit = (el) => (el.textContent || '').toLowerCase().includes(n) || own(el).includes(n);
+    let m = (els ?? [...document.body.querySelectorAll('*')]).filter(hit);
+    if (!sel) { const s = new Set(m); m = m.filter(el => ![...el.children].some(c => s.has(c))); }
+    exact = new Set(m.filter(el => (el.textContent || '').trim().toLowerCase() === n || own(el) === n));
+    els = m;
+  }
+  els = els || [];
+  const ranked = els.map((el, i) => ({el, i, v: __shown(el) ? 0 : 1, x: exact.has(el) ? 0 : 1}))
+    .sort((a, b) => a.v - b.v || a.x - b.x || a.i - b.i);
+  return {vp: __vp, total: els.length, items: ranked.slice(0, limit).map(r => __el(r.el))};
+})()"""
+
+_FOCUS_JS = """(() => { %s
+  const gp = [...document.querySelectorAll('.gpfocus')];
+  const a = document.activeElement;
+  return {vp: __vp, window_focused: document.hasFocus(), gpfocus: gp.map(__el),
+          active: a && a !== document.body && a !== document.documentElement ? __el(a) : null};
+})()"""
+
+
+# Quick Access, main menu and toasts are child browser views of the Big Picture window. Their own
+# screenX/screenY read 0 after a Steam UI reload, but GetBounds() on the parent's views is reliable
+# (QuickAccess: x 1005.5, y 40, 854x681 CSS px on a 1353x761 window, partly off screen).
+_VIEW_BOUNDS_JS = """(async () => {
+  const pops = [...(window.g_PopupManager?.m_mapPopups?.values?.() || [])];
+  const views = pops.flatMap(p => p.m_rgChildBrowserViews || []);
+  return (await Promise.all(views.map(v => Promise.resolve().then(() => v.GetBounds()).catch(() => null)))).filter(b => b && b.width > 0);
+})()"""
+
+
+class UiTimeout(ValueError):
+    pass
+
+
+def place_view(vp: dict[str, Any], bounds: list[dict[str, Any]]) -> dict[str, Any]:
+    """Give a child view's viewport its offset on the display: the bounds entry of the same size."""
+    for b in bounds or []:
+        if abs(b.get("width", 0) - vp["w"]) <= 2 and abs(b.get("height", 0) - vp["h"]) <= 2:
+            return {**vp, "sx": b.get("x", 0), "sy": b.get("y", 0)}
+    return vp
+
+
+def _denominators(vp: dict[str, Any]) -> tuple[float, float]:
+    # The Big Picture tab fills the display (innerWidth 1353 vs screen.width 1352 at dpr 1.42); a popup is
+    # smaller and offset, so it maps through the screen size.
+    if not vp.get("sx") and not vp.get("sy"):
+        return max(vp["w"], vp.get("sw") or 0) or 1, max(vp["h"], vp.get("sh") or 0) or 1
+    return vp.get("sw") or vp["w"] or 1, vp.get("sh") or vp["h"] or 1
+
+
+def shape_element(raw: dict[str, Any], vp: dict[str, Any]) -> dict[str, Any]:
+    """Raw element record from the page -> rect in CSS px, centre normalised 0..1 across the display
+    (input_mouse x/y) and in display pixels (input_mouse pixels=true), and whether it is on screen.
+    The centre is that of the part inside both the tab's viewport and the display, so a partly
+    clipped element still gets a point that hits it."""
+    x, y, w, h = (float(v or 0) for v in raw.get("rect") or (0, 0, 0, 0))
+    sx, sy = float(vp.get("sx") or 0), float(vp.get("sy") or 0)
+    dw, dh = _denominators(vp)
+    left, right = max(x, 0.0, -sx), min(x + w, float(vp["w"]), dw - sx)
+    top, bottom = max(y, 0.0, -sy), min(y + h, float(vp["h"]), dh - sy)
+    on_screen = w > 0 and h > 0 and right > left and bottom > top
+    if not on_screen:
+        left, right, top, bottom = x, x + w, y, y + h
+    cx, cy = sx + (left + right) / 2, sy + (top + bottom) / 2
+    nx, ny = cx / dw, cy / dh
+    dpr = float(vp.get("dpr") or 1)
+    text = " ".join(str(raw.get("text") or "").split())
+    if len(text) > MAX_TEXT:
+        text = text[:MAX_TEXT - 1] + "…"
+    out = {
+        "tag": raw.get("tag"),
+        "id": raw.get("id") or None,
+        "classes": list(raw.get("classes") or []),
+        "text": text,
+        "rect": {"x": round(x, 1), "y": round(y, 1), "width": round(w, 1), "height": round(h, 1)},
+        "norm": {"x": round(nx, 4), "y": round(ny, 4)},
+        "px": {"x": round(cx * dpr), "y": round(cy * dpr)},
+        "visible": bool(raw.get("shown")) and on_screen,
+        "focused": bool(raw.get("focused")),
+    }
+    if raw.get("label"):
+        out["label"] = raw["label"]
+    return out
+
+
+def _brief(el: dict[str, Any] | None) -> str:
+    if not el:
+        return "nothing"
+    return f"<{el['tag']}{' #' + el['id'] if el.get('id') else ''}> {el['text'][:60]!r} at {el['norm']}"
+
+
+class UiInspector:
+    def __init__(self, navigator: UiNavigator | None = None, evaluate: TargetEvaluate | None = None,
+                 sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep):
+        self.nav = navigator or UiNavigator()
+        self._evaluate = evaluate or (lambda target, js: cdp.evaluate_in(target, js, timeout=10))
+        self._sleep = sleep
+
+    async def _eval(self, target: str, js: str) -> Any:
+        try:
+            return await self._evaluate(target, js)
+        except cdp.CdpError as e:
+            msg = str(e)
+            if "DMCP: " in msg:
+                raise ValueError(msg.split("DMCP: ", 1)[1].splitlines()[0]) from None
+            raise
+
+    async def _viewport(self, vp: dict[str, Any]) -> dict[str, Any]:
+        if vp.get("sw") and vp["w"] < vp["sw"] - 2:
+            try:
+                return place_view(vp, await self._eval("SharedJSContext", _VIEW_BOUNDS_JS))
+            except cdp.CdpError:
+                pass
+        return vp
+
+    async def query(self, selector: str | None = None, text: str | None = None, target: str | None = None,
+                    limit: int = 20) -> dict[str, Any]:
+        if not selector and not text:
+            raise ValueError("give selector and/or text")
+        limit = max(1, min(int(limit), MAX_LIMIT))
+        target = target or QUERY_TARGET
+        js = _QUERY_JS % (_ELEMENT_JS, json.dumps(selector or None), json.dumps(text or None), limit)
+        raw = await self._eval(target, js)
+        if not isinstance(raw, dict):
+            raise cdp.CdpError(f"{target} returned no query result")
+        vp = await self._viewport(raw["vp"])
+        items = [shape_element(r, vp) for r in raw.get("items") or []]
+        items.sort(key=lambda e: not e["visible"])
+        return {"target": target, "total": raw.get("total", len(items)), "elements": items}
+
+    async def focus(self, target: str | None = None) -> dict[str, Any]:
+        state = await self.nav.state()
+        # The Quick Access and main menus are separate CEF windows with their own focus tree.
+        target = target or SIDE_MENU_TARGETS.get(state.get("side_menu") or "", QUERY_TARGET)
+        raw = await self._eval(target, _FOCUS_JS % _ELEMENT_JS)
+        if not isinstance(raw, dict):
+            raise cdp.CdpError(f"{target} returned no focus data")
+        vp = await self._viewport(raw["vp"])
+        gp = [shape_element(r, vp) for r in raw.get("gpfocus") or []]
+        active = shape_element(raw["active"], vp) if raw.get("active") else None
+        element = next((e for e in gp if e["visible"]), gp[0] if gp else active)
+        out: dict[str, Any] = {"route": state.get("current"), "side_menu": state.get("side_menu"), "target": target,
+                               "window_focused": bool(raw.get("window_focused")), "element": element}
+        if len(gp) > 1:
+            out["gpfocus"] = gp
+        if active and (not element or active["rect"] != element["rect"]):
+            out["active_element"] = active
+        return out
+
+    async def wait_for(self, selector: str | None = None, text: str | None = None, route: str | None = None,
+                       gone: bool = False, timeout: float = 10, interval: float = 0.25,
+                       target: str | None = None) -> dict[str, Any]:
+        if route is not None and (selector or text):
+            raise ValueError("give route, or selector and/or text, not both")
+        if route is None and not selector and not text:
+            raise ValueError("give selector, text or route")
+        timeout = max(0.0, min(float(timeout), 120.0))
+        interval = max(0.05, min(float(interval), 5.0))
+        want = (route.rstrip("/") or "/") if route is not None else None
+        loop = asyncio.get_running_loop()
+        start = loop.time()
+        last_error: str | None = None
+        while True:
+            try:
+                if want is not None:
+                    current = (await self.nav.state()).get("current")
+                    if (current == want) != gone:
+                        return {"ok": True, "elapsed_s": round(loop.time() - start, 2), "route": current}
+                else:
+                    res = await self.query(selector, text, target, limit=5)
+                    visible = [e for e in res["elements"] if e["visible"]]
+                    if bool(visible) != gone:
+                        out: dict[str, Any] = {"ok": True, "elapsed_s": round(loop.time() - start, 2)}
+                        if visible:
+                            out["element"] = visible[0]
+                        return out
+                last_error = None
+            except cdp.CdpError as e:
+                last_error = str(e)  # the tab can vanish briefly, e.g. while a plugin reloads
+            if loop.time() - start + interval > timeout:
+                break
+            await self._sleep(interval)
+        what = f"route {want}" if want is not None else " ".join(
+            f"{k}={v!r}" for k, v in (("selector", selector), ("text", text)) if v)
+        try:
+            focus = await self.focus()
+            where = f"current route {focus['route']}, focus {_brief(focus['element'])}"
+        except (cdp.CdpError, ValueError) as e:
+            where = f"current route and focus unknown ({e})"
+        extra = f"; last error: {last_error}" if last_error else ""
+        raise UiTimeout(f"timed out after {timeout:g}s waiting for {what}{' to go' if gone else ''}; {where}{extra}")

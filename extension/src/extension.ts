@@ -10,12 +10,16 @@ import {
   addDevice, changeHost, copyViewerUrl, deviceActions, deviceFrom, editDevice, removeDevice, switchDevice, viewerUrl,
 } from './devices';
 import { DevicesTreeProvider } from './devicesTree';
+import {
+  GamesTreeProvider, copyDeckyPath, findGame, gameLaunch, gameProtonLog, gameTerminate, openDeckyPath, openGameSaves, openNodeInExplorer,
+} from './games';
 import { toggleInput } from './input';
 import { LogManager } from './logs';
 import { navigate, openPluginPanel, simpleNavigate } from './navigation';
 import { connect, enterToken, pair } from './pairing';
 import { PluginsTreeProvider } from './pluginsTree';
 import { PreviewViewProvider } from './preview';
+import { DeckyFileSystemProvider, SCHEME } from './remoteFs';
 import { ScreenPanel, StatusBar } from './screenPanel';
 
 export { connectionTimings } from './connection';
@@ -27,6 +31,9 @@ let conn: Connection | undefined;
 export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   conn = new Connection(ctx);
   const c = conn;
+  // Registered before any await so a restored decky:// workspace folder resolves as soon as we activate.
+  const remoteFs = new DeckyFileSystemProvider(c);
+  ctx.subscriptions.push(remoteFs, vscode.workspace.registerFileSystemProvider(SCHEME, remoteFs, { isCaseSensitive: true }));
   await c.initDevices();
   await c.refresh();
   const status = new StatusBar(c);
@@ -41,12 +48,14 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   const devicesView = vscode.window.createTreeView('decky-toolkit.devices', { treeDataProvider: devicesTree });
   const actionsView = vscode.window.createTreeView('decky-toolkit.actions', { treeDataProvider: actionsTree });
   const pluginsView = vscode.window.createTreeView('decky-toolkit.plugins', { treeDataProvider: pluginsTree });
+  const gamesTree = new GamesTreeProvider(c);
+  const gamesView = vscode.window.createTreeView('decky-toolkit.games', { treeDataProvider: gamesTree, showCollapseAll: true });
   const controllers = new ControllerWatcher(c, () => c.proxy.start());
   const controllersTree = new ControllersTreeProvider(controllers);
   const controllersView = vscode.window.createTreeView('decky-toolkit.controllers', { treeDataProvider: controllersTree });
   ctx.subscriptions.push(
     c, status, logs, deployOut, consoleOut, workspacePlugins, devicesTree, actionsTree, pluginsTree, devicesView, actionsView, pluginsView,
-    controllers, controllersTree, controllersView,
+    controllers, controllersTree, controllersView, gamesTree, gamesView,
     vscode.window.registerWebviewViewProvider(PreviewViewProvider.viewId, preview),
   );
   const refreshPlugins = () => pluginsTree.refresh();
@@ -65,11 +74,13 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
       sessionId = connected?.id;
       refreshPlugins();
       controllersTree.refresh();
+      gamesTree.refresh();
     }
     const d = connected && (c.health.kind === 'unreachable' ? `${connected.name} · unreachable` : connected.name);
     actionsView.description = d;
     pluginsView.description = d;
     controllersView.description = d;
+    gamesView.description = d;
     preview.setDescription(d);
     if (c.paired && connected && actionsView.visible) {
       statsLease ??= c.watchStats();
@@ -155,6 +166,15 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   command('decky-toolkit.uiBack', () => simpleNavigate(c, { action: 'back' }));
   command('decky-toolkit.uiQuickAccess', () => simpleNavigate(c, { action: 'quick_access' }));
   command('decky-toolkit.uiCloseMenus', () => simpleNavigate(c, { action: 'close_menus' }));
+  command('decky-toolkit.findGame', () => findGame(c, gamesTree, gamesView));
+  command('decky-toolkit.refreshGames', async () => gamesTree.refresh());
+  command('decky-toolkit.openGameSaves', arg => openGameSaves(c, gamesTree, arg));
+  command('decky-toolkit.openDeckyPath', () => openDeckyPath(c));
+  command('decky-toolkit.gameLaunch', arg => gameLaunch(c, gamesTree, arg));
+  command('decky-toolkit.gameTerminate', arg => gameTerminate(c, gamesTree, arg));
+  command('decky-toolkit.gameProtonLog', arg => gameProtonLog(c, gamesTree, arg));
+  command('decky-toolkit.openInExplorer', arg => openNodeInExplorer(c, arg));
+  command('decky-toolkit.copyDeckyPath', arg => copyDeckyPath(arg));
   command('decky-toolkit.deploy', () => deployer.deploy());
   command('decky-toolkit.deployFull', () => deployer.deploy({ full: true }));
   command('decky-toolkit.toggleAutoDeploy', async () => {

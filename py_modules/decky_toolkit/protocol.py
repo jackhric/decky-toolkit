@@ -35,6 +35,7 @@ class McpServer:
     def __init__(self, tools: ToolRegistry, logger: logging.Logger):
         self.tools = tools
         self.log = logger
+        tools.log = logger
         self._methods: dict[str, Handler] = {
             "initialize": self._initialize,
             "ping": self._ping,

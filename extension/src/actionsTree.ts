@@ -92,6 +92,7 @@ export class ActionsTreeProvider implements vscode.TreeDataProvider<ActionNode>,
       ]),
       group('steam', 'Steam', 'game', false, [
         leaf('navigate', 'Navigate to…', 'compass', 'decky-toolkit.navigate'),
+        leaf('openGameSaves', 'Open save data…', 'save', 'decky-toolkit.openGameSaves'),
         leaf('openPluginPanel', 'Open plugin panel…', 'extensions', 'decky-toolkit.openPluginPanel'),
         leaf('uiBack', 'Back', 'arrow-left', 'decky-toolkit.uiBack'),
         leaf('uiQuickAccess', 'Quick Access', 'layout-sidebar-right', 'decky-toolkit.uiQuickAccess'),
