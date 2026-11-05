@@ -103,7 +103,7 @@ def test_call_plugin_method(monkeypatch):
 
 
 def test_call_plugin_method_redacts_token(monkeypatch):
-    status = {"enabled": True, "token": "secret", "url": "http://h:8765/mcp", "viewer_url": "http://h:8765/viewer?token=secret",
+    status = {"enabled": True, "token": "secret", "url": "http://h:8765/mcp",
               "nested": [{"token": "x", "keep": 1}]}
 
     async def fake_eval(title, js, timeout=15):
@@ -113,4 +113,3 @@ def test_call_plugin_method_redacts_token(monkeypatch):
     res = asyncio.run(plugin_api.call_plugin_method("Decky Toolkit", "get_status"))
     assert res["result"] == {"enabled": True, "url": "http://h:8765/mcp", "nested": [{"keep": 1}]}
     assert "secret" not in json.dumps(res)
-    assert plugin_api.redact_secrets({"viewer_url": "http://h/viewer"}) == {"viewer_url": "http://h/viewer"}

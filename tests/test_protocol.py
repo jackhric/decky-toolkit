@@ -34,7 +34,7 @@ def make_registry() -> ToolRegistry:
 
 async def with_server(fn):
     api = Api(auth=TokenAuth(TOKEN), mcp=McpServer(make_registry(), logging.getLogger("t")), capturer=None,
-              static_dir=None, logger=logging.getLogger("t"))
+              logger=logging.getLogger("t"))
     runner = web.AppRunner(api.build_app())
     await runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", 0)
@@ -101,18 +101,3 @@ def test_mcp_flow():
     asyncio.run(with_server(run))
 
 
-def test_viewer_token_and_cookie():
-    async def run(s, base):
-        async with s.get(f"{base}/viewer") as r:
-            assert r.status == 401
-        async with s.get(f"{base}/viewer?token=wrong", allow_redirects=False) as r:
-            assert r.status == 401
-        async with s.get(f"{base}/viewer?token={TOKEN}", allow_redirects=False) as r:
-            assert r.status == 302 and "decky_toolkit_token" in r.headers.get("Set-Cookie", "")
-        # cookie now authorises token-protected routes too
-        async with s.get(f"{base}/stream/stats") as r:
-            assert r.status == 200
-        s.cookie_jar.clear()
-        async with s.get(f"{base}/viewer") as r:
-            assert r.status == 401
-    asyncio.run(with_server(run))

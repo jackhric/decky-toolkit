@@ -5,7 +5,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable
 
-CLIENT_KINDS = ("vscode", "browser", "mcp", "other")
+CLIENT_KINDS = ("vscode", "mcp", "other")
 MAX_PENDING = 10
 MAX_PENDING_PER_REMOTE = 2
 MAX_NAME_LEN = 64
@@ -35,7 +35,6 @@ class PairingRequest:
     status: str = "pending"
     resolved_at: float | None = None
     token_delivered: bool = False
-    cookie_delivered: bool = False
     waiters: int = 0
     changed: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
 
@@ -150,12 +149,6 @@ class PairingRequests:
         if req.status != "approved" or req.token_delivered:
             return False
         req.token_delivered = True
-        return True
-
-    def claim_cookie(self, req: PairingRequest) -> bool:
-        if req.status != "approved" or req.cookie_delivered:
-            return False
-        req.cookie_delivered = True
         return True
 
     def prune(self) -> int:

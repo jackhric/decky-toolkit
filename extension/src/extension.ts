@@ -7,7 +7,7 @@ import { Connection } from './connection';
 import { ControllerWatcher, ControllersTreeProvider, addVirtualController, removeVirtualController } from './controllers';
 import { DeployController, PluginWorkspace } from './deploy';
 import {
-  addDevice, changeHost, copyViewerUrl, deviceActions, deviceFrom, editDevice, removeDevice, switchDevice, viewerUrl,
+  addDevice, changeHost, deviceActions, deviceFrom, editDevice, removeDevice, switchDevice,
 } from './devices';
 import { DevicesTreeProvider } from './devicesTree';
 import {
@@ -148,16 +148,18 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   command('decky-toolkit.removeDevice', arg => removeDevice(c, arg));
   command('decky-toolkit.switchDevice', () => switchDevice(c));
   command('decky-toolkit.deviceActions', arg => deviceActions(c, arg));
-  command('decky-toolkit.copyViewerUrl', arg => copyViewerUrl(c, arg));
   command('decky-toolkit.openScreen', async () => {
     if (await c.client()) await ScreenPanel.show(ctx, c, controllers);
   });
-  command('decky-toolkit.openViewer', async () => {
-    const d = (await c.client()) && c.connectedDevice;
-    if (d) await vscode.env.openExternal(vscode.Uri.parse(viewerUrl(d)));
-  });
   command('decky-toolkit.snapshot', () => snapshot(c));
   command('decky-toolkit.toggleInput', () => toggleInput(c));
+  command('decky-toolkit.screen.inputOn', () => toggleInput(c, true));
+  command('decky-toolkit.screen.inputOff', () => toggleInput(c, false));
+  command('decky-toolkit.screen.mute', async () => ScreenPanel.mute(true));
+  command('decky-toolkit.screen.unmute', async () => ScreenPanel.mute(false));
+  command('decky-toolkit.screen.pause', async () => ScreenPanel.pause(true));
+  command('decky-toolkit.screen.resume', async () => ScreenPanel.pause(false));
+  command('decky-toolkit.screen.settings', () => ScreenPanel.settings());
   command('decky-toolkit.addVirtualController', () => addVirtualController(c, controllers));
   command('decky-toolkit.removeVirtualController', arg => removeVirtualController(c, controllers, arg));
   command('decky-toolkit.refreshControllers', async () => controllersTree.refresh());

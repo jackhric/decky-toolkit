@@ -147,11 +147,10 @@ async def call_plugin_method(plugin: str, method: str, args: list[Any] | None = 
 
 
 def redact_secrets(value: Any) -> Any:
-    """Drop `token` keys (and viewer URLs carrying one): Decky Toolkit's own get_status returns the bearer token,
+    """Drop `token` keys: Decky Toolkit's own get_status returns the bearer token,
     which must not leak to an MCP client through a plugin call."""
     if isinstance(value, dict):
-        return {k: redact_secrets(v) for k, v in value.items()
-                if k != "token" and not (k == "viewer_url" and isinstance(v, str) and "token=" in v)}
+        return {k: redact_secrets(v) for k, v in value.items() if k != "token"}
     if isinstance(value, list):
         return [redact_secrets(v) for v in value]
     return value

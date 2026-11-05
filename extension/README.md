@@ -63,7 +63,7 @@ row shows the host once and the state as the description; otherwise the descript
 | unreachable | `warning` (yellow) | `unreachable` | connect (retries) | Connect, `…` |
 
 The `…` icon and the right-click menu hold the rest: **Re-pair** (only for a paired device),
-**Enter token manually**, **Edit**, **Copy viewer URL** and **Remove**. A connected device never
+**Enter token manually**, **Edit** and **Remove**. A connected device never
 shows Pair, Enter token or Connect as a row or a button. Connect and disconnect live only here.
 
 The view title has **Add device** (+) and **Refresh** (also checks which devices answer). With no
@@ -78,9 +78,6 @@ you expand or collapse.
 - **Screen** (description: fps and Mbit/s from `/stream/stats`, polled every 5 s only while the
   view is visible)
   - **Open screen panel**: the live screen in an editor tab.
-  - **Open viewer in browser**: opens `http://host:port/viewer`. The browser is paired on its own:
-    it shows a **Request access** page and you allow it on the device, unless it still has the
-    cookie from an earlier pairing.
   - **Snapshot to file**: fetches `/frame.jpg` and saves it (default name `screen-<timestamp>.jpg`).
 - **Plugin** (description: `<name> v<version>` of the detected plugin; the tooltip names its folder
   and the directory it deploys to)
@@ -283,49 +280,63 @@ instead of a notification.
 
 The screen panel can drive the device with your keyboard, mouse and a gamepad. Remote input is **off
 by default** and is a device-wide switch: it is the same flag as the **Allow remote input** toggle
-in the device's Decky Toolkit panel and the **⌨ Input** button in the browser viewer.
+in the device's Decky Toolkit panel.
 
-- **Turn it on or off** with the **Input** button in the screen panel toolbar (highlighted while
-  on), or run **Decky: Toggle remote input** from the command palette. The extension sends
+- **Turn it on or off** with the keyboard icon in the screen panel's tab bar (`$(keyboard)` while
+  off, `$(record-keys)` while on), or run **Decky: Toggle remote input** from the command palette. The extension sends
   `PUT /input/settings`; the panel itself never calls the device for this. While input is on the
-  status bar shows `$(keyboard)` after the device's name. If the device cannot inject input, the button
-  is disabled and its tooltip gives the reason. A Deck whose plugin predates remote input shows
+  status bar shows `$(keyboard)` after the device's name. If the device cannot inject input, turning
+  it on shows a warning with the reason. A Deck whose plugin predates remote input shows
   *not supported by this device version*.
 - **Mouse and keyboard**: click the picture to capture input (a focus outline shows it). Mouse
   moves, clicks and the wheel land on the matching spot of the device screen, and keys are sent by
   physical position (`KeyboardEvent.code`), so VS Code keybindings do not fire while the picture
-  has focus. Click the toolbar, switch tabs or leave the window to give the keyboard back; every
-  held key and button is released.
+  has focus. Click outside the picture, switch tabs or leave the window to give the keyboard back;
+  every held key and button is released.
 - **Gamepad**: a controller connected to this computer is forwarded about 60 times a second while
-  the panel has focus ("Gamepad connected" in the toolbar). It appears on the device as an Xbox 360
-  pad. Whether the Gamepad API works inside a webview depends on the VS Code build.
-- **Forward to**: next to *Gamepad connected*, a select picks which pad on the device your gamepad
-  drives: **Auto** (the pad the device creates on its own, the default) or one of the virtual pads
-  from the [Controllers](#controllers) view; **New virtual pad…** adds one and selects it. The
-  choice goes into the `pad` field of every gamepad message; switching sends the old pad a neutral
-  state first. The panel remembers the choice and falls back to Auto when that pad is removed. A
-  device without controller management shows no select.
+  the panel has focus (the panel briefly shows *Gamepad connected*). It appears on the device as an
+  Xbox 360 pad. Whether the Gamepad API works inside a webview depends on the VS Code build.
+- **Gamepad goes to** (in the stream settings) picks which pad on the device your gamepad drives:
+  **Auto** (the pad the device creates on its own, the default) or one of the virtual pads from the
+  [Controllers](#controllers) view; **New virtual pad…** adds one and selects it. The choice goes
+  into the `pad` field of every gamepad message; switching sends the old pad a neutral state first.
+  It falls back to Auto when that pad is removed. A device without controller management does not
+  offer it.
 
 The panel's WebSocket (`/input`) goes through the same loopback proxy as the stream, which adds the
 token during the handshake.
 
-## Stream settings and audio
+## Screen panel controls
 
-The screen panel toolbar has the same controls as the browser viewer:
+The panel is only the picture. Its controls are native icons in the editor tab bar, shown while the
+panel is the active editor of its group:
 
-- **Stream** opens frame rate (15/24/30/60 fps), JPEG quality (50-90), size (native, 1600, 1280,
-  960, 640 px wide) and **Audio** on/off. These are device-wide (`/stream/settings`, the same values
-  the browser viewer and the `set_stream_settings` tool change). Like the input toggle, the panel
-  asks the extension, which sends the `PUT`; the controls show *Applying…* until the first frame of
-  the restarted stream arrives. Changes made elsewhere show up within one 5 s stats poll. A device
-  without the route hides the button.
-- **Sound** is on by default: the panel plays what the device is playing (`/audio`, raw 48 kHz
-  stereo PCM, about 1.5 Mbit/s, through the same loopback proxy) with an AudioWorklet that keeps
-  about 120 ms buffered and drops back when it falls 300 ms behind. **🔊 / 🔇** mutes this window
-  only and the slider sets the local volume; both are kept with the panel's state. Until VS Code
-  allows sound (it may need a click in the panel first) the toolbar says *Click anywhere to enable
-  audio*. The audio socket closes while the panel is hidden, like the video stream.
-- **Fullscreen** appears only where the webview allows the Fullscreen API.
+| Icon | Command | What it does |
+| --- | --- | --- |
+| `$(keyboard)` / `$(record-keys)` | Turn on / off remote input | Device-wide, see [Remote input](#remote-input) |
+| `$(unmute)` / `$(mute)` | Mute / Unmute | Sound on this computer only; shown while the device streams audio |
+| `$(settings-gear)` | Stream settings… | QuickPick, see below |
+| `$(debug-pause)` / `$(play)` | Pause / Resume | Freezes the picture; the stream stays connected |
+| `$(device-camera)` | Snapshot to file | Saves the current `/frame.jpg` with a Save dialog |
+
+**Stream settings…** lists:
+
+- *Stream · every client*: **Frame rate** (15/24/30/60 fps), **JPEG quality** (50-90), **Size**
+  (native, 1600, 1280, 960, 640 px wide) and **Audio** on/off. These are device-wide
+  (`/stream/settings`, the same values the `set_stream_settings` tool changes); the extension sends
+  the `PUT`, and the panel shows *Applying stream settings…* until the first frame of the restarted
+  stream arrives. Changes made elsewhere show up within one 5 s stats poll. A device without the
+  route offers only the local entries.
+- *This computer*: **Volume** (100-10 %; picking one unmutes) and **Gamepad goes to** (see
+  [Remote input](#remote-input)). Mute and volume are remembered across panels and sessions.
+
+**Sound** is on by default: the panel plays what the device is playing (`/audio`, raw 48 kHz stereo
+PCM, about 1.5 Mbit/s, through the same loopback proxy) with an AudioWorklet that keeps about 120 ms
+buffered and drops back when it falls 300 ms behind. Until VS Code allows sound (it may need a click
+in the panel first) the panel shows *Click the picture to enable audio*. The audio socket closes
+while the panel is hidden, like the video stream.
+
+The screen is only available here: the device serves no browser viewer.
 
 ## Pairing
 
@@ -384,10 +395,8 @@ All of these are also in the command palette under the `Decky:` category.
 | Decky: Enter token manually | Paste a token; it is checked with an MCP `tools/list` call |
 | Decky: Disconnect and forget token | Forgets the token for the active device |
 | Decky: Switch device / Add device… / Edit device / Remove device | Connect to another saved device, manage saved devices |
-| Decky: Copy viewer URL | Copies `http://host:port/viewer` for a browser |
 | Decky: Change host | Changes the active device's host/port and writes the `decky-toolkit.host`/`port` settings |
-| Decky: Open screen | Live screen panel with sound, fps / Mbps / resolution / audio kbps, stream settings, mute and volume, pause, fit/actual, snapshot and the remote input toggle |
-| Decky: Open viewer in browser | Opens `http://host:port/viewer` in the default browser (pair the browser on the device) |
+| Decky: Open screen | Live screen panel with sound; remote input, mute, stream settings, pause and snapshot as tab bar icons |
 | Decky: Snapshot to file | Saves the current `/frame.jpg` with a Save dialog |
 | Decky: Deploy plugin | Build if needed, zip, `POST /plugins/install`, reload just this plugin and confirm it (<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd>) |
 | Decky: Deploy plugin (full restart) | Same, but restarts Decky Loader and waits for `/health` |
@@ -494,24 +503,24 @@ full restart, a failing build and auto-deploy on change. It also checks that Con
 (name, kind, the waiting message and the row's code, then approval), a denied request with Try
 again, waiting through a lost connection and a forgotten request (new code) and Cancel sending
 `DELETE`, the "Update Decky Toolkit" path for an older device, the reachability error with Retry, the 15 s health check going unreachable and back, Add device, snapshot, Copy MCP URL /
-token and Open viewer, and the remote input toggle (screen panel message, palette command, status
-bar indicator, unavailable and unsupported devices), and the screen panel's stream settings and
-audio: `ready` loads `/stream/settings`, `setStream` sends only known fields, a stats tick mirrors
-outside changes, a 404 hides the button, and `media/screen.js` run in a minimal DOM toggles mute
-and volume, posts `setStream` with the *Applying…* state and hides the audio controls when audio is
-off device-wide. For controllers it checks the Controllers view rows (empty, physical and virtual,
+token, and the remote input toggle (title action and its icon, palette command, status bar
+indicator, unavailable and unsupported devices), and the screen panel's controls: which tab bar
+actions show with which icons for each state, mute and pause flipping their icon, the stream
+settings QuickPick (`PUT` of one field, *Applying* message, volume unmuting, audio off hiding the
+mute action, a stats tick mirroring outside changes, a 404 leaving only the local entries), and
+`media/screen.js` run in a minimal DOM (audio socket and hint, `/input` socket and its 4003
+handling). For controllers it checks the Controllers view rows (empty, physical and virtual,
 404, error), live updates over SSE through the proxy, add (default name, success text) and remove,
 the 409 and Steam Input refusals shown as-is, the poll fallback and recovery after a 404; the
-screen panel's `pads` message and, in `media/screen.js`, the **Forward to** select (`pad` field,
-neutral state on switch, **New virtual pad…**, fallback to Auto); the Navigate to… picker
+**Gamepad goes to** pick (**New virtual pad…**, fallback to Auto when the pad is removed, none on a
+404) and, in `media/screen.js`, the `pad` field with a neutral state on switch; the Navigate to… picker
 (sections, current page, template prompt), Open plugin panel, Back / Quick Access / Close menus,
 a 400 and a 404; the Games view (a Proton title with saves and prefix shortcuts, a native title, a
 shortcut whose saves fail, a 404 device, errors), the Find game picker, Open save data adding a
 `decky://` workspace folder, launch, terminate with its confirmation, the Proton log tab and Open
 device path; the `decky:` file system against a fake `/fs*` server (stat, listings, symlinks,
 write/read round trip, mkdir, rename, delete with `confirm=1`, refused and sensitive paths as
-`NoPermissions`, unreachable / unpaired / unknown devices as `Unavailable`); and the browser viewer's Controllers popover (`static/viewer.html` in a minimal
-DOM).
+`NoPermissions`, unreachable / unpaired / unknown devices as `Unavailable`).
 
 ### Deploy check (device)
 

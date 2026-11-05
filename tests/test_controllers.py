@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 from aiohttp import ClientSession, ClientTimeout, web  # noqa: E402
 
 from decky_toolkit import cdp, ui  # noqa: E402
-from decky_toolkit.auth import TOKEN_COOKIE, TokenAuth  # noqa: E402
+from decky_toolkit.auth import TokenAuth  # noqa: E402
 from decky_toolkit.controllers import ControllerService, evdev_gamepads, merge, parse_bitmap  # noqa: E402
 from decky_toolkit.http import Api  # noqa: E402
 from decky_toolkit.input import uinput  # noqa: E402
@@ -225,7 +225,7 @@ def test_add_virtual_refused_when_steam_does_not_list_it():
 
 
 async def with_server(fn, **kwargs):
-    api = Api(auth=TokenAuth(TOKEN), mcp=McpServer(ToolRegistry(), LOG), capturer=None, static_dir=None, logger=LOG,
+    api = Api(auth=TokenAuth(TOKEN), mcp=McpServer(ToolRegistry(), LOG), capturer=None, logger=LOG,
               log_keepalive=0.2, **kwargs)
     runner = web.AppRunner(api.build_app())
     await runner.setup()
@@ -245,7 +245,7 @@ def test_controller_routes_and_events():
     async def run(s, base):
         async with s.get(f"{base}/controllers") as r:
             assert r.status == 401
-        async with s.get(f"{base}/controllers", cookies={TOKEN_COOKIE: TOKEN}) as r:
+        async with s.get(f"{base}/controllers", headers=H) as r:
             body = await r.json()
             assert body["controllers"] == [] and body["virtual"] == [] and body["input_enabled"] is False
         async with s.get(f"{base}/controllers/events", headers=H) as ev:
@@ -265,7 +265,7 @@ def test_controller_routes_and_events():
             while not ev1["controllers"] or not ev1["controllers"][0]["seen_by_steam"]:
                 ev1 = await asyncio.wait_for(next_event(), 3)
             assert ev1["virtual"][0]["id"] == "pad1" and ev1["controllers"][0]["virtual_id"] == "pad1"
-            async with s.delete(f"{base}/controllers/virtual/pad1", cookies={TOKEN_COOKIE: TOKEN}) as r:
+            async with s.delete(f"{base}/controllers/virtual/pad1", headers=H) as r:
                 assert r.status == 200 and await r.json() == {"removed": "pad1"}
             ev2 = await asyncio.wait_for(next_event(), 3)
             while ev2["virtual"]:
@@ -391,7 +391,7 @@ def test_ui_routes_http():
     fake = FakeSteamUi()
 
     async def run(s, base):
-        async with s.get(f"{base}/ui/routes", cookies={TOKEN_COOKIE: TOKEN}) as r:
+        async with s.get(f"{base}/ui/routes", headers=H) as r:
             assert r.status == 200 and (await r.json())["current"] == "/library/home"
         async with s.post(f"{base}/ui/navigate", json={"path": "/library/home"}, headers=H) as r:
             assert r.status == 200 and (await r.json())["ok"] is True
