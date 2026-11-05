@@ -67,7 +67,11 @@ The `…` icon and the right-click menu hold the rest: **Re-pair** (only for a p
 shows Pair, Enter token or Connect as a row or a button. Connect and disconnect live only here.
 
 The view title has **Add device** (+) and **Refresh** (also checks which devices answer). With no
-saved devices the view shows **No devices yet. Add a Decky device …** with an **Add device** button.
+saved devices a welcome view takes its place: the flat Decky Toolkit mark, an **Add a device** button,
+the line *The device needs Decky Loader and the Decky Toolkit plugin installed* (the plugin name links to
+this repo) and **How pairing works**, which opens the *Connect a Decky device* walkthrough (install the
+plugin, add the device, approve it, open the screen). The welcome view and the Devices tree switch on the
+`decky-toolkit.hasDevices` context key.
 
 ### Actions
 
