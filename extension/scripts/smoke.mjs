@@ -31,9 +31,15 @@ await esbuild.build({
   logLevel: 'warning',
 });
 
+class TabInputWebview { constructor(viewType) { this.viewType = viewType; } }
+// A screen tab left behind by an earlier extension host (VS Code prefixes the view type).
+const orphanGroup = { viewColumn: 2, isActive: false, tabs: [] };
+orphanGroup.tabs.push({ group: orphanGroup, isActive: true, input: new TabInputWebview('mainThreadWebview-decky-toolkit.screen') });
+const tabGroups = [orphanGroup];
+
 const calls = {
   treeViews: [], treeProviders: [], webviewProviders: [], commands: new Map(), context: new Map(), statusItems: [], executed: [],
-  panels: [], progress: [], messages: [], statusMessages: [], clipboard: [], unexpectedErrors: [], opened: [], written: [], saveDialogs: [],
+  panels: [], closedTabs: [], progress: [], messages: [], statusMessages: [], clipboard: [], unexpectedErrors: [], opened: [], written: [], saveDialogs: [],
   watchers: [], output: [], fsProviders: [], folderUpdates: [], docs: [], revealed: [], decorations: [], channels: new Map(),
 };
 
@@ -104,7 +110,9 @@ const vscode = {
   FileType: { Unknown: 0, File: 1, Directory: 2, SymbolicLink: 64 },
   FileChangeType: { Changed: 1, Created: 2, Deleted: 3 },
   CancellationError: class extends Error {},
+  TabInputWebview,
   window: {
+    tabGroups: { all: tabGroups, close: async tab => { calls.closedTabs.push(tab); for (const g of tabGroups) g.tabs = g.tabs.filter(t => t !== tab); return true; } },
     createStatusBarItem: () => {
       const item = { text: '', tooltip: '', visible: false, show() { this.visible = true; }, hide() { this.visible = false; }, dispose() { this.visible = false; } };
       calls.statusItems.push(item);
@@ -126,12 +134,12 @@ const vscode = {
       calls.treeViews.push({ id, provider: opts.treeDataProvider, view });
       return view;
     },
-    createWebviewPanel: (viewType, title) => {
+    createWebviewPanel: (viewType, title, where) => {
       const dispose = new EventEmitter();
       const received = new EventEmitter();
       const posted = [];
       const panel = {
-        viewType, title, reveal() {}, dispose() { this.disposed = true; dispose.fire(); },
+        viewType, title, where, reveal() {}, dispose() { this.disposed = true; dispose.fire(); },
         onDidDispose: dispose.event, onDidChangeViewState: new EventEmitter().event,
         webview: { html: '', cspSource: 'vscode-resource:', asWebviewUri: u => u, postMessage: async m => { posted.push(m); return true; }, onDidReceiveMessage: received.event },
         _received: received, _posted: posted,
@@ -683,6 +691,17 @@ async function actionsTree() {
   }
   return { roots, kids };
 }
+
+await check('activate() replaces a screen tab orphaned by an extension host restart', async () => {
+  assert.equal(calls.closedTabs.length, 1, 'the orphaned tab is closed');
+  assert.deepEqual(orphanGroup.tabs, []);
+  assert.equal(calls.panels.length, 1, 'a working screen panel takes its place');
+  assert.deepEqual(calls.panels[0].where, { viewColumn: 2, preserveFocus: true }, 'same group; focus stays where it was');
+  calls.panels[0].dispose();
+  calls.panels.length = 0;
+  for (const k of [...calls.context.keys()]) if (k.startsWith('decky-toolkit.screen.')) calls.context.delete(k);
+  return 'orphan closed, new panel in column 2 without stealing focus';
+});
 
 await check('activate() registers the seven views and the decky: file system', async () => {
   const trees = [...calls.treeViews.map(t => t.id), ...calls.treeProviders.map(t => t.id)].sort();

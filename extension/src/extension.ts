@@ -286,6 +286,7 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
       `Decky Toolkit: copied the bearer token for ${c.label}. It is a secret: anyone with it can control the device, so keep it out of shared files and chats.`);
   });
 
+  await ScreenPanel.replaceOrphan(ctx, c, controllers);
   const last = c.lastSessionDevice;
   if (last) void connect(c, last, false);
   void c.probeAll();
