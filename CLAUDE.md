@@ -13,8 +13,13 @@ See README.md for setup and docs/reference.md for the tool list and architecture
   DevTools client for Steam CEF on 127.0.0.1:8080), `settings.py`, `input/` (remote input: `ei.py`
   libei over ctypes, `uinput.py`, `keymap.py`, `service.py` owning state and the virtual pad registry; tools
   in `tools/input.py`), `controllers.py` (Steam Input controller list + evdev merge, virtual pad
-  creation confirmed by Steam; tools in `tools/controllers.py`), `ui.py` (Steam UI navigation; tools
-  in `tools/ui.py`).
+  creation confirmed by Steam; tools in `tools/controllers.py`), `ui.py` (Steam UI navigation and
+  element queries; tools in `tools/ui.py`), `console.py` (background Steam UI console capture; tools in
+  `tools/cef.py`), `audit.py` (request origin context variable, audit middleware), `tools/guard.py`
+  (sensitive-path deny list), `tools/plugin_api.py` (plugin backend methods, calls, frontend call check), `apps.py` (Steam library/launch via the client JS; tools in `tools/apps.py`), `games.py`
+  (game/prefix/save paths, `fs_*` file browser with its sensitive-path and delete guards, `fs_read`/`fs_write`/`fs_mkdir`/`fs_rename` behind `writable` for the `/fs/*` routes, Proton logs; `vdf.py`
+  parses KeyValues; tools in `tools/games.py`), `record.py` (screen recording to MKV; tools in `tools/record.py`),
+  `tools/perf.py` (Steam performance overlay).
 - `src/index.tsx` — Quick Access panel (React, `@decky/ui`, `@decky/api`). Built by `pnpm run build`
   into `dist/index.js`.
 - `scripts/test.sh` — Python tests under uv with the loader's Python major (CI runs it). Deploying this repo to
@@ -215,6 +220,77 @@ See README.md for setup and docs/reference.md for the tool list and architecture
   Opening a plugin panel = `DeckyPluginLoader.deckyState.setActivePlugin(name)` (decky-loader
   `frontend/src/components/DeckyState.tsx`) then `OpenQuickAccessMenu(999)`.
 
+## Developer diagnostics facts (verified 2026-11-04, Steam client 1792618285)
+- Console capture keeps one DevTools websocket per watched tab (SharedJSContext, "Steam Big Picture Mode")
+  with `Runtime.enable` + `Log.enable`. Decky's injector also holds a socket to SharedJSContext; CEF allows
+  several clients and domain enables are per session. With the collector attached, toasts, the Decky
+  panel, Decky settings and `DeckyBackend.call` kept working, and the journal shows the injector's "socket
+  has been disconnected" warning only ~2 s after each loader start (Decky reloading the Steam UI), exactly
+  as before the collector existed.
+- `Runtime.enable` replays the console messages V8 still holds (the Steam UI's startup log since its last
+  reload, ~250 entries) as `Runtime.consoleAPICalled` with their original timestamps (ms since epoch).
+  Decky's WSRouter logs every backend call with `console.debug('%c Decky %c WSRouter %c', css, css, css,
+  ...)`; a plugin polling every 0.5 s (Tender) adds ~4 debug entries/s, hence the separate debug ring and
+  the default level `info`. Steam logs at `log`/`warn`. The Big Picture tab reports failed resource loads
+  as `Log.entryAdded` source `network`, level `error` (`customimages/*.jpg` 404s at startup).
+- Console object args arrive with `preview` (nested objects only as `Array(2)`/`Object`). An exception from
+  `setTimeout(() => { throw new Error('x') })` arrives as `Runtime.exceptionThrown` with text `Uncaught` and
+  `exception.description` `Error: x\n    at <anonymous>:1:26` (no url for evaluated code); an unhandled
+  rejection as `Uncaught (in promise)`.
+- Gamepad focus: the focused element has classes `Panel Focusable gpfocus gpfocuswithin`, its ancestors
+  `gpfocuswithin` (14 on the library home). In the Big Picture tab `document.activeElement` is the same
+  element; on a game page with no gamepad focus there is no `.gpfocus` and activeElement is `BODY`.
+- Quick Access and the main menu are child browser views of the Big Picture window, each its own CEF
+  target (`QuickAccess_uid2`, `MainMenu_uid2`) with its own `.gpfocus`. QuickAccess is 855x682 CSS px at
+  dpr 1.42, placed at x 1005.5, y 40 of the 1353x761 main window (it extends off screen; the visible panel
+  starts at display x 1427). Its `screenX`/`screenY` read 1005/40 once and 0/0 after a Steam UI reload;
+  `g_PopupManager`'s main popup `m_rgChildBrowserViews[i].GetBounds()` is reliable (hidden views report 0x0).
+  Checked by matching element rects against a stream frame.
+- `DeckyBackend.call('loader/call_plugin_method', ...)` rejects with a `PyError`: `name` "Python Exception",
+  empty `message`, `pythonTraceback` ending in the exception line. An undefined method fails the same way.
+
+## Apps, game files, recording and perf overlay facts (verified 2026-11-04, Steam client 1792618285)
+- Library: `appStore.allApps` (overviews: `appid`, `display_name`, `app_type` 1 game / 4 tool / 1073741824 non-Steam
+  shortcut, `m_gameid`, `rt_last_time_played`, `size_on_disk` string or null). **`overview.installed` is true when
+  the app is installed on any family/streaming client**; local install is `local_per_client_data.installed`
+  (`per_client_data[]` lists other machines by `client_name`). `appStore.GetAppOverviewByAppID(id)`.
+- Details: `SteamClient.Apps.RegisterForAppDetails(id, cb)` fires once right away with `strInstallFolder`,
+  `strCompatToolName` (`proton_11`, `proton_experimental`, `steamlinuxruntime_sniper` for native titles, `""` for
+  most shortcuts), `strCompatToolDisplayName`, `strDeveloperName`, `vecPlatforms`, `lDiskUsageBytes`,
+  `strShortcutExe`/`strShortcutStartDir`, cloud fields. It can fire inside the register call, so unregister on the next
+  tick. 157 apps in parallel take ~0.3 s. `appDetailsStore` only caches apps something registered for.
+- No `SteamClient.Apps.GetRunningApps` / `GetAvailableCompatTools` on this build (compat tools moved to an internal
+  `CompatManager` service). Running apps: `SteamUIStore.RunningApps` (`appid`, `display_name`) and
+  `MainRunningAppID`; the pid comes from `/proc`: `reaper SteamLaunch AppId=<id> -- ...` and its descendants.
+- `SteamClient.Apps.RunGame(String(gameid), "", -1, 100)` launched VVVVVV (in RunningApps within ~2 s);
+  `SteamClient.Apps.TerminateApp(String(gameid), false)` ended it within ~1 s. `SteamClient.InstallFolder.GetInstallFolders()`
+  gives `strFolderPath` and `vecApps[{nAppID, ...}]` per library.
+- Every `Runtime.evaluate` in SharedJSContext shares one global scope: a top-level `const` in an injected script
+  fails the second time ("Identifier has already been declared"), so wrap helpers in a function.
+- Steam account id = SteamID64 (`App.m_CurrentUser.strSteamID`) - 76561197960265728 = the `userdata/<id>` dir.
+- Saves: `userdata/<id>/<appid>/remotecache.vdf` lists the cloud files with a `root`: 0 = `userdata/.../remote`
+  (Castle Crashers), 3 = prefix `AppData/Local` (Chained Together), 2 = prefix `Documents` (Skyrim SE) and, for the
+  native VVVVVV (OSType -203), `~/.local/share` (Steam's Linux root override reuses the Windows id). Auto-Cloud dirs
+  hold a `steam_autocloud.vdf` marker. Proton prefixes are `<library>/steamapps/compatdata/<appid>/pfx`.
+- Recording: a second gamescope PipeWire consumer (`gst-launch ... vp8enc ! webmmux` next to the live stream) left
+  gamescope logging "pipewire: warning: out of buffers" 60 times a second, froze the live stream (keepalive kept
+  re-sending the last frame) until the live pipeline was restarted, and its `-e` EOS never completed. A fresh second
+  consumer on a static screen also gets no frames even after `debug_force_repaint`. So `record.py` muxes the live
+  stream's own JPEG frames and PCM chunks into Matroska in Python. 5 s at 1080p60 q70: 295 frames, 249 audio chunks,
+  64 MB; `ffprobe`/`ffmpeg -f null` clean; live stream stayed at 60 fps meanwhile. Bazzite has `vp8enc`, `vp9enc`,
+  `webmmux`, `avimux`, `opusenc` but no `x264enc`/VA encoders (SteamOS not checked for vpx); vp8enc at 1080p30
+  `cpu-used=8` took ~1 core.
+- Perf overlay: `SystemPerfStore` (window.SystemPerfStore, created lazily by the Quick Access tab) builds
+  `CMsgSystemPerfUpdateSettings {1 gameid=active_profile_game_id, 3 settings_delta {1 global {5 perf_overlay_level}}}`
+  and calls `SteamClient.System.Perf.UpdateSettings(base64)`; state comes from `SteamClient.System.Perf.RegisterForStateChanges`
+  (ArrayBuffer `CMsgSystemPerfState`). Slider 0-4 = enum 0, 4, 1, 2, 3. Here `perf_overlay_is_standalone` (limits
+  field 7) is true, so the tab shows only the slider (no service toggle); the global profile id is 769. Setting
+  level 2 moved Steam's own slider to 2 and wrote `preset=2` to mangoapp's `MANGOHUD_CONFIGFILE`.
+- The overlay never appears in `screen_capture`: mangoapp is a gamescope external overlay, and `paint_pipewire` paints
+  only focus/override/underlay/decoration windows plus the Steam overlay (gamescope `src/steamcompmgr.cpp`).
+  `gamescopectl screenshot <path> <type>` (0 all real layers, 1 base plane (default), 2 full composition, 3 screen
+  buffer) did not show it either. Check the level with the Quick Access perf tab in a capture instead.
+
 ## Pairing
 A client files `POST /pair/request` and long-polls `GET /pair/request/{id}?wait=25`; the device owner
 approves or denies it in the panel, which shows only an "Approve pairing request?" prompt while one is
@@ -228,7 +304,7 @@ rule below. `/mcp` always requires the bearer token. Events: `decky_toolkit_pair
 and code), `decky_toolkit_pair_requests` (list changed), `decky_toolkit_paired` (remote IP, client name). To
 drive frontend methods from a test, evaluate
 `window.DeckyBackend.call('loader/call_plugin_method', 'Decky Toolkit', '<method>', ...args)` in
-SharedJSContext via the `cef_evaluate` tool.
+SharedJSContext via the `cef_evaluate` tool, or use `call_plugin_method` (`plugin: "Decky Toolkit"`).
 
 ## CI and releases
 - Work branches off `dev` and PRs target `dev`; `dev` is merged into `main` to release. CI runs on PRs and
@@ -261,3 +337,8 @@ SharedJSContext via the `cef_evaluate` tool.
 - Tools return str/dict (serialised to text) or a list of MCP content blocks. Raise `ValueError`
   for bad input; other exceptions become `isError` results with a traceback.
 - Comments only for non-obvious *why*; match the sparse style.
+- Any tool or route that reads or writes a caller-supplied device path must call `tools.guard.check_read` /
+  `check_write` (Steam credential/session files, library folder lists, SSH keys); the server runs as root.
+- Tools that restart the loader, delete things or are otherwise hard to undo take `confirm: true`
+  (`tools.system.require_confirm`) and say so in their description. Add risky new tools to
+  `audit.AUDITED_TOOLS` so their calls are logged (argument names only, never values).

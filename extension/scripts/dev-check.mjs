@@ -324,6 +324,31 @@ await check('stage + zip a sample plugin', async () => {
   return `${listing.length} entries, unzip -t ok, exec bit kept (${files.join(' ')})`;
 });
 
+// Informational: game file routes. Printed, never counted as failures (older devices lack them).
+async function info(name, fn) {
+  try {
+    console.log(`INFO  ${name}: ${await fn()}`);
+  } catch (e) {
+    console.log(`INFO  ${name}: unavailable (${redact(e.message)})`);
+  }
+}
+const devClient = new DeckyClient({ host, port }, token);
+await info('/fs?path=/home/jackh/.local/share/VVVVVV', async () => {
+  const l = await devClient.fsList('/home/jackh/.local/share/VVVVVV');
+  return `${l.count} entries (${l.entries.map(e => `${e.path}${e.type === 'dir' ? '/' : ''}`).join(', ')})`;
+});
+await info('/apps/70300/saves', async () => {
+  const s = await devClient.appSaves(70300);
+  const best = s.candidates[0];
+  return `${s.candidates.length} candidates, ${s.steam_cloud.length} Steam Cloud files; best ${best ? `${best.path} (${best.size} B, ${best.found_by})` : 'none'}`;
+});
+await info('/fs/read of the best VVVVVV save (read only)', async () => {
+  const best = (await devClient.appSaves(70300)).candidates[0];
+  if (!best) return 'no save to read';
+  const bytes = await devClient.fsRead(best.path);
+  return `${bytes.length} bytes${bytes.length === best.size ? ', matches the listed size' : `, listed ${best.size}`}`;
+});
+
 proxy.stop();
 const failed = results.filter(r => !r[0]);
 console.log(failed.length ? `\n${failed.length} check(s) failed` : '\nall checks passed');

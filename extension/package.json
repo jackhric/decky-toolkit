@@ -44,8 +44,10 @@
     "onView:decky-toolkit.devices",
     "onView:decky-toolkit.actions",
     "onView:decky-toolkit.plugins",
+    "onView:decky-toolkit.games",
     "onView:decky-toolkit.controllers",
-    "onView:decky-toolkit.preview"
+    "onView:decky-toolkit.preview",
+    "onFileSystem:decky"
   ],
   "contributes": {
     "viewsContainers": {
@@ -79,6 +81,14 @@
           "when": "decky-toolkit.connected",
           "visibility": "collapsed",
           "initialSize": 2
+        },
+        {
+          "id": "decky-toolkit.games",
+          "name": "Games",
+          "icon": "media/decky.svg",
+          "when": "decky-toolkit.connected",
+          "visibility": "collapsed",
+          "initialSize": 3
         },
         {
           "id": "decky-toolkit.controllers",
@@ -339,6 +349,60 @@
         "title": "More actions…",
         "category": "Decky",
         "icon": "$(ellipsis)"
+      },
+      {
+        "command": "decky-toolkit.findGame",
+        "title": "Find game…",
+        "category": "Decky",
+        "icon": "$(search)"
+      },
+      {
+        "command": "decky-toolkit.refreshGames",
+        "title": "Refresh games",
+        "category": "Decky",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "decky-toolkit.openGameSaves",
+        "title": "Open save data…",
+        "category": "Decky",
+        "icon": "$(save)"
+      },
+      {
+        "command": "decky-toolkit.openDeckyPath",
+        "title": "Open device path…",
+        "category": "Decky",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "decky-toolkit.gameLaunch",
+        "title": "Launch game",
+        "category": "Decky",
+        "icon": "$(play)"
+      },
+      {
+        "command": "decky-toolkit.gameTerminate",
+        "title": "Terminate game",
+        "category": "Decky",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "decky-toolkit.gameProtonLog",
+        "title": "Show Proton log",
+        "category": "Decky",
+        "icon": "$(output)"
+      },
+      {
+        "command": "decky-toolkit.openInExplorer",
+        "title": "Open in Explorer",
+        "category": "Decky",
+        "icon": "$(root-folder-opened)"
+      },
+      {
+        "command": "decky-toolkit.copyDeckyPath",
+        "title": "Copy path",
+        "category": "Decky",
+        "icon": "$(copy)"
       }
     ],
     "configuration": {
@@ -424,6 +488,21 @@
           "command": "decky-toolkit.refreshPlugins",
           "when": "view == decky-toolkit.plugins",
           "group": "navigation@2"
+        },
+        {
+          "command": "decky-toolkit.findGame",
+          "when": "view == decky-toolkit.games",
+          "group": "navigation@1"
+        },
+        {
+          "command": "decky-toolkit.openDeckyPath",
+          "when": "view == decky-toolkit.games",
+          "group": "navigation@2"
+        },
+        {
+          "command": "decky-toolkit.refreshGames",
+          "when": "view == decky-toolkit.games",
+          "group": "navigation@3"
         },
         {
           "command": "decky-toolkit.addVirtualController",
@@ -526,11 +605,74 @@
           "command": "decky-toolkit.removeDevice",
           "when": "view == decky-toolkit.devices && viewItem =~ /^deck\\.(unpaired|paired|session)$/",
           "group": "3_device@3"
+        },
+        {
+          "command": "decky-toolkit.gameLaunch",
+          "when": "view == decky-toolkit.games && viewItem == game",
+          "group": "inline@1"
+        },
+        {
+          "command": "decky-toolkit.gameTerminate",
+          "when": "view == decky-toolkit.games && viewItem == game.running",
+          "group": "inline@1"
+        },
+        {
+          "command": "decky-toolkit.openGameSaves",
+          "when": "view == decky-toolkit.games && viewItem =~ /^game(\\.running)?$/",
+          "group": "inline@2"
+        },
+        {
+          "command": "decky-toolkit.openGameSaves",
+          "when": "view == decky-toolkit.games && viewItem =~ /^game(\\.running)?$/",
+          "group": "1_game@1"
+        },
+        {
+          "command": "decky-toolkit.gameLaunch",
+          "when": "view == decky-toolkit.games && viewItem == game",
+          "group": "1_game@2"
+        },
+        {
+          "command": "decky-toolkit.gameTerminate",
+          "when": "view == decky-toolkit.games && viewItem == game.running",
+          "group": "1_game@2"
+        },
+        {
+          "command": "decky-toolkit.gameProtonLog",
+          "when": "view == decky-toolkit.games && viewItem =~ /^game(\\.running)?$/",
+          "group": "1_game@3"
+        },
+        {
+          "command": "decky-toolkit.copyDeckyPath",
+          "when": "view == decky-toolkit.games && viewItem =~ /^game(\\.running)?$/",
+          "group": "2_path@1"
+        },
+        {
+          "command": "decky-toolkit.openInExplorer",
+          "when": "view == decky-toolkit.games && viewItem == deckyDir",
+          "group": "inline@1"
+        },
+        {
+          "command": "decky-toolkit.openInExplorer",
+          "when": "view == decky-toolkit.games && viewItem =~ /^decky(Dir|File)$/",
+          "group": "1_path@1"
+        },
+        {
+          "command": "decky-toolkit.copyDeckyPath",
+          "when": "view == decky-toolkit.games && viewItem =~ /^decky(Dir|File)$/",
+          "group": "1_path@2"
         }
       ],
       "commandPalette": [
         {
           "command": "decky-toolkit.deviceActions",
+          "when": "false"
+        },
+        {
+          "command": "decky-toolkit.openInExplorer",
+          "when": "false"
+        },
+        {
+          "command": "decky-toolkit.copyDeckyPath",
           "when": "false"
         }
       ]

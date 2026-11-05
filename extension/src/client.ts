@@ -1,5 +1,9 @@
 import type {
+  AppsList,
   ControllersList,
+  FsListing,
+  GameDirs,
+  GameSaves,
   Health,
   InputSettings,
   InstallResult,
@@ -271,7 +275,7 @@ export class DeckyClient {
       const res = await this.json<unknown>('/loader/restart', { method: 'POST' });
       return typeof res === 'string' ? res : JSON.stringify(res);
     } catch (e) {
-      if (isMissingRoute(e)) return this.callToolText('restart_loader');
+      if (isMissingRoute(e)) return this.callToolText('restart_loader', { confirm: true });
       throw e;
     }
   }
@@ -305,6 +309,53 @@ export class DeckyClient {
       body: JSON.stringify(body),
       timeoutMs: 15000,
     });
+  }
+
+  apps(): Promise<AppsList> {
+    return this.json<AppsList>('/apps?installed_only=1', { timeoutMs: 30000 });
+  }
+
+  appDirs(appid: number): Promise<GameDirs> {
+    return this.json<GameDirs>(`/apps/${appid}/dirs`, { timeoutMs: 30000 });
+  }
+
+  appSaves(appid: number): Promise<GameSaves> {
+    return this.json<GameSaves>(`/apps/${appid}/saves`, { timeoutMs: 30000 });
+  }
+
+  fsList(path: string, glob?: string): Promise<FsListing> {
+    const q = new URLSearchParams({ path });
+    if (glob) q.set('glob', glob);
+    return this.json<FsListing>(`/fs?${q}`, { timeoutMs: 20000 });
+  }
+
+  async fsRead(path: string): Promise<Uint8Array> {
+    const route = `/fs/read?${new URLSearchParams({ path })}`;
+    const res = await this.fetch(route, { timeoutMs: 120000 });
+    if (!res.ok) throw new HttpError(res.status, await res.text(), route);
+    return new Uint8Array(await res.arrayBuffer());
+  }
+
+  fsWrite(path: string, data: Uint8Array, opts: { create: boolean; overwrite: boolean }): Promise<{ path: string; bytes: number; created: boolean }> {
+    const q = new URLSearchParams({ path, create: opts.create ? '1' : '0', overwrite: opts.overwrite ? '1' : '0' });
+    return this.json(`/fs/write?${q}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: new Uint8Array(data),
+      timeoutMs: 120000,
+    });
+  }
+
+  fsMkdir(path: string): Promise<unknown> {
+    return this.json('/fs/mkdir', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }) });
+  }
+
+  fsRename(from: string, to: string, overwrite: boolean): Promise<unknown> {
+    return this.json('/fs/rename', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from, to, overwrite }) });
+  }
+
+  fsDelete(path: string): Promise<unknown> {
+    return this.json(`/fs?${new URLSearchParams({ path, confirm: '1' })}`, { method: 'DELETE', timeoutMs: 60000 });
   }
 
   logTail(q: LogQuery): Promise<LogTail> {

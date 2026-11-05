@@ -8,15 +8,18 @@ from typing import Callable
 
 from aiohttp import web
 
-from . import cdp, logs
+from . import audit, cdp, games, logs
+from .apps import Apps
 from .audio import FORMAT as AUDIO_FORMAT, AudioCapturer, AudioDisabled, AudioUnavailable
 from .auth import TokenAuth
 from .capture import BOUNDARY, CaptureUnavailable, ScreenCapturer
+from .console import DEFAULT_LEVEL, ConsoleCollector
 from .controllers import ControllerService
 from .input.ei import EiError
 from .input.service import InputDisabled, InputService, InputUnavailable
 from .pairing import MAX_WAIT_SECONDS, POLL_AFTER_MS, PairingLimit, PairingRequests
 from .protocol import SERVER_INFO, McpServer
+from .record import check_name, recorder_for
 from .tools import plugins
 from .tools.system import list_plugins, schedule_loader_restart
 from .ui import UiNavigator
@@ -38,7 +41,8 @@ class Api:
     def __init__(self, *, auth: TokenAuth, mcp: McpServer, capturer: ScreenCapturer | None, static_dir: str | None,
                  logger: logging.Logger, pairing: PairingRequests | None = None, base_url: BaseUrl | None = None, log_keepalive: float = LOG_KEEPALIVE_SECONDS,
                  input_service: InputService | None = None, audio: AudioCapturer | None = None,
-                 controllers: ControllerService | None = None, ui: UiNavigator | None = None):
+                 controllers: ControllerService | None = None, ui: UiNavigator | None = None,
+                 console: ConsoleCollector | None = None):
         self.auth = auth
         self.mcp = mcp
         self.capturer = capturer
@@ -51,9 +55,11 @@ class Api:
         self.audio = audio
         self.controllers = controllers
         self.ui = ui
+        self.console = console
 
     def build_app(self) -> web.Application:
-        app = web.Application(client_max_size=64 * 1024 * 1024, middlewares=[self.auth.middleware()])
+        app = web.Application(client_max_size=64 * 1024 * 1024,
+                              middlewares=[self.auth.middleware(), audit.middleware(self.log)])
         app.add_routes([
             web.get("/", self.handle_root),
             web.get("/health", self.handle_health),
@@ -84,6 +90,20 @@ class Api:
             web.post("/loader/restart", self.handle_loader_restart),
             web.get("/logs/tail", self.handle_logs_tail),
             web.get("/logs/stream", self.handle_logs_stream),
+            web.get("/cef/console", self.handle_console),
+            web.get("/cef/console/stream", self.handle_console_stream),
+            web.get("/apps", self.handle_apps),
+            web.get("/apps/{appid}", self.handle_app),
+            web.get("/apps/{appid}/dirs", self.handle_app_dirs),
+            web.get("/apps/{appid}/saves", self.handle_app_saves),
+            web.get("/fs", self.handle_fs),
+            web.delete("/fs", self.handle_fs_delete),
+            web.get("/fs/read", self.handle_fs_read),
+            web.put("/fs/write", self.handle_fs_write),
+            web.post("/fs/mkdir", self.handle_fs_mkdir),
+            web.post("/fs/rename", self.handle_fs_rename),
+            web.get("/recordings", self.handle_recordings),
+            web.get("/recordings/{name}", self.handle_recording_download),
             *self.mcp.routes(),
         ])
         return app
@@ -547,6 +567,41 @@ class Api:
             return _error(404, f"no log dir {logs.plugin_log_dir(plugin or '')}")
         return await self._sse(request, logs.follow(source, plugin, n))
 
+    # ---- steam ui console ----
+
+    async def handle_console(self, request: web.Request) -> web.Response:
+        if self.console is None:
+            return _error(404, "console capture not available")
+        q = request.query
+        try:
+            lines = int(q.get("lines", 200))
+            return web.json_response(self.console.query(q.get("target") or None, lines, q.get("level", DEFAULT_LEVEL),
+                                                        q.get("since") or None, q.get("grep") or None))
+        except ValueError as e:
+            return _error(400, str(e))
+
+    async def handle_console_stream(self, request: web.Request) -> web.StreamResponse:
+        if self.console is None:
+            return _error(404, "console capture not available")
+        q = request.query
+        target, level = q.get("target") or None, q.get("level", DEFAULT_LEVEL)
+        try:
+            tail = max(0, min(int(q.get("tail", logs.DEFAULT_TAIL)), logs.MAX_TAIL))
+            self.console.query(target, 1, level)  # validates before the stream starts
+        except ValueError as e:
+            return _error(400, str(e))
+        console = self.console
+
+        async def events():
+            source = console.follow(target, tail, level)
+            try:
+                async for entry in source:
+                    yield json.dumps(entry, ensure_ascii=False)
+            finally:
+                await source.aclose()
+
+        return await self._sse(request, events())
+
     async def _sse(self, request: web.Request, lines) -> web.StreamResponse:
         """Stream an async iterator of strings as `data:` events with keepalive comments."""
         res = web.StreamResponse(headers={
@@ -590,3 +645,199 @@ class Api:
                 await asyncio.gather(pending, return_exceptions=True)
             await lines.aclose()
         return res
+
+    # ---- apps, game files, recordings ----
+
+    @property
+    def apps(self) -> Apps:
+        if getattr(self, "_apps", None) is None:
+            self._apps = Apps()
+        return self._apps
+
+    async def _library_call(self, fn, *args) -> web.Response:
+        try:
+            return web.json_response(await fn(*args))
+        except games.SensitivePath as e:
+            return _error(403, str(e))
+        except FileNotFoundError as e:
+            return _error(404, str(e))
+        except ValueError as e:
+            return _error(400, str(e))
+        except cdp.CdpError as e:
+            return _error(502, str(e))
+
+    async def _app_route(self, request: web.Request, fn) -> web.Response:
+        raw = request.match_info["appid"]
+        if not raw.isdigit() or int(raw) <= 0:
+            return _error(400, "appid must be a positive integer")
+        return await self._library_call(fn, int(raw))
+
+    async def handle_apps(self, request: web.Request) -> web.Response:
+        installed = request.query.get("installed_only", "1") not in ("0", "false")
+        tools = request.query.get("include_tools", "0") in ("1", "true")
+        return await self._library_call(self.apps.list, installed, request.query.get("query"), tools)
+
+    async def handle_app(self, request: web.Request) -> web.Response:
+        return await self._app_route(request, self.apps.info)
+
+    async def handle_app_dirs(self, request: web.Request) -> web.Response:
+        return await self._app_route(request, self.apps.dirs)
+
+    async def handle_app_saves(self, request: web.Request) -> web.Response:
+        return await self._app_route(request, self.apps.saves)
+
+    async def handle_fs(self, request: web.Request) -> web.Response:
+        path = request.query.get("path")
+        if not path:
+            return _error(400, "path is required")
+        try:
+            depth = int(request.query.get("depth", 1))
+        except ValueError:
+            return _error(400, "depth must be an integer")
+
+        async def listing() -> dict:
+            return await asyncio.to_thread(games.fs_list, path, depth, request.query.get("glob") or None)
+        return await self._library_call(listing)
+
+    # Bearer-only: these read raw bytes or change files, so the viewer cookie never reaches them.
+    @staticmethod
+    def _fs_roots() -> tuple[list[tuple[str, int]], list[tuple[str, int]], list[str]]:
+        root = games.steam_root()
+        libs = games.library_folders(root)
+        runtime = os.environ.get("DECKY_PLUGIN_RUNTIME_DIR")
+        return games.write_roots(root, libs, runtime), games.delete_roots(root, libs, runtime), games.installed_name_keys(libs)
+
+    async def _fs_call(self, request: web.Request, fn) -> web.Response:
+        if denied := self._require_bearer(request):
+            return denied
+        try:
+            result = await asyncio.to_thread(fn)
+        except (games.SensitivePath, PermissionError) as e:
+            return web.json_response({"error": str(e), "code": "EACCES"}, status=403)
+        except FileExistsError as e:
+            return web.json_response({"error": str(e), "code": "EEXIST"}, status=409)
+        except IsADirectoryError as e:
+            return web.json_response({"error": str(e), "code": "EISDIR"}, status=409)
+        except NotADirectoryError as e:
+            return web.json_response({"error": str(e), "code": "ENOTDIR"}, status=409)
+        except FileNotFoundError as e:
+            return web.json_response({"error": str(e), "code": "ENOENT"}, status=404)
+        except games.TooLarge as e:
+            return web.json_response({"error": str(e), "code": "EFBIG"}, status=413)
+        except ValueError as e:
+            return _error(400, str(e))
+        except OSError as e:
+            return _error(500, str(e))
+        if isinstance(result, bytes):
+            return web.Response(body=result, content_type="application/octet-stream")
+        return web.json_response(result)
+
+    @staticmethod
+    def _flag(request: web.Request, name: str, default: bool) -> bool:
+        raw = request.query.get(name)
+        return default if raw is None else raw not in ("0", "false", "")
+
+    async def handle_fs_read(self, request: web.Request) -> web.Response:
+        if denied := self._require_bearer(request):
+            return denied
+        path = request.query.get("path")
+        if not path:
+            return _error(400, "path is required")
+        return await self._fs_call(request, lambda: games.fs_read(path))
+
+    async def handle_fs_write(self, request: web.Request) -> web.Response:
+        if denied := self._require_bearer(request):
+            return denied
+        path = request.query.get("path")
+        if not path:
+            return _error(400, "path is required")
+        data = await request.read()
+        create, overwrite = self._flag(request, "create", True), self._flag(request, "overwrite", True)
+
+        def write() -> dict:
+            roots, _, keys = self._fs_roots()
+            return games.fs_write(path, data, roots, keys, create=create, overwrite=overwrite)
+        return await self._fs_call(request, write)
+
+    async def _fs_body(self, request: web.Request) -> dict:
+        if not request.can_read_body:
+            return {}
+        try:
+            body = await request.json()
+        except (ValueError, UnicodeDecodeError):
+            raise ValueError("expected a JSON object")
+        if not isinstance(body, dict):
+            raise ValueError("expected a JSON object")
+        return body
+
+    async def handle_fs_mkdir(self, request: web.Request) -> web.Response:
+        if denied := self._require_bearer(request):
+            return denied
+        try:
+            body = await self._fs_body(request)
+        except ValueError as e:
+            return _error(400, str(e))
+        path = body.get("path") or request.query.get("path")
+        if not isinstance(path, str) or not path:
+            return _error(400, "path is required")
+        parents = body.get("parents") is True or self._flag(request, "parents", False)
+
+        def mkdir() -> dict:
+            roots, _, keys = self._fs_roots()
+            return games.fs_mkdir(path, roots, keys, parents=parents)
+        return await self._fs_call(request, mkdir)
+
+    async def handle_fs_rename(self, request: web.Request) -> web.Response:
+        if denied := self._require_bearer(request):
+            return denied
+        try:
+            body = await self._fs_body(request)
+        except ValueError as e:
+            return _error(400, str(e))
+        src, dst = body.get("from"), body.get("to")
+        if not isinstance(src, str) or not src or not isinstance(dst, str) or not dst:
+            return _error(400, "from and to are required")
+        overwrite = body.get("overwrite") is True
+
+        def rename() -> dict:
+            roots, _, keys = self._fs_roots()
+            return games.fs_rename(src, dst, roots, keys, overwrite=overwrite)
+        return await self._fs_call(request, rename)
+
+    async def handle_fs_delete(self, request: web.Request) -> web.Response:
+        if denied := self._require_bearer(request):
+            return denied
+        path = request.query.get("path")
+        if not path:
+            return _error(400, "path is required")
+        if request.query.get("confirm") != "1":
+            return _error(400, "deleting is destructive: add confirm=1")
+
+        def delete() -> dict:
+            _, roots, _ = self._fs_roots()
+            p = games.expand(path)
+            games.check_sensitive(p)
+            if os.path.lexists(p) and not games.deletable(p, roots):
+                raise games.OutsideRoots(f"refused: {p} is not inside a game dir (steamapps/common/<game>/...), a "
+                                         "compatdata or shadercache entry, userdata/<account>/<appid> or the plugin "
+                                         "runtime dir")
+            return games.fs_delete(p, True, roots)
+        return await self._fs_call(request, delete)
+
+    async def handle_recordings(self, _request: web.Request) -> web.Response:
+        if self.capturer is None:
+            return _error(404, "capture not available")
+        return web.json_response(await asyncio.to_thread(recorder_for(self.capturer).list))
+
+    async def handle_recording_download(self, request: web.Request) -> web.StreamResponse:
+        if self.capturer is None:
+            return _error(404, "capture not available")
+        try:
+            name = check_name(request.match_info["name"])
+        except ValueError as e:
+            return _error(400, str(e))
+        path = recorder_for(self.capturer).path_for(name)
+        if not os.path.isfile(path):
+            return _error(404, f"no recording named {name}")
+        return web.FileResponse(path, headers={"Content-Type": "video/x-matroska",
+                                               "Content-Disposition": f'attachment; filename="{name}.mkv"'})

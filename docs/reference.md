@@ -16,11 +16,15 @@ use the tools below.
 | `list_plugins` | Plugins under `~/homebrew/plugins` with their `plugin.json` metadata |
 | `read_plugin_log` | Tail a plugin's backend log from `~/homebrew/logs/<plugin>/` |
 | `loader_log` | Tail `journalctl -u plugin_loader`, optional substring filter |
-| `restart_loader` | Restart `plugin_loader.service` (scheduled 1 s out so the call returns) |
-| `install_plugin` | Install a plugin zip (device path or base64) atomically, then restart the loader, reload the plugin, or neither |
+| `restart_loader` | Restart `plugin_loader.service` (scheduled 1 s out so the call returns); needs `confirm: true` |
+| `install_plugin` | Install a plugin zip (device path or base64) atomically, then restart the loader (needs `confirm: true`), reload the plugin, or neither |
 | `reload_plugin` | Reload one plugin's backend through Decky without restarting the loader |
+| `plugin_methods` | List a plugin's frontend-callable backend methods (public async methods of `class Plugin`, with args and docstrings) |
+| `call_plugin_method` | Call a plugin's backend method the way its frontend does; returns the result or Decky's Python traceback |
+| `plugin_frontend_check` | Find `callable("x")`/`call("x")` names in a plugin's frontend that have no backend method |
 | `cef_targets` | List Steam CEF DevTools tabs on `localhost:8080` |
 | `cef_evaluate` | Run JS in a Steam tab (default `SharedJSContext`, where `window.DeckyPluginLoader` lives) |
+| `cef_console` / `cef_console_clear` | Steam UI console output (console calls, uncaught exceptions, browser log), captured in the background per tab |
 | `cef_screenshot` | PNG screenshot of a Steam tab via `Page.captureScreenshot` |
 | `screen_capture` | JPEG of the full gamescope display (games included) from its PipeWire video node |
 | `stream_status` | Live stream state: running, fps, bitrate, resolution, viewer count, settings |
@@ -34,7 +38,20 @@ use the tools below.
 | `add_virtual_controller` / `remove_virtual_controller` | Plug in or unplug a virtual Xbox 360 pad; returns once Steam Input lists it |
 | `ui_routes` | Steam and Decky pages you can navigate to, plugin routes, current page and menu state |
 | `ui_navigate` | Go to a page (`/settings/display`, `/decky/settings`), back, open Quick Access / a Decky plugin panel / a game page |
-| `read_file` / `write_file` | Read or write files on the device (runs as root) |
+| `ui_query` | Find elements by CSS selector or text, with screen coordinates ready for `input_mouse` |
+| `ui_focus` | The element that has gamepad focus, plus the current route |
+| `ui_wait_for` | Wait until an element appears or disappears, or a route is shown, instead of sleeping |
+| `read_file` / `write_file` | Read or write files on the device (runs as root); Steam credential/session files and SSH keys are refused |
+| `apps_list` / `app_info` | Steam library from the client: install dir, Proton or runtime, size, last played; one app with its dirs |
+| `apps_running` | Running apps with the pid of their `reaper` process and its children |
+| `app_launch` / `app_terminate` | Start a game like pressing Play; force-quit it (`confirm: true`) |
+| `game_dirs` | Install dir, Proton prefix and its AppData/Documents dirs, Steam Cloud userdata, shader cache, XDG dirs |
+| `game_saves` | Likely save files: Steam Cloud's own list first, then Auto-Cloud dirs, then heuristics |
+| `proton_log` | `~/steam-<appid>.log` (PROTON_LOG) and the app's lines in Steam's `logs/` |
+| `fs_list` / `fs_stat` / `fs_delete` | Browse the device; delete only inside game, prefix, userdata or plugin data dirs (`confirm: true`) |
+| `screen_record` / `screen_record_stop` | Record up to 120 s of screen and sound to an MKV (MJPEG + PCM) from the live stream |
+| `recordings_list` / `recording_delete` | Saved recordings (download via `GET /recordings/<name>`); delete with `confirm: true` |
+| `perf_overlay` / `perf_overlay_status` | Steam's performance overlay level 0-4, as on the Quick Access performance tab |
 
 ## Pairing
 
@@ -192,6 +209,8 @@ Besides `/mcp` the server has plain HTTP routes for scripts and editor integrati
 curl -H "Authorization: Bearer $TOKEN" -F file=@my-plugin.zip "http://<deck-ip>:8765/plugins/install?restart=loader"
 curl -N -H "Authorization: Bearer $TOKEN" "http://<deck-ip>:8765/logs/stream?plugin=my-plugin"   # SSE
 curl -H "Authorization: Bearer $TOKEN" "http://<deck-ip>:8765/logs/tail?source=loader&tail=50"
+curl -H "Authorization: Bearer $TOKEN" "http://<deck-ip>:8765/apps/70300/saves"
+curl -OJ -H "Authorization: Bearer $TOKEN" "http://<deck-ip>:8765/recordings/<name>"
 curl -X POST -H "Content-Type: application/json" -d '{"client_name":"my script","client_kind":"other"}' \
   "http://<deck-ip>:8765/pair/request"                   # {id, code}; allow it on the device, then:
 curl "http://<deck-ip>:8765/pair/request/<id>?wait=25"   # {status: "approved", token, ...} once
@@ -245,6 +264,9 @@ root) and is shown in the plugin panel.
   tool on a trusted LAN. Disable it from the panel when not in use.
 - `write_file`, `read_file` and `cef_evaluate` are intentionally powerful: anyone with the token
   has root on the device.
+- The file browser tools (`fs_*`, `game_saves`) refuse Steam's login files (`config/loginusers.vdf`,
+  `config/config.vdf`, `ssfn*`). Destructive tools (`fs_delete`, `app_terminate`, `recording_delete`) need
+  `confirm: true`, and `fs_delete` only works inside game, Proton prefix, userdata and plugin data dirs.
 
 ## Targets
 

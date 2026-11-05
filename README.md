@@ -36,6 +36,7 @@
 - Steam Input management and one-step jumps to any Steam page or your plugin's Quick Access panel.
 - Loader and plugin logs streamed into VS Code output channels.
 - JavaScript console for Steam's `SharedJSContext`.
+- Games view: launch and stop games, and browse install dirs, Proton prefixes and saves as `decky://` folders.
 - HTTP API and MCP server for your own tools and agents.
 - Pairing approved on the device, with bearer-token auth.
 

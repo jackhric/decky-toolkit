@@ -168,8 +168,92 @@ export interface NavigateResult {
   current: string;
 }
 
+export interface AppSummary {
+  appid: number;
+  name: string | null;
+  type: string;
+  installed: boolean;
+  running: boolean;
+  install_dir: string | null;
+  /** e.g. `proton_11`, `steamlinuxruntime_sniper` (native titles), null for most shortcuts. */
+  compat_tool: string | null;
+  compat_tool_display: string | null;
+  size_on_disk: number | null;
+  library: string | null;
+  /** ISO time, null when never played. */
+  last_played: string | null;
+  installed_elsewhere?: string[];
+  shortcut_exe?: string | null;
+}
+
+export interface AppsList {
+  count: number;
+  apps: AppSummary[];
+}
+
+export interface DirEntry {
+  path: string | null;
+  exists: boolean;
+  mtime?: string;
+}
+
+export interface GameDirs {
+  appid: number;
+  name: string | null;
+  platform: 'proton' | 'native';
+  compat_tool: string | null;
+  steam_root: string;
+  install_dir: DirEntry;
+  compatdata: DirEntry;
+  prefix: DirEntry;
+  prefix_user_dirs: Record<'appdata_roaming' | 'appdata_local' | 'appdata_locallow' | 'documents' | 'saved_games', DirEntry & { matches?: string[] }>;
+  account_id: string | null;
+  userdata: DirEntry;
+  cloud_remote: DirEntry;
+  shader_cache: DirEntry;
+  xdg: (DirEntry & { base?: string })[];
+}
+
+export interface SaveCandidate {
+  path: string;
+  size: number;
+  mtime: string | null;
+  found_by: string;
+  rank: number;
+  score: number;
+}
+
+export interface GameSaves {
+  appid: number;
+  name: string | null;
+  steam_cloud: { name: string; root: number | string; size: number | null; time: number | null; local_path: string | null }[];
+  candidates: SaveCandidate[];
+  notes: string[];
+}
+
+export interface FsEntry {
+  /** Relative to the listed directory. */
+  path: string;
+  type: 'file' | 'dir' | 'symlink' | 'other';
+  size: number;
+  mtime: string | null;
+  target?: string;
+  sensitive?: boolean;
+}
+
+export interface FsListing {
+  path: string;
+  depth: number;
+  glob: string | null;
+  entries: FsEntry[];
+  count: number;
+  truncated: boolean;
+}
+
 export interface ErrorBody {
   error: string;
+  /** `/fs/*` routes: ENOENT, EACCES, EEXIST, EISDIR, ENOTDIR, EFBIG. */
+  code?: string;
 }
 
 export type ToolName =

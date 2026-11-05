@@ -10,3 +10,6 @@ __pycache__
 .vscode/settings.json
 .playwright-mcp/
 .claude/worktrees/
+
+# Test fixtures ship a tiny built bundle
+!tests/fixtures/**/dist/
