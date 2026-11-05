@@ -197,7 +197,7 @@ H = {"Authorization": f"Bearer {TOKEN}"}
 
 async def with_api(fn, console):
     api = Api(auth=TokenAuth(TOKEN), mcp=McpServer(build_registry(console=console), LOG), capturer=None,
-              static_dir=None, logger=LOG, console=console)
+              logger=LOG, console=console)
     runner = web.AppRunner(api.build_app())
     await runner.setup()
     await web.TCPSite(runner, "127.0.0.1", 0).start()

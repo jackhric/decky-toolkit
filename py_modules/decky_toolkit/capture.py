@@ -1,8 +1,8 @@
 """Full-display capture: gamescope's PipeWire video node -> GStreamer -> JPEG frames.
 
 The GStreamer pipeline runs as a subprocess and writes a multipart/x-mixed-replace stream to its
-stdout; we parse it into frames and fan them out to any number of subscribers (browser viewers and
-MCP tool calls). The pipeline only runs while someone is consuming frames.
+stdout; we parse it into frames and fan them out to any number of subscribers (the extension's screen
+panel, recordings and MCP tool calls). The pipeline only runs while someone is consuming frames.
 """
 import asyncio
 import collections

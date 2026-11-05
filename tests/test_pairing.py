@@ -46,13 +46,13 @@ def test_limits_and_replacement():
     assert p.get(first.id) is None and first.changed.is_set(), "the old request is dropped and its pollers woken"
     assert again in p.pending() and len(p.pending()) == 2
     for i in range(8):
-        p.create(f"n{i}", "browser", f"10.0.1.{i}")
+        p.create(f"n{i}", "mcp", f"10.0.1.{i}")
     assert len(p.pending()) == P.MAX_PENDING
     with pytest.raises(PairingLimit):
-        p.create("eleventh", "browser", "10.0.2.1")
+        p.create("eleventh", "mcp", "10.0.2.1")
     # Resolved requests do not count against the limit.
     p.deny(again.id)
-    p.create("eleventh", "browser", "10.0.2.1")
+    p.create("eleventh", "mcp", "10.0.2.1")
 
 
 def test_codes_unique_among_pending(monkeypatch):
@@ -63,14 +63,13 @@ def test_codes_unique_among_pending(monkeypatch):
     assert p.create("b", "vscode", "2").code == "0042"
 
 
-def test_token_and_cookie_delivered_once():
+def test_token_delivered_once():
     p, _, events = make()
     req = p.create("a", "vscode", "1")
     assert not p.claim_token(req)
     p.approve(req.id)
     assert events[-1] == "approve"
     assert p.claim_token(req) and not p.claim_token(req)
-    assert p.claim_cookie(req) and not p.claim_cookie(req)
     with pytest.raises(ValueError):
         p.deny(req.id)
     with pytest.raises(ValueError):

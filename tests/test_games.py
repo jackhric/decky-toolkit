@@ -372,13 +372,12 @@ def test_fs_read_write_mkdir_rename(tree, tmp_path):
 
 
 def test_fs_write_routes(tree, tmp_path, monkeypatch):
-    from decky_toolkit.auth import TOKEN_COOKIE
     home, root = tree["home"], tree["root"]
     runtime = tmp_path / "runtime"
     runtime.mkdir()
     monkeypatch.setenv("DECKY_USER_HOME", home)
     monkeypatch.setenv("DECKY_PLUGIN_RUNTIME_DIR", str(runtime))
-    cookie = {"Cookie": f"{TOKEN_COOKIE}=test-token"}
+    cookie = {"Cookie": "decky_toolkit_token=test-token"}
     q = "path=" + str(runtime / "sub/f.bin")
 
     async def run(s, base):

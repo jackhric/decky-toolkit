@@ -164,7 +164,7 @@ See README.md for setup and docs/reference.md for the tool list and architecture
 - `date` on the device right before `pw-play` to the first loud chunk at a LAN client: 175-215 ms,
   which includes pw-play's own startup; browser playback adds its ~120 ms buffer.
 - Stopped with SIGINT like the video pipeline; it is gone 10 s after the last client (checked at 16 s).
-- AudioWorklet only exists in secure contexts: the viewer on `http://<ip>:8765` falls back to
+- AudioWorklet only exists in secure contexts: a page served over `http://<ip>:8765` (the removed browser viewer) fell back to
   scheduled AudioBufferSources; via localhost or the VS Code webview it uses the worklet. Both paths
   measured -25.7 dBFS at the output node for the -23.8 dBFS tone at volume 0.8 (headless Chromium).
 - Chromium checks AudioWorklet modules against `script-src` (not `worker-src`), so the webview CSP
@@ -298,7 +298,7 @@ pending (frontend methods `list_pair_requests`,
 `approve_pair_request`, `deny_pair_request`). No time limit. Requests live in memory
 (`py_modules/decky_toolkit/pairing.py`): a pending one expires 60 s after its last poll, a decided one 5 min
 after the decision, and a plugin restart forgets them all, so clients re-request (new code) on a 404.
-The token goes out once per approval; the browser flow gets the cookie via `?cookie=1` instead.
+The token goes out once per approval.
 Approval is deliberately device-only (no HTTP/MCP route), the one exception to the remote-configurable
 rule below. `/mcp` always requires the bearer token. Events: `decky_toolkit_pair_request` (toast with name
 and code), `decky_toolkit_pair_requests` (list changed), `decky_toolkit_paired` (remote IP, client name). To
@@ -330,9 +330,14 @@ SharedJSContext via the `cef_evaluate` tool, or use `call_plugin_method` (`plugi
   reads; `pr-title.yml` enforces a conventional title (`feat:`, `fix:`, `feat!:` for breaking, ...).
 
 ## Conventions
-- Every setting is configurable remotely (approving a pairing request is not a setting): through an MCP tool, the HTTP API (for the extension) and
-  the web viewer where it applies. The Decky panel only mirrors state (it polls `get_status` and
+- Every setting is configurable remotely (approving a pairing request is not a setting): through an MCP tool, the HTTP API and the
+  extension's UI where it applies. The Decky panel only mirrors state (it polls `get_status` and
   listens for change events); it never holds a setting that cannot be changed remotely.
+- The live screen exists only in the VS Code extension: the device serves no browser viewer, and every route
+  except `/`, `/health` and `/pair/request*` is bearer-only (no cookie auth). The screen panel webview draws only
+  the picture; its controls are `editor/title` actions with codicons (`when: activeWebviewPanelId ==
+  'decky-toolkit.screen'`), toggles are command pairs switched by `decky-toolkit.screen.*` context keys, and
+  choices go in QuickPicks. Don't add an in-page toolbar.
 - Keep the MCP server dependency-free beyond the loader bundle (aiohttp + stdlib).
 - Tools return str/dict (serialised to text) or a list of MCP content blocks. Raise `ValueError`
   for bad input; other exceptions become `isError` results with a traceback.

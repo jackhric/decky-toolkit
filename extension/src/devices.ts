@@ -185,18 +185,6 @@ export async function switchDevice(conn: Connection): Promise<void> {
   await pick?.run?.();
 }
 
-export function viewerUrl(d: { host: string; port: number }): string {
-  return `http://${d.host}:${d.port}/viewer`;
-}
-
-export async function copyViewerUrl(conn: Connection, arg?: unknown): Promise<void> {
-  const d = deviceFrom(conn, arg);
-  if (!d) return;
-  await vscode.env.clipboard.writeText(viewerUrl(d));
-  void vscode.window.showInformationMessage(
-    `Decky Toolkit: copied ${viewerUrl(d)}. Open it in a browser, press "Request access" and allow it on the device to watch there.`);
-}
-
 /** The `…` overflow of a device row: everything except the row's primary action. */
 export async function deviceActions(conn: Connection, arg?: unknown): Promise<void> {
   const d = deviceFrom(conn, arg);
@@ -208,7 +196,6 @@ export async function deviceActions(conn: Connection, arg?: unknown): Promise<vo
   items.push(
     { label: '$(edit) Enter token manually', run: run('decky-toolkit.enterToken') },
     { label: '$(pencil) Edit', run: run('decky-toolkit.editDevice') },
-    { label: '$(copy) Copy viewer URL', description: viewerUrl(d), run: run('decky-toolkit.copyViewerUrl') },
     { label: '$(trash) Remove', run: run('decky-toolkit.removeDevice') },
   );
   const pick = await vscode.window.showQuickPick(items, { placeHolder: `${d.name} · ${statusLabel(status)}` });

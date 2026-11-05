@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 import type { ConnectionState } from './connection';
 import { DeployController, pluginSummary } from './deploy';
-import { viewerUrl } from './devices';
 import type { WorkspacePlugin } from './pluginDeploy';
 
 export interface PluginSource {
@@ -73,14 +72,11 @@ export class ActionsTreeProvider implements vscode.TreeDataProvider<ActionNode>,
 
     const screen = group('screen', 'Screen', 'device-desktop', true, [
       leaf('openScreen', 'Open screen panel', 'window', 'decky-toolkit.openScreen'),
-      leaf('openViewer', 'Open viewer in browser', 'link-external', 'decky-toolkit.openViewer'),
       leaf('snapshot', 'Snapshot to file', 'device-camera', 'decky-toolkit.snapshot'),
     ]);
     screen.description = screenDescription(this.conn);
     screen.tooltip = 'Live device display';
-    screen.children![1].tooltip = `Opens ${viewerUrl(d)} in your browser. The browser is paired separately: it asks for access and you ` +
-      'allow it in the device\'s Decky Toolkit panel, unless it still has the cookie from an earlier pairing.';
-    screen.children![2].tooltip = 'Save the current frame (/frame.jpg) as a JPEG';
+    screen.children![1].tooltip = 'Save the current frame (/frame.jpg) as a JPEG';
 
     return [
       screen,
