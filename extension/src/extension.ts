@@ -7,7 +7,7 @@ import { Connection, LinkState, linkSuffix } from './connection';
 import { ControllerWatcher, ControllersTreeProvider, addVirtualController, removeVirtualController } from './controllers';
 import { DeployController, PluginWorkspace } from './deploy';
 import {
-  addDevice, changeHost, deviceActions, deviceFrom, editDevice, removeDevice, switchDevice,
+  addDevice, deviceActions, deviceFrom, removeDevice, renameDevice, switchDevice,
 } from './devices';
 import { DevicesTreeProvider } from './devicesTree';
 import { DeviceDiscovery } from './discovery';
@@ -18,7 +18,7 @@ import {
 import { toggleInput } from './input';
 import { LogManager } from './logs';
 import { navigate, openPluginPanel, simpleNavigate } from './navigation';
-import { connect, enterToken, pair } from './pairing';
+import { connect, pair } from './pairing';
 import { PluginsTreeProvider } from './pluginsTree';
 import { PreviewViewProvider } from './preview';
 import { DeckyFileDecorations, DeckyFileSystemProvider, SCHEME } from './remoteFs';
@@ -171,15 +171,6 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     else if (c.link === 'rejected') await pair(c, d);
     else await connect(c, d);
   });
-  command('decky-toolkit.pairAgain', async arg => {
-    const d = deviceFrom(c, arg);
-    if (d) await pair(c, d);
-  });
-  command('decky-toolkit.enterToken', arg => enterToken(c, arg === undefined ? undefined : deviceFrom(c, arg)));
-  command('decky-toolkit.disconnect', async () => {
-    await c.clearToken();
-    void vscode.window.showInformationMessage(`Decky Toolkit: forgot the token for ${c.label}.`);
-  });
   command('decky-toolkit.refresh', async () => {
     actionsTree.refresh();
     await c.refresh();
@@ -187,11 +178,10 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     await c.probeAll();
   });
   command('decky-toolkit.refreshPlugins', async () => refreshPlugins());
-  command('decky-toolkit.changeHost', () => changeHost(c));
   command('decky-toolkit.addDevice', () => addDevice(c));
   command('decky-toolkit.searchNetwork', () => searchNetwork(discovery));
   command('decky-toolkit.connectFound', arg => connectFound(c, discovery, arg));
-  command('decky-toolkit.editDevice', arg => editDevice(c, arg));
+  command('decky-toolkit.renameDevice', arg => renameDevice(c, arg));
   command('decky-toolkit.removeDevice', arg => removeDevice(c, arg));
   command('decky-toolkit.switchDevice', () => switchDevice(c));
   command('decky-toolkit.deviceActions', arg => deviceActions(c, arg));

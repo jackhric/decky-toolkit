@@ -61,6 +61,8 @@ export interface ConnectionState {
   statusOf(device: SavedDevice): DeviceStatus;
   /** The code the device shows for a pairing request that is waiting for approval. */
   pairingCodeOf?(id: string): string | undefined;
+  /** Plugin version from the device's last `/health` answer; `/health` needs no token, so it is known before pairing. */
+  versionOf?(id: string): string | undefined;
   authedClient(): DeckyClient | undefined;
   /** Polls `/stream/stats` while at least one returned lease is undisposed. */
   watchStats(): vscode.Disposable;
@@ -90,6 +92,7 @@ export class Connection implements ConnectionState, vscode.Disposable {
   private readonly hasToken = new Map<string, boolean>();
   private readonly busy = new Map<string, 'connecting' | 'pairing'>();
   private readonly unreachableIds = new Set<string>();
+  private readonly versions = new Map<string, string>();
   private session?: SavedDevice;
   /** The device of the latest session in this window, kept after it ends. */
   private recent?: SavedDevice;
@@ -137,6 +140,8 @@ export class Connection implements ConnectionState, vscode.Disposable {
     await this.ctx.globalState.update(DEVICES_KEY, devices);
     await this.ctx.globalState.update(ACTIVE_KEY, devices.some(d => d.id === activeId) ? activeId : devices[0]?.id);
     await this.refresh();
+    const unknown = devices.filter(d => !this.versions.has(d.id)).map(d => d.id);
+    if (unknown.length) void this.probeAll(unknown);
   }
 
   async setActive(id: string): Promise<void> {
@@ -209,7 +214,10 @@ export class Connection implements ConnectionState, vscode.Disposable {
     } catch (e) {
       next = { kind: 'unreachable', error: describeError(e) };
     }
-    if (gen === this.generation) this.setHealth(next);
+    if (gen === this.generation) {
+      if (next.kind === 'ok' && this.session) this.noteVersion(this.session.id, next.health.version);
+      this.setHealth(next);
+    }
     return next;
   }
 
@@ -288,6 +296,16 @@ export class Connection implements ConnectionState, vscode.Disposable {
     return s && this.devices.find(d => d.id === s.id && d.host === s.host && d.port === s.port);
   }
 
+  versionOf(id: string): string | undefined {
+    return this.versions.get(id);
+  }
+
+  noteVersion(id: string, version: string | undefined): void {
+    if (!version || this.versions.get(id) === version) return;
+    this.versions.set(id, version);
+    this.fireStatus();
+  }
+
   statusOf(device: SavedDevice): DeviceStatus {
     const busy = this.busy.get(device.id);
     if (busy) return busy;
@@ -333,7 +351,7 @@ export class Connection implements ConnectionState, vscode.Disposable {
     const todo = this.devices.filter(d => d.id !== this.connectedDevice?.id && (!ids || ids.includes(d.id)));
     await Promise.all(todo.map(async d => {
       try {
-        await new DeckyClient(d).health(3000);
+        this.noteVersion(d.id, (await new DeckyClient(d).health(3000)).version);
         this.setReachable(d.id, true);
       } catch {
         this.setReachable(d.id, false);
@@ -516,7 +534,7 @@ export function linkMessage(conn: ConnectionState): string {
   switch (conn.link) {
     case 'connecting': return `Connecting to ${name}…`;
     case 'unreachable': return `Lost connection to ${name}.\nReconnecting as soon as it answers again…`;
-    case 'rejected': return `${name} rejected the stored token.\nRe-pair the device to continue.`;
+    case 'rejected': return `${name} rejected the stored token.\nReconnect to continue; the device asks you to approve this editor again.`;
     case 'disconnected': return `Disconnected from ${name}.\nReconnect from the Devices view or the Reconnect action.`;
     default: return '';
   }

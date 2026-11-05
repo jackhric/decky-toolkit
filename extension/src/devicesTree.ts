@@ -25,21 +25,24 @@ export function deviceRow(conn: ConnectionState, d: SavedDevice): DeviceNode {
   const code = status === 'pairing' ? conn.pairingCodeOf?.(d.id) : undefined;
   const rejected = session && status === 'connected' && conn.tokenRejected;
   const label = code ? `waiting for approval · code ${code}` : rejected ? 'token rejected' : statusLabel(status);
-  n.description = nameIsHost ? label : `${address} · ${label}`;
+  const version = conn.versionOf?.(d.id);
+  const versioned = version ? `v${version} · ${label}` : label;
+  n.description = nameIsHost ? versioned : `${address} · ${versioned}`;
   const color = rejected ? 'problemsErrorIcon.foreground' : status === 'connected' ? 'testing.iconPassed'
     : status === 'unreachable' ? 'problemsWarningIcon.foreground' : undefined;
   n.iconPath = new vscode.ThemeIcon(rejected ? 'key' : STATUS_ICON[status], color ? new vscode.ThemeColor(color) : undefined);
   const busy = status === 'connecting' || status === 'pairing';
   n.contextValue = busy ? 'deck.busy' : session ? 'deck.session' : status === 'unpaired' ? 'deck.unpaired' : 'deck.paired';
   const md = new vscode.MarkdownString();
-  md.appendMarkdown(`**${d.name}** · ${address}\n\n`);
+  md.appendMarkdown(`**${d.name}** · ${address}${version ? ` · Decky Toolkit ${version}` : ''}\n\n`);
   const h = conn.health;
-  if (rejected) md.appendMarkdown('Connected, but the device rejected the stored token · Re-pair from `…`\n\n');
+  if (rejected) md.appendMarkdown('The device rejected the stored token · click to reconnect; the device asks you to approve this editor again\n\n');
   else if (session && h.kind === 'ok') md.appendMarkdown(`Connected · ${h.health.name} ${h.health.version}, API v${h.health.api_version}\n\n`);
   else if (session && h.kind === 'unreachable') md.appendMarkdown(`Lost connection: ${h.error}. Reconnecting as soon as it answers\n\n`);
   else md.appendMarkdown(`${label}${busy ? '' : status === 'unpaired' ? ' · click to pair and connect' : ' · click to connect'}\n\n`);
   n.tooltip = md;
   if (!session && !busy) n.command = { command: 'decky-toolkit.connect', title: 'Connect', arguments: [d.id] };
+  else if (rejected) n.command = { command: 'decky-toolkit.reconnect', title: 'Reconnect' };
   return n;
 }
 

@@ -89,49 +89,24 @@ export async function addDevice(conn: Connection): Promise<void> {
   }
 }
 
-export async function editDevice(conn: Connection, arg?: unknown): Promise<void> {
+export async function renameDevice(conn: Connection, arg?: unknown): Promise<void> {
   const d = deviceFrom(conn, arg);
-  if (!d) return addDevice(conn);
-  const title = `Edit ${d.name}`;
+  if (!d) return;
   const name = (await vscode.window.showInputBox({
-    title, prompt: 'Name', value: d.name, ignoreFocusOut: true, validateInput: v => (v.trim() ? undefined : 'Name is empty'),
+    title: `Rename ${d.name}`, prompt: 'Name shown in the Devices view', value: d.name, ignoreFocusOut: true,
+    validateInput: v => (v.trim() ? undefined : 'Name is empty'),
   }))?.trim();
-  if (!name) return;
-  const addr = await promptAddress(d, title);
-  if (!addr) return;
-  const dup = duplicateOf(conn, addr.host, addr.port, d.id);
-  if (dup) throw new Error(`${addr.host}:${addr.port} is already saved as "${dup.name}".`);
-  await conn.saveDevices(conn.devices.map(x => (x.id === d.id ? { ...x, name, ...addr } : x)));
-  conn.setReachable(d.id, true);
-}
-
-/** "Change host" keeps the active device's name and also writes the fallback settings. */
-export async function changeHost(conn: Connection): Promise<void> {
-  const addr = await promptAddress(conn.address, `Change host of ${conn.label}`);
-  if (!addr) return;
-  const d = conn.activeDevice;
-  if (d) {
-    const dup = duplicateOf(conn, addr.host, addr.port, d.id);
-    if (dup) throw new Error(`${addr.host}:${addr.port} is already saved as "${dup.name}"; switch to it instead.`);
-  }
-  const cfg = vscode.workspace.getConfiguration('decky-toolkit');
-  const target = (key: string) =>
-    cfg.inspect(key)?.workspaceValue !== undefined ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
-  await cfg.update('host', addr.host, target('host'));
-  await cfg.update('port', addr.port, target('port'));
-  if (d) {
-    const rename = d.name === d.host ? addr.host : d.name;
-    await conn.saveDevices(conn.devices.map(x => (x.id === d.id ? { ...x, name: rename, ...addr } : x)));
-  }
+  if (!name || name === d.name) return;
+  await conn.saveDevices(conn.devices.map(x => (x.id === d.id ? { ...x, name } : x)));
 }
 
 export async function removeDevice(conn: Connection, arg?: unknown): Promise<void> {
   const d = deviceFrom(conn, arg);
   if (!d) return;
   const ok = await vscode.window.showWarningMessage(
-    `Remove ${d.name} (${d.host}:${d.port}) from the saved devices?`,
-    { modal: true, detail: 'Its stored token is forgotten too, unless another saved device uses the same address.' },
-    'Remove');
+    `Forget ${d.name} (${d.host}:${d.port})?`,
+    { modal: true, detail: 'Its stored token is deleted. Connecting to it again asks for approval on the device.' },
+    'Forget');
   if (!ok) return;
   const rest = conn.devices.filter(x => x.id !== d.id);
   if (!rest.some(x => x.host === d.host && x.port === d.port)) await conn.deleteTokenFor(d);
@@ -191,13 +166,10 @@ export async function deviceActions(conn: Connection, arg?: unknown): Promise<vo
   if (!d) return;
   const status = conn.statusOf(d);
   const run = (cmd: string) => () => vscode.commands.executeCommand(cmd, d.id);
-  const items: PickItem[] = [];
-  if (status !== 'unpaired') items.push({ label: '$(key) Re-pair', run: run('decky-toolkit.pairAgain') });
-  items.push(
-    { label: '$(edit) Enter token manually', run: run('decky-toolkit.enterToken') },
-    { label: '$(pencil) Edit', run: run('decky-toolkit.editDevice') },
-    { label: '$(trash) Remove', run: run('decky-toolkit.removeDevice') },
-  );
+  const items: PickItem[] = [
+    { label: '$(pencil) Rename…', run: run('decky-toolkit.renameDevice') },
+    { label: '$(trash) Forget device', run: run('decky-toolkit.removeDevice') },
+  ];
   const pick = await vscode.window.showQuickPick(items, { placeHolder: `${d.name} · ${statusLabel(status)}` });
   await pick?.run?.();
 }
