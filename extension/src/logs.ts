@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import type { LogQuery } from './api';
 import { DeckyClient, describeError, isConnectionError, isMissingRoute, sleep } from './client';
-import { Connection } from './connection';
+import { Connection, LinkState, linkMessage } from './connection';
 
 const POLL_MS = 3000;
 const RECENT_MAX = 400;
@@ -23,12 +23,16 @@ export function newLines(prev: string[], next: string[]): string[] {
 class LogSession {
   private readonly abort = new AbortController();
   private recent: string[] = [];
+  /** Aborts the current request when the connection drops, so a user Disconnect really stops the stream. */
+  private attempt?: AbortController;
+  private readonly sub: vscode.Disposable;
 
   constructor(
     private readonly conn: Connection,
     readonly channel: vscode.OutputChannel,
     private readonly query: LogQuery,
   ) {
+    this.sub = conn.onDidChange(() => { if (conn.link !== 'connected') this.attempt?.abort(); });
     void this.loop();
   }
 
@@ -40,7 +44,20 @@ class LogSession {
   private async loop(): Promise<void> {
     const signal = this.abort.signal;
     let mode: 'stream' | 'poll' = 'stream';
+    let paused: LinkState | undefined;
     while (!signal.aborted) {
+      const link = this.conn.link;
+      if (link !== 'connected') {
+        // One line per state instead of an error every retry; the channel stays open and resumes by itself.
+        if (link !== paused && link !== 'connecting') this.note(linkMessage(this.conn).split('\n')[0] + ' Output resumes when it is connected again.');
+        paused = link === 'connecting' ? paused : link;
+        await this.untilLinkChanged(signal);
+        continue;
+      }
+      if (paused) {
+        this.note(`Connected to ${this.conn.linkLabel} again.`);
+        paused = undefined;
+      }
       const token = await this.conn.token();
       if (!token) {
         this.channel.appendLine('[decky-toolkit] not paired; waiting for a token…');
@@ -48,20 +65,44 @@ class LogSession {
         continue;
       }
       const client = new DeckyClient(this.conn.address, token);
+      const attempt = this.attempt = new AbortController();
+      const stop = () => attempt.abort();
+      signal.addEventListener('abort', stop);
+      if (this.conn.link !== 'connected') attempt.abort();
       try {
-        if (mode === 'stream') await this.stream(client, signal);
-        else await this.pollOnce(client);
-      } catch (e) {
-        if (signal.aborted) return;
-        if (mode === 'stream' && isMissingRoute(e)) {
-          this.channel.appendLine('[decky-toolkit] /logs/stream not available on this device; polling via MCP every 3 s');
-          mode = 'poll';
-          continue;
+        try {
+          if (mode === 'stream') await this.stream(client, attempt.signal);
+          else await this.pollOnce(client);
+        } catch (e) {
+          if (signal.aborted) return;
+          if (attempt.signal.aborted) continue;
+          if (mode === 'stream' && isMissingRoute(e)) {
+            this.channel.appendLine('[decky-toolkit] /logs/stream not available on this device; polling via MCP every 3 s');
+            mode = 'poll';
+            continue;
+          }
+          // A dropped connection is reported once through the link state, not on every retry.
+          if (isConnectionError(e)) void this.conn.checkHealth();
+          else this.channel.appendLine(`[decky-toolkit] ${describeError(e)}; retrying…`);
         }
-        if (!isConnectionError(e) || mode === 'stream') this.channel.appendLine(`[decky-toolkit] ${describeError(e)}; retrying…`);
+        await sleep(POLL_MS, attempt.signal).catch(() => undefined);
+      } finally {
+        signal.removeEventListener('abort', stop);
+        this.attempt = undefined;
       }
-      await sleep(POLL_MS, signal).catch(() => undefined);
     }
+  }
+
+  private note(text: string): void {
+    this.channel.appendLine(`[decky-toolkit] ${text}`);
+  }
+
+  private untilLinkChanged(signal: AbortSignal): Promise<void> {
+    const from = this.conn.link;
+    return new Promise(resolve => {
+      const sub = this.conn.onDidChange(() => { if (this.conn.link !== from) { sub.dispose(); resolve(); } });
+      signal.addEventListener('abort', () => { sub.dispose(); resolve(); }, { once: true });
+    });
   }
 
   private untilChanged(signal: AbortSignal): Promise<void> {
@@ -104,6 +145,7 @@ class LogSession {
 
   dispose(): void {
     this.abort.abort();
+    this.sub.dispose();
   }
 }
 

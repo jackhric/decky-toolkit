@@ -39,7 +39,7 @@ export class PluginsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
 
   async getChildren(item?: vscode.TreeItem): Promise<vscode.TreeItem[]> {
     if (item) return [];
-    const client = this.conn.connectedDevice && this.conn.authedClient();
+    const client = this.conn.link === 'connected' && this.conn.authedClient();
     if (!client) return [];
     return loadPluginItems(client);
   }

@@ -4,7 +4,9 @@
   const img = document.getElementById('img'), msg = document.getElementById('msg');
   const INTERVAL_MS = 1500;
   const base = document.body.dataset.base;
-  let paired = document.body.dataset.paired === 'true';
+  const open = document.getElementById('open');
+  // live: the extension's connection is up; otherwise `offline` explains why and nothing is fetched.
+  let live = document.body.dataset.live === 'true', offline = document.body.dataset.text || '';
   let visible = document.visibilityState === 'visible';
   let timer = null, inflight = null, lastUrl = null, gen = 0;
 
@@ -13,7 +15,7 @@
   async function tick() {
     const my = gen;
     timer = null;
-    if (!visible || !paired) return;
+    if (!visible || !live) return;
     inflight = new AbortController();
     try {
       const res = await fetch(base + '/frame.jpg?t=' + Date.now(), { signal: inflight.signal, cache: 'no-store' });
@@ -34,20 +36,21 @@
     if (my === gen) schedule();
   }
 
-  function schedule() { if (!timer && visible && paired) timer = setTimeout(tick, INTERVAL_MS); }
+  function schedule() { if (!timer && visible && live) timer = setTimeout(tick, INTERVAL_MS); }
   function stop() { gen++; clearTimeout(timer); timer = null; if (inflight) inflight.abort(); }
   function restart() {
     stop();
-    if (!paired) return show('Not connected.\nConnect to a device in the Devices view.');
+    open.hidden = !live;
+    if (!live) return show(offline || 'Not connected.\nConnect to a device in the Devices view.');
     if (visible) tick();
   }
 
   window.addEventListener('message', e => {
     const m = e.data;
-    if (m.type === 'state') { paired = m.paired; restart(); }
+    if (m.type === 'state') { live = m.live; offline = m.text || ''; restart(); }
     if (m.type === 'visible') { visible = m.visible; restart(); }
   });
   document.addEventListener('visibilitychange', () => { visible = document.visibilityState === 'visible'; restart(); });
-  document.getElementById('open').onclick = () => vscode.postMessage({ type: 'open' });
+  open.onclick = () => vscode.postMessage({ type: 'open' });
   restart();
 })();

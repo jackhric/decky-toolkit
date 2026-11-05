@@ -11,7 +11,7 @@ const SESSION_KEY = 'decky-toolkit.connectedDevice';
 const TOKEN_PREFIX = 'decky-toolkit.token:';
 
 /** Mutable so tests can shorten them. */
-export const connectionTimings = { healthPollMs: 15000 };
+export const connectionTimings = { healthPollMs: 15000, retryMs: 2000 };
 
 export type DeviceStatus = 'unpaired' | 'disconnected' | 'connecting' | 'pairing' | 'connected' | 'unreachable';
 
@@ -24,6 +24,12 @@ export interface SavedDevice {
 
 /** `unsupported`: the device answers 404 to `/input/settings` (plugin predates remote input). */
 export type InputState = InputSettings | 'unsupported';
+
+/**
+ * What every device-backed surface shows. Undefined until the first connect of this window, so the views
+ * appear once and then stay put; `disconnected` is a session the user ended (or a device switch in progress).
+ */
+export type LinkState = 'connecting' | 'connected' | 'unreachable' | 'rejected' | 'disconnected';
 
 export type HealthState =
   | { kind: 'unknown' }
@@ -49,6 +55,9 @@ export interface ConnectionState {
   /** The device of the current session; stays set while it is briefly unreachable. */
   readonly connectedDevice: SavedDevice | undefined;
   readonly onDidChangeStatus: vscode.Event<void>;
+  readonly link: LinkState | undefined;
+  /** Name of the device `link` is about. */
+  readonly linkLabel: string;
   statusOf(device: SavedDevice): DeviceStatus;
   /** The code the device shows for a pairing request that is waiting for approval. */
   pairingCodeOf?(id: string): string | undefined;
@@ -82,7 +91,10 @@ export class Connection implements ConnectionState, vscode.Disposable {
   private readonly busy = new Map<string, 'connecting' | 'pairing'>();
   private readonly unreachableIds = new Set<string>();
   private session?: SavedDevice;
+  /** The device of the latest session in this window, kept after it ends. */
+  private recent?: SavedDevice;
   private healthTimer?: NodeJS.Timeout;
+  private probeTimer?: NodeJS.Timeout;
 
   constructor(private readonly ctx: vscode.ExtensionContext) {
     this.disposables.push(
@@ -203,9 +215,61 @@ export class Connection implements ConnectionState, vscode.Disposable {
 
   private setHealth(next: HealthState): void {
     if (JSON.stringify(next) === JSON.stringify(this.health)) return;
+    const wasDown = this.health.kind === 'unreachable';
     this.health = next;
+    if (this.session && wasDown !== (next.kind === 'unreachable')) this.scheduleHealth();
     if (this.session) this.statusChanged.fire();
     this.changed.fire();
+  }
+
+  private setTokenRejected(rejected: boolean): void {
+    if (rejected === this.tokenRejected) return;
+    this.tokenRejected = rejected;
+    this.fireStatus();
+  }
+
+  get link(): LinkState | undefined {
+    const s = this.connectedDevice;
+    if (s) {
+      if (this.busy.has(s.id)) return 'connecting';
+      if (this.tokenRejected) return 'rejected';
+      return this.health.kind === 'unreachable' ? 'unreachable' : 'connected';
+    }
+    if (!this.recent || this.devices.length === 0) return undefined;
+    return this.busy.size > 0 ? 'connecting' : 'disconnected';
+  }
+
+  /** The connected device, else the one of the latest session in this window. */
+  get linkDevice(): SavedDevice | undefined {
+    const id = this.session?.id ?? this.recent?.id;
+    return this.devices.find(d => d.id === id);
+  }
+
+  get linkLabel(): string {
+    return this.linkDevice?.name ?? this.label;
+  }
+
+  /** Reported by decky:// file access, which talks to any saved device on its own. */
+  noteReachable(device: SavedDevice | undefined, reachable: boolean): void {
+    const session = this.connectedDevice;
+    if (!device || device.id === session?.id) {
+      if (session && (reachable ? this.health.kind === 'unreachable' : this.health.kind !== 'unreachable')) void this.checkHealth();
+      return;
+    }
+    this.setReachable(device.id, reachable);
+  }
+
+  /** Polls `/health` often while the session is unreachable so it recovers within seconds. */
+  private scheduleHealth(): void {
+    clearTimeout(this.healthTimer);
+    if (!this.session) return;
+    const ms = this.health.kind === 'unreachable' ? connectionTimings.retryMs : connectionTimings.healthPollMs;
+    this.healthTimer = setTimeout(() => {
+      void this.checkHealth().then(h => {
+        // /health needs no token; the input settings route tells a rejected token apart.
+        if (h.kind === 'ok' && this.session && this.statsLeases === 0) void this.refreshInput();
+      }).finally(() => this.scheduleHealth());
+    }, ms);
   }
 
   private async loadTokenFlags(): Promise<void> {
@@ -254,12 +318,20 @@ export class Connection implements ConnectionState, vscode.Disposable {
     if (reachable === !this.unreachableIds.has(id)) return;
     if (reachable) this.unreachableIds.delete(id);
     else this.unreachableIds.add(id);
+    // Re-probe unreachable devices so their rows and decky:// editors recover without a manual refresh.
+    if (this.unreachableIds.size === 0) {
+      clearInterval(this.probeTimer);
+      this.probeTimer = undefined;
+    } else {
+      this.probeTimer ??= setInterval(() => void this.probeAll([...this.unreachableIds]), connectionTimings.healthPollMs);
+    }
     this.fireStatus();
   }
 
   /** Marks devices that do not answer `/health` so the device list can show them as unreachable. */
-  async probeAll(): Promise<void> {
-    await Promise.all(this.devices.filter(d => d.id !== this.connectedDevice?.id).map(async d => {
+  async probeAll(ids?: string[]): Promise<void> {
+    const todo = this.devices.filter(d => d.id !== this.connectedDevice?.id && (!ids || ids.includes(d.id)));
+    await Promise.all(todo.map(async d => {
       try {
         await new DeckyClient(d).health(3000);
         this.setReachable(d.id, true);
@@ -274,9 +346,11 @@ export class Connection implements ConnectionState, vscode.Disposable {
     const d = this.activeDevice;
     if (!d || d.id !== id) throw new Error('only the active device can be connected');
     this.session = { ...d };
+    this.recent = this.session;
     this.unreachableIds.delete(id);
-    clearInterval(this.healthTimer);
-    this.healthTimer = setInterval(() => void this.checkHealth(), connectionTimings.healthPollMs);
+    this.health = { kind: 'unknown' };
+    this.tokenRejected = false;
+    this.scheduleHealth();
     await this.ctx.globalState.update(SESSION_KEY, id);
     this.fireStatus();
     void this.checkHealth();
@@ -291,7 +365,7 @@ export class Connection implements ConnectionState, vscode.Disposable {
 
   private endSession(): void {
     this.session = undefined;
-    clearInterval(this.healthTimer);
+    clearTimeout(this.healthTimer);
     this.healthTimer = undefined;
     void this.ctx.globalState.update(SESSION_KEY, undefined);
   }
@@ -332,10 +406,13 @@ export class Connection implements ConnectionState, vscode.Disposable {
     try {
       next = await client.getInputSettings();
     } catch (e) {
+      if (gen === this.generation && e instanceof HttpError && e.status === 401) this.setTokenRejected(true);
       if (!(e instanceof HttpError && e.status === 404)) return this.input;
       next = 'unsupported';
     }
-    if (gen === this.generation) this.setInput(next);
+    if (gen !== this.generation) return next;
+    this.setTokenRejected(false);
+    this.setInput(next);
     return next;
   }
 
@@ -356,22 +433,22 @@ export class Connection implements ConnectionState, vscode.Disposable {
 
   private async pollStats(): Promise<void> {
     const client = this.authedClient();
-    if (!client) return;
-    if (this.session) void this.refreshInput();
+    if (!client || !this.session) return;
+    void this.refreshInput();
     const gen = this.generation;
     try {
       const stats = await client.streamStats();
       if (gen !== this.generation || this.statsLeases === 0) return;
       this.stats = stats;
       this.statsError = stats.error ?? undefined;
-      this.tokenRejected = false;
+      this.setTokenRejected(false);
       this.changed.fire();
       if (this.health.kind !== 'ok') void this.checkHealth();
     } catch (e) {
       if (gen !== this.generation || this.statsLeases === 0) return;
       this.stats = undefined;
       this.statsError = describeError(e);
-      this.tokenRejected = e instanceof HttpError && e.status === 401;
+      if (e instanceof HttpError && e.status === 401) this.setTokenRejected(true);
       this.changed.fire();
       if (isConnectionError(e)) this.setHealth({ kind: 'unreachable', error: this.statsError });
     }
@@ -417,9 +494,31 @@ export class Connection implements ConnectionState, vscode.Disposable {
 
   dispose(): void {
     clearInterval(this.statsTimer);
-    clearInterval(this.healthTimer);
+    clearTimeout(this.healthTimer);
+    clearInterval(this.probeTimer);
     this.proxy.stop();
     this.disposables.forEach(d => d.dispose());
+  }
+}
+
+const LINK_SUFFIX: Record<LinkState, string> = {
+  connecting: 'connecting…', connected: '', unreachable: 'connection lost', rejected: 'token rejected', disconnected: 'disconnected',
+};
+
+/** Short state for titles and view descriptions; empty while connected. */
+export function linkSuffix(link: LinkState | undefined): string {
+  return link ? LINK_SUFFIX[link] : '';
+}
+
+/** One explanation per state, shared by the screen panel, the preview and the log channels. */
+export function linkMessage(conn: ConnectionState): string {
+  const name = conn.linkLabel;
+  switch (conn.link) {
+    case 'connecting': return `Connecting to ${name}…`;
+    case 'unreachable': return `Lost connection to ${name}.\nReconnecting as soon as it answers again…`;
+    case 'rejected': return `${name} rejected the stored token.\nRe-pair the device to continue.`;
+    case 'disconnected': return `Disconnected from ${name}.\nReconnect from the Devices view or the Reconnect action.`;
+    default: return '';
   }
 }
 
