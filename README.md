@@ -27,6 +27,14 @@
   <a href="docs/reference.md">Reference</a>
 </p>
 
+<p align="center">
+  <img alt="VS Code with plugin code, the Deck's live screen showing the plugin's Quick Access panel, and the plugin's logs streaming below" src="docs/images/media/hero.png">
+</p>
+
+<p align="center">
+  <img alt="A game's save files and an .ini opened from the Deck over decky://, next to the game's page on the live screen" src="docs/images/media/games-files.png">
+</p>
+
 ## Features
 
 - One-click deploy from VS Code / VSCodium that reloads just your plugin, with no loader restart.
