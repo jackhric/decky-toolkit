@@ -84,18 +84,25 @@ const cell = (i: number) => {
 
   // A clip card stays hidden (its fade-in paused) until its poster has decoded, so no card shows up blank.
   // Posters load a few at a time, which staggers their arrival; each card's own --in delay staggers the fade.
-  const pending = [...document.querySelectorAll<HTMLElement>('.hero .tile:not(.ready)')];
-  const ready = (el: HTMLElement) => el.classList.add('ready');
+  // Both copies of a card (the loop renders the tiles twice) share a poster and are revealed together, so the loop's
+  // wrap never swaps a visible card for a hidden twin.
+  const byPoster = new Map<string, HTMLElement[]>();
+  for (const el of document.querySelectorAll<HTMLElement>('.hero .tile:not(.ready)')) {
+    const poster = el.querySelector('video')?.poster ?? '';
+    byPoster.set(poster, [...(byPoster.get(poster) ?? []), el]);
+  }
+  const pending = [...byPoster];
+  const ready = (els: HTMLElement[]) => els.forEach(el => el.classList.add('ready'));
   let next = 0;
   function pump() {
-    const el = pending[next++];
-    if (!el) return;
-    const poster = el.querySelector('video')?.poster;
-    if (!poster) { ready(el); pump(); return; }
+    const item = pending[next++];
+    if (!item) return;
+    const [poster, els] = item;
+    if (!poster) { ready(els); pump(); return; }
     const img = new Image();
     img.decoding = 'async';
     img.src = poster;
-    img.decode().catch(() => {}).finally(() => { ready(el); pump(); });
+    img.decode().catch(() => {}).finally(() => { ready(els); pump(); });
   }
   for (let i = 0; i < 6; i++) pump();
 
@@ -200,7 +207,7 @@ const cell = (i: number) => {
   .scroll {
     position: relative; display: grid; grid-template-columns: repeat(6, 262px); grid-auto-rows: 158px;
     will-change: transform; backface-visibility: hidden;
-    animation: rise 72s linear infinite -71.6s;
+    animation: rise 72s linear infinite;
   }
   @keyframes rise { to { transform: translateY(-50%); } }
   .shade {

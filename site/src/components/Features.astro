@@ -60,8 +60,9 @@ const chips = ['Keyboard', 'Mouse', 'Your gamepad', 'Virtual controllers', 'Jump
       <span class="mark"><Glyph name="console" /></span>
       <h3><a class="title" href={doc('console')}>Poke the Steam UI</a></h3>
       <p>A JavaScript console for Steam's <code>SharedJSContext</code>, for inspecting and testing UI code live.</p>
-      <pre class="panel" aria-hidden="true"><span class="dim">&gt;</span> SteamClient.Apps.RunGame(
-    '70300', '', -1, 100)</pre>
+      <pre class="panel" aria-hidden="true"><span class="dim">&gt;</span> SteamUIStore.RunningApps
+    .map(a =&gt; a.display_name)
+<span class="out">['VVVVVV']</span></pre>
     </Card>
 
     <Card class={card}>
