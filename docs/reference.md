@@ -78,7 +78,7 @@ you did not make.
 
 The normal panel is deliberately minimal: the device's IP address in large type ("port 8765"
 below it), which is all the extension's Add device needs, and one server status line. Everything
-else (server and remote input toggles, restart, regenerate token, the token itself) is under
+else (server and remote input toggles, restart, regenerate token) is under
 **Advanced**.
 
 ## Screen panel

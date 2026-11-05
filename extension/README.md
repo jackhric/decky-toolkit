@@ -56,21 +56,26 @@ device is not connected they are empty and say why (see [Losing the connection](
 ### Devices
 
 Each device is shown once, and its row is also the connection state. If the name is the host, the
-row shows the host once and the state as the description; otherwise the description is
-`host:port · state`.
+row shows the host once and `vX.Y.Z · state` as the description; otherwise the description is
+`host:port · vX.Y.Z · state`.
 
 | State | Icon | Description | Click | Inline icons |
 | --- | --- | --- | --- | --- |
-| not paired | `key` | `not paired` | connect (pairs first) | Connect, `…` |
-| paired, not connected | `vm` | `paired` | connect | Connect, `…` |
+| not paired | `key` | `v0.2.1 · not paired` | connect (pairs first) | Connect, `…` |
+| paired, not connected | `vm` | `v0.2.1 · paired` | connect | Connect, `…` |
 | connecting / pairing | spinner | `connecting…` / `waiting for approval · code 4821` | none | none |
-| connected | `vm-connect` (green) | `connected` | none | Disconnect, `…` |
+| connected | `vm-connect` (green) | `v0.2.1 · connected` | none | Disconnect, `…` |
 | unreachable | `warning` (yellow) | `unreachable` | connect (retries) | Connect, `…` |
-| connected, token rejected | `key` (red) | `token rejected` | none | Disconnect, `…` (Re-pair) |
+| connected, token rejected | `key` (red) | `v0.2.1 · token rejected` | reconnect (pairs again) | Disconnect, `…` |
 
-The `…` icon and the right-click menu hold the rest: **Re-pair** (only for a paired device),
-**Enter token manually**, **Edit** and **Remove**. A connected device never
-shows Pair, Enter token or Connect as a row or a button. Connect and disconnect live only here.
+The version is the plugin version from the device's public `/health`, so it shows before pairing too;
+it is left out until the device has answered once.
+
+The `…` icon and the right-click menu hold the rest: **Rename…** (the name only) and **Forget device**
+(also deletes its stored token). There is no manual pairing: no token entry, no Re-pair and no address
+editing. A device whose token stops working is paired again by connecting to it, which asks for
+approval on the device; a device that moved to another address is forgotten and added again (or found
+by [Discovery](#discovery)). Connect and disconnect live only here.
 
 The view title has **Add device** (+), **Search network** (`$(search)`, see [Discovery](#discovery))
 and **Refresh** (also checks which devices answer). With no saved devices and none found on the network,
@@ -381,12 +386,12 @@ The screen is only available here: the device serves no browser viewer.
 
 ## Pairing
 
-Pairing starts when you connect to a device without a token (or whose token the device rejects), or
-when you choose **Re-pair**.
+Pairing starts when you connect to a device without a token, or whose token the device rejects. It is
+the only way to get a token: there is no manual token entry.
 
 1. **Reachability.** The extension calls `GET /health` (no token). If the device does not answer, you
    get one error: *Can't reach <name> at host:port. Is the device on and Decky Toolkit enabled?* with
-   **Retry** and **Edit device**. Nothing else happens.
+   **Retry**. Nothing else happens.
 2. **Request.** The extension files `POST /pair/request` with the name *VS Code on <hostname>*
    (*VSCodium* or *Cursor* in those editors) and gets a 4-digit code.
 3. **Waiting, with no time limit.** One progress notification: *Decky Toolkit: Waiting for approval on
@@ -402,9 +407,8 @@ when you choose **Re-pair**.
    **Deploy plugin**.
 5. **Denied.** *Pairing denied on <name>* with **Try again**.
 
-A device whose plugin predates pairing requests gets *Update Decky Toolkit on <name> to pair* with
-**Enter token manually**; paste the token shown in its Decky Toolkit panel. Other failures (for example
-too many pending requests) offer **Try again** and **Enter token manually**.
+A device whose plugin predates pairing requests gets *Update Decky Toolkit on <name> to pair with it*.
+Other failures (for example too many pending requests) offer **Try again**.
 
 ### Adding a device
 
@@ -433,13 +437,13 @@ fills again by itself when the device answers. The state (context key `decky-too
 | State | When | Recovers |
 | --- | --- | --- |
 | `connection lost` | `/health` fails (device asleep, network gone, Decky Loader restarting), or the screen stream drops and an immediate `/health` check fails | by itself: `/health` is retried every 2 s while lost |
-| `token rejected` | an authenticated request answers 401 (the `/input/settings` check after each `/health`, or the stats poll) | **Re-pair** |
+| `token rejected` | an authenticated request answers 401 (the `/input/settings` check after each `/health`, or the stats poll) | **Reconnect**, which pairs again (approve on the device) |
 | `disconnected` | you clicked Disconnect (or removed / switched the device) | **Reconnect** |
 | `connecting…` | a connect or pairing is running | by itself |
 
 - **Actions, Plugins, Games, Controllers**: stay visible but empty, with a welcome message for the
   state (*Lost connection to the device. …* with **Reconnect now**, *The device rejected the stored
-  token …* with **Re-pair**, *Disconnected from the device.* with **Reconnect**). The view title
+  token …* with **Reconnect**, *Disconnected from the device.* with **Reconnect**). The view title
   description says `<name> · connection lost` (or `token rejected`, `disconnected`).
 - **Preview**: stops fetching, hides its button and shows the same explanation as the screen panel.
 - **Screen panel**: stays open. The tab title becomes `Screen: <name> (connection lost)` (or
@@ -465,12 +469,8 @@ All of these are also in the command palette under the `Decky:` category.
 | Decky: Connect | Connects to a device; pairs first when there is no valid token |
 | Decky: Disconnect | Ends the session; keeps the token |
 | Decky: Reconnect | Connects to the device of the last session again (pairs again when its token was rejected) |
-| Decky: Re-pair | Runs pairing again for a device |
-| Decky: Enter token manually | Paste a token; it is checked with an MCP `tools/list` call |
-| Decky: Disconnect and forget token | Forgets the token for the active device |
-| Decky: Switch device / Add device… / Edit device / Remove device | Connect to another saved device, manage saved devices |
+| Decky: Switch device / Add device… / Rename device / Forget device | Connect to another saved device, add one, rename it, or forget it and its token |
 | Decky: Search network | Look for unsaved Decky Toolkit devices on the local network ([Discovery](#discovery)) |
-| Decky: Change host | Changes the active device's host/port and writes the `decky-toolkit.host`/`port` settings |
 | Decky: Open screen | Live screen panel with sound; remote input, mute, stream settings, pause and snapshot as tab bar icons |
 | Decky: Snapshot to file | Saves the current `/frame.jpg` with a Save dialog |
 | Decky: Deploy plugin | Build if needed, zip, `POST /plugins/install`, reload just this plugin and confirm it (<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd>) |

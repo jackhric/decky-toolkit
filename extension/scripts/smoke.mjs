@@ -624,7 +624,7 @@ ext.discoveryHooks.createSocket = () => {
     close: () => undefined,
   };
 };
-ext.discoveryTimings.mdnsMs = 30;
+ext.discoveryTimings.mdnsMs = 150;
 ext.discoveryTimings.probeTimeoutMs = 60;
 ext.discoveryTimings.minRescanMs = 60_000;
 
@@ -781,7 +781,7 @@ await check('unpaired: only Devices visible, one row, Connect inline', async () 
   assert.equal(rows.length, 1);
   const [r] = rows;
   assert.equal(r.label, '10.1.2.3', 'name equal to host is shown once');
-  assert.equal(r.description, 'not paired');
+  assert.equal(r.description, 'v0.2.0 · not paired', 'the version comes from the public /health before pairing');
   assert.equal(r.iconPath.id, 'key');
   assert.equal(r.contextValue, 'deck.unpaired');
   assert.deepEqual(r.command, { command: 'decky-toolkit.connect', title: 'Connect', arguments: [seedId()] });
@@ -883,7 +883,7 @@ await check('Connect on an unpaired device files a pairing request, waits for ap
   assert.equal(prog.title, 'Decky Toolkit');
   assert.equal(prog.messages[0], 'Waiting for approval on 10.1.2.3 · code 4821. On the device: Quick Access → Decky Toolkit → Approve.');
   assert.ok(!prog.messages.some(m => /\d+ s\b|120/.test(m)), 'no countdown');
-  assert.equal(rowDuringPairing.description, 'waiting for approval · code 4821');
+  assert.equal(rowDuringPairing.description, 'v0.2.0 · waiting for approval · code 4821');
   assert.equal(rowDuringPairing.contextValue, 'deck.busy');
   assert.equal(secrets.get(tokenKey), 'fake-token');
   assert.equal(calls.context.get('decky-toolkit.connected'), true);
@@ -900,7 +900,7 @@ await check('connected: views, device row, titles and status bar', async () => {
   assert.deepEqual(visibleViews(), ['decky-toolkit.devices', 'decky-toolkit.actions', 'decky-toolkit.plugins', 'decky-toolkit.games', 'decky-toolkit.controllers', 'decky-toolkit.preview']);
   const [r] = devicesProvider().getChildren();
   assert.equal(r.label, '10.1.2.3');
-  assert.equal(r.description, 'connected');
+  assert.equal(r.description, 'v0.2.0 · connected');
   assert.equal(r.iconPath.id, 'vm-connect');
   assert.equal(r.iconPath.color.id, 'testing.iconPassed');
   assert.equal(r.contextValue, 'deck.session');
@@ -908,8 +908,8 @@ await check('connected: views, device row, titles and status bar', async () => {
   assert.deepEqual(itemMenu('decky-toolkit.devices', r.contextValue, true), ['decky-toolkit.disconnectDevice', 'decky-toolkit.deviceActions']);
   const ctxMenu = itemMenu('decky-toolkit.devices', r.contextValue, false);
   for (const bad of ['decky-toolkit.connect', 'decky-toolkit.pair']) assert.ok(!ctxMenu.includes(bad), `${bad} on a connected device`);
-  assert.ok(ctxMenu.includes('decky-toolkit.pairAgain'));
-  assert.equal(pkg.contributes.commands.find(c => c.command === 'decky-toolkit.pairAgain').title, 'Re-pair');
+  assert.deepEqual(ctxMenu.filter(m => !/connect/i.test(m)), ['decky-toolkit.renameDevice', 'decky-toolkit.removeDevice'], 'right-click: Disconnect, Rename and Forget only');
+  assert.equal(pkg.contributes.commands.find(c => c.command === 'decky-toolkit.removeDevice').title, 'Forget device');
   assert.deepEqual(labels(await pluginsProvider().getChildren()), ['Decky Toolkit', 'Tender']);
   assert.equal(tree('decky-toolkit.actions').view.description, '10.1.2.3');
   assert.equal(tree('decky-toolkit.plugins').view.description, '10.1.2.3');
@@ -1644,7 +1644,7 @@ await check('connection lost: views stay but go blank, screen panel / preview / 
   device.up = false;
   await settle(150);
   let [r] = devicesProvider().getChildren();
-  assert.equal(r.description, 'unreachable');
+  assert.equal(r.description, 'v0.2.0 · unreachable');
   assert.equal(r.iconPath.id, 'warning');
   assert.equal(calls.context.get('decky-toolkit.connected'), true, 'the session and its token stay');
   assert.equal(calls.context.get('decky-toolkit.link'), 'unreachable');
@@ -1678,7 +1678,7 @@ await check('connection lost: views stay but go blank, screen panel / preview / 
   device.up = true;
   await settle(150);
   [r] = devicesProvider().getChildren();
-  assert.equal(r.description, 'connected');
+  assert.equal(r.description, 'v0.2.0 · connected');
   assert.equal(calls.context.get('decky-toolkit.link'), 'connected');
   assert.equal(status(), '$(vm-connect) 10.1.2.3');
   assert.equal(calls.statusItems[0].backgroundColor, undefined);
@@ -1738,7 +1738,7 @@ await check('user Disconnect: views stay blank with "Disconnected" and Reconnect
     assert.equal(tree(`decky-toolkit.${id}`).view.description, '10.1.2.3 · disconnected');
   }
   const [r] = devicesProvider().getChildren();
-  assert.equal(r.description, 'paired');
+  assert.equal(r.description, 'v0.2.0 · paired');
   assert.equal(r.iconPath.id, 'vm');
   assert.equal(r.contextValue, 'deck.paired');
   assert.equal(r.command.command, 'decky-toolkit.connect');
@@ -1778,12 +1778,12 @@ await check('token rejected mid-session: views blank with Re-pair, status bar an
   assert.equal(calls.context.get('decky-toolkit.link'), 'rejected');
   for (const id of LOST_VIEWS) {
     assert.deepEqual(await tree(`decky-toolkit.${id}`).provider.getChildren(), []);
-    assert.match(welcomeFor(`decky-toolkit.${id}`)[0], /rejected the stored token.*\n\[Re-pair\]\(command:decky-toolkit\.reconnect\)$/s);
+    assert.match(welcomeFor(`decky-toolkit.${id}`)[0], /rejected the stored token.*\n\[Reconnect\]\(command:decky-toolkit\.reconnect\)$/s);
   }
   assert.equal(status(), '$(key) 10.1.2.3: token rejected');
   assert.equal(calls.statusItems[0].backgroundColor.id, 'statusBarItem.errorBackground');
   const [r] = devicesProvider().getChildren();
-  assert.equal(r.description, 'token rejected');
+  assert.equal(r.description, 'v0.2.0 · token rejected');
   const file = ext.deckyUri({ host: '10.1.2.3', port: 8765 }, '/home/jackh/.local/share/VVVVVV/saves/tsave.vvv');
   assert.equal(calls.decorations[0].provideFileDecoration(file).color.id, 'list.errorForeground');
   device.pairQueue = ['approved'];
@@ -1851,8 +1851,8 @@ await check('reachability error: one message with Retry / Edit device, no pairin
   await run('decky-toolkit.connect', seedId());
   await settle();
   assert.equal(calls.lastError.m, "Can't reach 10.1.2.3 at 10.1.2.3:8765. Is the device on and Decky Toolkit enabled?");
-  assert.deepEqual(calls.lastError.buttons, ['Retry', 'Edit device']);
-  assert.equal(row.description, 'unreachable');
+  assert.deepEqual(calls.lastError.buttons, ['Retry'], 'no way to edit the address: forget and add the device again');
+  assert.equal(row.description, 'v0.2.0 · unreachable');
   assert.equal(row.iconPath.id, 'warning');
   assert.equal(row.iconPath.color.id, 'problemsWarningIcon.foreground');
   assert.ok(!fetched.includes('/pair/request'));
@@ -1893,25 +1893,25 @@ await check('pairing has no time limit: survives a lost connection and a forgott
   prog.cancel();
   await done;
   await settle();
-  assert.equal(row.description, 'waiting for approval · code 4822', 'the row shows the new code');
+  assert.equal(row.description, 'v0.2.0 · waiting for approval · code 4822', 'the row shows the new code');
   assert.ok(prog.messages.some(m => /^Lost contact with 10\.1\.2\.3 \(cannot reach the device \(socket hang up\)\), retrying… Code 4821\.$/.test(m)));
   assert.equal(prog.messages.at(-1), 'Waiting for approval on 10.1.2.3 · code 4822. On the device: Quick Access → Decky Toolkit → Approve.');
   assert.deepEqual(device.pairCancelled, ['req1']);
   assert.equal(calls.messages.filter(m => m.kind === 'warning').length, warningsBefore, 'cancel is silent');
   assert.equal(calls.context.get('decky-toolkit.connected'), false);
-  assert.equal(devicesProvider().getChildren()[0].description, 'not paired');
+  assert.equal(devicesProvider().getChildren()[0].description, 'v0.2.0 · not paired');
   return `${prog.messages.length} progress updates, codes 4821 → 4822, DELETE ${device.pairCancelled[0]}`;
 });
 
-await check('a device without pairing requests (401): "Update Decky Toolkit" with Enter token manually', async () => {
+await check('a device without pairing requests (401): "Update Decky Toolkit", no manual token entry', async () => {
   device.pairUnsupported = true;
   let offered;
   ui.warning = (m, buttons) => { offered = { m, buttons }; return undefined; };
   await run('decky-toolkit.connect', seedId());
   device.pairUnsupported = false;
-  assert.equal(offered.m, 'Decky Toolkit: Update Decky Toolkit on 10.1.2.3 to pair. Until then, copy the token from its Decky Toolkit panel.');
-  assert.deepEqual(offered.buttons, ['Enter token manually']);
-  assert.equal(devicesProvider().getChildren()[0].description, 'not paired');
+  assert.equal(offered.m, 'Decky Toolkit: Update Decky Toolkit on 10.1.2.3 to pair with it.');
+  assert.deepEqual(offered.buttons, []);
+  assert.equal(devicesProvider().getChildren()[0].description, 'v0.2.0 · not paired');
   return `"${offered.m}" [${offered.buttons.join(', ')}]`;
 });
 
@@ -1953,11 +1953,23 @@ await check('status bar QuickPick: connect/switch, disconnect, open screen, add'
   return offered.labels.filter(Boolean).join(' | ');
 });
 
-await check('the … overflow menu', async () => {
+await check('the … overflow menu: only Rename and Forget device; no manual pairing anywhere', async () => {
   let offered;
   ui.quickPick = items => { offered = items.map(i => i.label); };
   await run('decky-toolkit.deviceActions', seedId());
-  assert.deepEqual(offered.map(l => l.replace(/^\$\([^)]+\) /, '')), ['Re-pair', 'Enter token manually', 'Edit', 'Remove']);
+  assert.deepEqual(offered.map(l => l.replace(/^\$\([^)]+\) /, '')), ['Rename…', 'Forget device']);
+  for (const id of ['decky-toolkit.enterToken', 'decky-toolkit.pairAgain', 'decky-toolkit.changeHost', 'decky-toolkit.editDevice', 'decky-toolkit.disconnect']) {
+    assert.ok(!calls.commands.has(id), `${id} is gone`);
+  }
+  assert.doesNotMatch(JSON.stringify(pkg.contributes), /Re-pair|Enter token|token manually/);
+  ui.inputBox = opts => { assert.equal(opts.value, '10.1.2.3'); return '  Living room Deck  '; };
+  await run('decky-toolkit.renameDevice', seedId());
+  assert.equal(globalState.get('decky-toolkit.devices')[0].name, 'Living room Deck');
+  const [row] = devicesProvider().getChildren();
+  assert.equal(row.label, 'Living room Deck');
+  assert.match(row.description, /^10\.1\.2\.3:8765 · v0\.2\.0 · /);
+  ui.inputBox = () => '10.1.2.3';
+  await run('decky-toolkit.renameDevice', seedId());
   return offered.join(' | ');
 });
 
