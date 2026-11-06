@@ -7,7 +7,7 @@ from typing import Any
 
 from ..steam import cdp
 from . import ToolRegistry
-from ..loader.plugins import plugins_dir, resolve_plugin
+from ..loader.plugins import check_dir_name, plugins_dir, resolve_plugin
 
 SOURCE_SUFFIXES = (".ts", ".tsx")
 MAX_SOURCE_BYTES = 8 * 1024 * 1024
@@ -20,9 +20,7 @@ _CALL_RE = re.compile(r"(?<![\w$])(callable(?:\$\d+)?|call)\s*(?:<[^<>()]*>)?\s*
 
 
 def _plugin_path(dirname: str) -> str:
-    if not dirname or "/" in dirname or dirname.startswith("."):
-        raise ValueError("dir must be a bare plugin directory name")
-    path = os.path.join(plugins_dir(), dirname)
+    path = os.path.join(plugins_dir(), check_dir_name(dirname))
     if not os.path.isdir(path):
         raise FileNotFoundError(f"no plugin installed at {path}")
     return path

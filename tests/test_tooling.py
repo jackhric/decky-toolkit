@@ -114,7 +114,7 @@ def test_snapshot_lists_threads_and_tasks():
 
 # ---- run_command ----
 
-from decky_toolkit import shell  # noqa: E402
+from decky_toolkit import shell, system  # noqa: E402
 
 
 def run(coro):
@@ -124,10 +124,10 @@ def run(coro):
 def test_run_command_basics():
     r = run(shell.run_command("echo out; echo err >&2; exit 3", logger=LOG))
     assert (r["exit_code"], r["stdout"], r["stderr"], r["timed_out"]) == (3, "out\n", "err\n", False)
-    assert r["user"] == shell.desktop_user().pw_name and r["cwd"] == shell.desktop_user().pw_dir
+    assert r["user"] == system.desktop_user().pw_name and r["cwd"] == system.desktop_user().pw_dir
     assert run(shell.run_command("cat; pwd", cwd="/tmp", stdin="fed\n", logger=LOG))["stdout"] == "fed\n/tmp\n"
     env = run(shell.run_command("echo $XDG_RUNTIME_DIR $DISPLAY $LD_LIBRARY_PATH", logger=LOG))["stdout"].split()
-    assert env == [f"/run/user/{shell.desktop_user().pw_uid}", ":0"]
+    assert env == [f"/run/user/{system.desktop_user().pw_uid}", ":0"]
 
 
 def test_run_command_timeout_stops_the_whole_group():

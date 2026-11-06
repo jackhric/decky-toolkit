@@ -15,6 +15,7 @@ from typing import Any, Iterable
 
 from . import vdf
 from ..guard import check_read, check_write, is_sensitive
+from ..system import tail, user_home
 
 STEAMID64_BASE = 76561197960265728
 MAX_LIST_ENTRIES = 2000
@@ -39,16 +40,6 @@ _NOT_SAVE_EXT = {".dll", ".exe", ".so", ".pak", ".ucas", ".utoc", ".log", ".png"
 
 class OutsideRoots(PermissionError):
     pass
-
-
-def user_home() -> str:
-    home = os.environ.get("DECKY_USER_HOME")
-    if home:
-        return home
-    try:
-        return pwd.getpwnam(os.environ.get("DECKY_USER", "deck")).pw_dir
-    except KeyError:
-        return os.path.expanduser("~")
 
 
 def expand(path: str, home: str | None = None) -> str:
@@ -795,19 +786,6 @@ def fs_rename(src: str, dst: str, scope: WriteScope | None, home: str | None = N
 
 # ---- logs ----
 
-def _tail_lines(path: str, lines: int) -> list[str]:
-    with open(path, "rb") as f:
-        f.seek(0, os.SEEK_END)
-        size = f.tell()
-        data = b""
-        while size > 0 and data.count(b"\n") <= lines:
-            step = min(65536, size)
-            size -= step
-            f.seek(size)
-            data = f.read(step) + data
-    return data.decode(errors="replace").splitlines()[-lines:]
-
-
 STEAM_LOGS = ("compat_log.txt", "gameprocess_log.txt", "console_log.txt", "content_log.txt", "cloud_log.txt",
               "shader_log.txt", "streaming_log.txt")
 
@@ -819,7 +797,7 @@ def proton_log(appid: int, lines: int = 200, home: str | None = None, root: str 
     out: dict[str, Any] = {"appid": appid}
     if os.path.isfile(path):
         st = os.stat(path)
-        out["proton_log"] = {"path": path, "size": st.st_size, "mtime": iso(st.st_mtime), "lines": _tail_lines(path, lines)}
+        out["proton_log"] = {"path": path, "size": st.st_size, "mtime": iso(st.st_mtime), "lines": tail(path, lines).splitlines()}
     else:
         out["proton_log"] = {"path": path, "exists": False,
                              "hint": "set the launch option PROTON_LOG=1 %command% and run the game to create it"}
@@ -830,7 +808,7 @@ def proton_log(appid: int, lines: int = 200, home: str | None = None, root: str 
         if not os.path.isfile(p):
             continue
         # Only the tail is searched: these logs grow for weeks and the recent launches are what matter.
-        hits = [l for l in _tail_lines(p, 20000) if needle.search(l)][-lines:]
+        hits = [l for l in tail(p, 20000).splitlines() if needle.search(l)][-lines:]
         if hits:
             steam_logs.append({"file": p, "mtime": iso(os.path.getmtime(p)), "lines": hits})
     out["steam_logs"] = steam_logs

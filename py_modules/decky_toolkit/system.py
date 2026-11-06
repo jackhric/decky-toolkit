@@ -1,6 +1,25 @@
 """Subprocess and file helpers shared across the backend."""
 import asyncio
 import os
+import pwd
+
+
+def desktop_user() -> pwd.struct_passwd:
+    """Decky's user (DECKY_USER, the owner of ~/homebrew, whom Steam runs as); the current user outside the loader."""
+    name = os.environ.get("DECKY_USER")
+    try:
+        return pwd.getpwnam(name) if name else pwd.getpwuid(os.getuid())
+    except KeyError:
+        return pwd.getpwuid(os.getuid())
+
+
+def user_home() -> str:
+    return os.environ.get("DECKY_USER_HOME") or desktop_user().pw_dir
+
+
+def user_runtime_dir() -> str:
+    """The desktop session's XDG_RUNTIME_DIR: PipeWire, gamescope, D-Bus and X live there, for root as well."""
+    return f"/run/user/{desktop_user().pw_uid}"
 
 
 def clean_env() -> dict[str, str]:
@@ -20,6 +39,7 @@ async def run(*argv: str, timeout: float = 20) -> tuple[int, str]:
 
 
 def tail(path: str, lines: int) -> str:
+    """The last `lines` lines, read backwards in blocks so a long log is not read whole."""
     with open(path, "rb") as f:
         f.seek(0, os.SEEK_END)
         size = f.tell()
