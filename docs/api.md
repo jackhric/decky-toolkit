@@ -414,7 +414,8 @@ without a version bump.
 backend run), `file`; `steam_console`: `target`, `level`, `since` (see [Console](#console)); `proton`: `appid`, Proton's
 `~/steam-<appid>.log` plus the matching lines of Steam's `logs/`; every source: `lines`, `grep`, `match`; an argument
 of another source is refused). `logs_wait` (`pattern`, `source` `loader`/`plugin`/`steam_console`, `timeout`, `count`,
-`since_s` to accept lines from the last few seconds): `{source, matched, lines | entries, waited_ms}`.
+`since_s` to accept lines from the last few seconds): `{source, matched, matches, waited_ms}`, `matches` being log
+lines or, for `steam_console`, console entries.
 
 `plugin_reload` (`plugin`, `mode` `backend` default or `frontend`): as `POST /plugins/{dir}/reload?mode=…`.
 `plugin_install` (`path` on the device or `zip_base64`, plus `restart` as for `POST /plugins/install`).

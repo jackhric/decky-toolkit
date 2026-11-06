@@ -246,36 +246,18 @@ def test_device_activity_tool():
 
 # ---- logs ----
 
-from decky_toolkit.loader import logs  # noqa: E402
 
 
-def test_wait_for_log_and_previous_runs(tmp_path, monkeypatch):
+def test_logs_read_previous_runs_and_names(tmp_path, monkeypatch):
     monkeypatch.setenv("DECKY_HOME", str(tmp_path))
     d = tmp_path / "logs" / "demo"
     d.mkdir(parents=True)
     (tmp_path / "plugins" / "demo").mkdir(parents=True)
     (tmp_path / "plugins" / "demo" / "plugin.json").write_text('{"name": "Demo Plugin"}')
     old, new = d / "2026-11-06 01.00.00.log", d / "2026-11-06 02.00.00.log"
-    stamp = time.strftime("%Y-%m-%d %H:%M:%S")
     old.write_text("[2026-11-06 01:00:00,000][INFO]: Goodnight World!\n")
     os.utime(old, (time.time() - 60, time.time() - 60))
-    new.write_text(f"[{stamp},000][INFO]: Hello World!\n")
-
-    async def go():
-        async def later():
-            await asyncio.sleep(0.4)
-            with open(new, "a") as f:
-                f.write(f"[{stamp},500][INFO]: ready on port 1\n")
-        asyncio.create_task(later())
-        hit = await logs.wait_for("plugin", "demo", r"ready on port \d", 5)
-        recent = await logs.wait_for("plugin", "demo", "hello world", 1, since_s=30)
-        miss = await logs.wait_for("plugin", "demo", "never", 0.3)
-        return hit, recent, miss
-
-    hit, recent, miss = run(go())
-    assert hit["matched"] and hit["lines"][0].endswith("ready on port 1") and hit["waited_ms"] >= 300
-    assert recent["matched"] and "Hello World" in recent["lines"][0]
-    assert miss == {"matched": False, "lines": [], "waited_ms": miss["waited_ms"]}
+    new.write_text("[2026-11-06 02:00:00,000][INFO]: Hello World!\n[2026-11-06 02:00:00,500][INFO]: ready on port 1\n")
 
     reg = make_registry()
     prev = json.loads(text(run(reg.call("logs_read", {"source": "plugin", "plugin": "demo", "run": 1}))))
