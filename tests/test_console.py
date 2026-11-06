@@ -236,12 +236,9 @@ def test_console_routes_and_tools():
         assert not c._subs
 
         rpc = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-               "params": {"name": "cef_console", "arguments": {"level": "error"}}}
+               "params": {"name": "logs_read", "arguments": {"source": "steam_console", "level": "error"}}}
         async with session.post(f"{base}/mcp", json=rpc, headers=H) as r:
             result = (await r.json())["result"]
         assert [e["text"] for e in json.loads(result["content"][0]["text"])["entries"]] == ["live one"]
-        rpc["params"] = {"name": "cef_console_clear", "arguments": {}}
-        async with session.post(f"{base}/mcp", json=rpc, headers=H) as r:
-            assert json.loads((await r.json())["result"]["content"][0]["text"])["cleared"]["SharedJSContext"] == 2
 
     asyncio.run(with_api(run, c))

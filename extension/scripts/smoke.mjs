@@ -362,7 +362,8 @@ const games = {
   tools: {
     app_launch: a => ({ appid: a.appid, name: 'Chained Together', launched: true, running: true }),
     app_terminate: a => ({ appid: a.appid, name: 'VVVVVV', terminated: true, running: false }),
-    proton_log: a => ({
+    logs_read: a => ({
+      source: a.source,
       appid: a.appid,
       proton_log: { path: `/home/jackh/steam-${a.appid}.log`, exists: false, hint: 'set the launch option PROTON_LOG=1 %command% and run the game to create it' },
       steam_logs: [{ file: `${STEAM}/logs/compat_log.txt`, mtime: ago(60), lines: [`StartSession: appID ${a.appid}`] }],

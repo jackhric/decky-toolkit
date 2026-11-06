@@ -13,7 +13,7 @@ export const PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '202
 
 const LOCAL_TOOLS: ToolDescription[] = [
   {
-    name: 'deploy_plugin',
+    name: 'plugin_deploy',
     description: 'Package a Decky plugin folder (plugin.json, dist/, main.py, py_modules/, ...) from this machine, install it on the paired device '
       + 'and confirm the device loaded it. Run the plugin\'s own build first; dist/ must exist. Without `restart`, a new plugin restarts '
       + 'Decky Loader, a plugin with the debug flag is left to the loader\'s file watcher, and any other installed one is reloaded.',
@@ -125,7 +125,7 @@ export class McpServer {
     const problem = localTool && argumentProblem(localTool, args);
     if (problem) return result(id, text(problem, true));
     if (name === 'device_status') return result(id, text(JSON.stringify(await deviceStatus(), null, 2)));
-    if (name === 'deploy_plugin') {
+    if (name === 'plugin_deploy') {
       try {
         const dir = args.dir ?? '.';
         if (typeof dir !== 'string') throw new InvalidOption('dir must be a string');
@@ -182,7 +182,7 @@ export class McpServer {
             capabilities: { tools: { listChanged: true } },
             serverInfo: { name: 'decky-toolkit', version: VERSION },
             instructions: 'Tools that inspect and control the paired Steam Deck running Decky Loader (screen, logs, plugins, Steam UI, input) '
-              + `plus deploy_plugin to install a Decky plugin from this machine; if a tool says the device is not paired, ${PAIR_HINT} in a terminal.`,
+              + `plus plugin_deploy to install a Decky plugin from this machine; if a tool says the device is not paired, ${PAIR_HINT} in a terminal.`,
           });
         }
         case 'ping':

@@ -159,7 +159,7 @@ The view title has **Open screen** and **Refresh**.
 
 ### Plugins
 
-Lists the device's plugins (`GET /plugins`, falling back to the `list_plugins` tool) as
+Lists the device's plugins (`GET /plugins`, falling back to the `plugin_list` tool) as
 `Name  version · dir`; hover for flags, `api_version` and `has_backend`. The inline icons reload a
 plugin's backend (`POST /plugins/{dir}/reload`) or open its log. The title bar has **Install
 plugin zip…** (pick a `.zip`, upload to `/plugins/install?restart=loader`, wait for the loader) and
@@ -381,7 +381,7 @@ panel is the active editor of its group:
 
 - *Stream · every client*: **Frame rate** (15/24/30/60 fps), **JPEG quality** (50-90), **Size**
   (native, 1600, 1280, 960, 640 px wide) and **Audio** on/off. These are device-wide
-  (`/stream/settings`, the same values the `set_stream_settings` tool changes); the extension sends
+  (`/stream/settings`, the same values the `stream_settings` tool changes); the extension sends
   the `PUT`, and the panel shows *Applying stream settings…* until the first frame of the restarted
   stream arrives. Changes made elsewhere show up within one 5 s stats poll. A device without the
   route offers only the local entries.
@@ -500,10 +500,10 @@ All of these are also in the command palette under the `Decky:` category.
 | Decky: Open save data… | Picks a game and adds its best save folder to the Explorer (`decky://`) |
 | Decky: Open device path… | Opens a device folder in the Explorer or a device file in the editor |
 | Decky: Launch game / Terminate game | `app_launch`; `app_terminate` after a confirmation |
-| Decky: Show Proton log | `proton_log` for a game in an editor tab |
+| Decky: Show Proton log | `logs_read` with `source: proton` for a game, in an editor tab |
 | Decky: Refresh games | Reloads the Games view |
 | Decky: Install plugin zip… | Uploads a plugin zip from disk to `/plugins/install?restart=loader` |
-| Decky: Restart loader | `POST /loader/restart` (falls back to the `restart_loader` tool) |
+| Decky: Restart loader | `POST /loader/restart` (falls back to the `loader_restart` tool) |
 | Decky: Reload plugin | `POST /plugins/{dir}/reload` for one plugin backend |
 | Decky: Show loader logs | Streams `journalctl -u plugin_loader` via `/logs/stream` |
 | Decky: Show plugin logs | Streams a plugin's log from `~/homebrew/logs/<dir>/` |
@@ -549,10 +549,8 @@ Windows), one device per machine, and shared with the upcoming CLI.
   a built-in zip writer and uploads the zip. It confirms a fast reload from `/logs/tail` (the
   loader journal and the plugin's log) and `/plugins`. Build and deploy output goes to the
   "Decky" output channel.
-- **Older devices.** If `/logs/stream` is missing, logs fall back to polling the `loader_log` /
-  `read_plugin_log` MCP tools every 3 s and print only new lines. Deploy and reload need a device
-  plugin with `/plugins/install` and `/plugins/{dir}/reload`; without them you get an error asking
-  you to update the device plugin.
+- **Older devices.** Logs need `/logs/stream`, deploy and reload need `/plugins/install` and
+  `/plugins/{dir}/reload`; on a device plugin without them you get a message asking you to update it.
 
 ## Development
 

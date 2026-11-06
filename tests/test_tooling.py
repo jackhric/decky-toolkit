@@ -161,8 +161,8 @@ def test_run_command_truncates_and_checks_input():
 def test_run_command_is_audited_in_full(caplog):
     with caplog.at_level(logging.INFO, logger="t"):
         run(shell.run_command("echo secret-free", logger=LOG))
-    line = next(r.message for r in caplog.records if "run_command" in r.message)
-    assert line.startswith("audit run_command as=") and line.endswith(": echo secret-free")
+    line = next(r.message for r in caplog.records if "device_run" in r.message)
+    assert line.startswith("audit device_run as=") and line.endswith(": echo secret-free")
 
 
 def test_exec_route():
@@ -276,6 +276,8 @@ def test_wait_for_log_and_previous_runs(tmp_path, monkeypatch):
     monkeypatch.setenv("DECKY_HOME", str(tmp_path))
     d = tmp_path / "logs" / "demo"
     d.mkdir(parents=True)
+    (tmp_path / "plugins" / "demo").mkdir(parents=True)
+    (tmp_path / "plugins" / "demo" / "plugin.json").write_text('{"name": "Demo Plugin"}')
     old, new = d / "2026-11-06 01.00.00.log", d / "2026-11-06 02.00.00.log"
     stamp = time.strftime("%Y-%m-%d %H:%M:%S")
     old.write_text("[2026-11-06 01:00:00,000][INFO]: Goodnight World!\n")
@@ -299,10 +301,35 @@ def test_wait_for_log_and_previous_runs(tmp_path, monkeypatch):
     assert miss == {"matched": False, "lines": [], "waited_ms": miss["waited_ms"]}
 
     reg = ToolRegistry()
-    from decky_toolkit.tools import system
-    system.register(reg)
-    prev = json.loads(text(run(reg.call("read_plugin_log", {"plugin_dir": "demo", "run": 1}))))
+    from decky_toolkit.tools import logs as log_tools
+    log_tools.register(reg)
+    prev = json.loads(text(run(reg.call("logs_read", {"source": "plugin", "plugin": "demo", "run": 1}))))
     assert prev["file"] == old.name and "Goodnight" in prev["text"]
-    only = json.loads(text(run(reg.call("read_plugin_log", {"plugin_dir": "demo", "match": "^\\[.*ready"}))))
+    only = json.loads(text(run(reg.call("logs_read", {"source": "plugin", "plugin": "demo", "match": "^\\[.*ready"}))))
     assert only["text"].endswith("ready on port 1")
-    assert run(reg.call("read_plugin_log", {"plugin_dir": "demo", "run": 5}))["isError"]
+    assert run(reg.call("logs_read", {"source": "plugin", "plugin": "demo", "run": 5}))["isError"]
+    by_name = json.loads(text(run(reg.call("logs_read", {"source": "plugin", "plugin": "Demo Plugin", "run": 1}))))
+    assert by_name["file"] == old.name
+
+
+AREAS = ("app", "cef", "controller", "device", "fs", "input", "loader", "logs", "perf", "plugin", "recording", "screen",
+         "stream", "toolkit", "ui")
+
+
+def test_tool_names_are_area_then_action():
+    import re
+    rx = re.compile(rf"^({'|'.join(AREAS)})_[a-z]+(_[a-z]+)*$")
+    bad = [n for n in build_registry()._tools if not rx.match(n)]
+    assert bad == []
+
+
+def test_logs_read_takes_only_the_arguments_of_its_source():
+    reg = build_registry()
+    r = run(reg.call("logs_read", {"source": "loader", "plugin": "x"}))
+    assert r["isError"] and "source 'loader' does not take plugin (it takes since, until)" in text(r)
+    r = run(reg.call("logs_read", {"source": "plugin"}))
+    assert r["isError"] and "needs plugin" in text(r)
+    r = run(reg.call("logs_read", {"source": "proton", "appid": 0}))
+    assert r["isError"] and "positive integer" in text(r)
+    r = run(reg.call("logs_wait", {"pattern": "x", "source": "loader", "plugin": "y"}))
+    assert r["isError"] and "does not take plugin" in text(r)

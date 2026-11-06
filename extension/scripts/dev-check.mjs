@@ -244,9 +244,9 @@ await check('MCP tools/list via client', async () => {
   return `${tools.length} tools: ${tools.map(t => t.name).join(', ')}`;
 });
 
-await check('MCP tools/call loader_log via client', async () => {
-  const text = await new DeckyClient({ host, port }, identity).callToolText('loader_log', { lines: 5 });
-  return `${text.split('\n').length} lines`;
+await check('MCP tools/call logs_read via client', async () => {
+  const text = await new DeckyClient({ host, port }, identity).callToolText('logs_read', { source: 'loader', lines: 5 });
+  return `${(JSON.parse(text) as { text: string }).text.split('\n').length} lines`;
 });
 
 // Read-only: never adds pads or navigates on the shared device. Passes on 404 (older device).

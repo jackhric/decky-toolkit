@@ -18,9 +18,9 @@ claude mcp add --transport http decky <the copied URL>
 
 In VS Code, **Decky: Write MCP config for this workspace** adds the server to `.mcp.json` for you.
 
-Tools include `decky_status`, `list_plugins`, `install_plugin`, `reload_plugin`, `read_plugin_log`,
-`wait_for_log`, `run_command`, `device_activity`, `ui_state`, `screen_capture`, `input_key`, `input_gamepad`,
-`ui_navigate`, `cef_evaluate` and more; see the
+Tools are named `<area>_<action>`: `device_info`, `device_run`, `device_activity`, `logs_read`, `logs_wait`,
+`plugin_list`, `plugin_install`, `plugin_reload`, `ui_state`, `ui_navigate`, `screen_capture`, `input_key`,
+`input_gamepad`, `cef_evaluate` and more; see the
 [full reference](https://github.com/jackhric/decky-toolkit/blob/main/docs/reference.md#mcp-tools).
 
 ## HTTP

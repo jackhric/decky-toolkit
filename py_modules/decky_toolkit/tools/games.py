@@ -1,4 +1,4 @@
-"""Game dirs, save locations, Proton logs and a guarded file browser."""
+"""App dirs, save locations and a guarded file browser."""
 import asyncio
 import os
 from typing import Any
@@ -19,44 +19,32 @@ def register(reg: ToolRegistry, apps: Apps | None = None) -> None:
     lib = apps or Apps()
 
     @reg.add(
-        "game_dirs",
+        "app_dirs",
         "Resolve one title's directories: install dir, Proton prefix (compatdata/<appid>/pfx) and its steamuser "
         "AppData/Roaming, AppData/Local, AppData/LocalLow, Documents and Saved Games (with subdirs named after the "
         "game or developer), Steam Cloud userdata/<account>/<appid>/remote, shader cache, and for native Linux titles "
         "matching ~/.local/share, ~/.config and ~/.config/unity3d entries. Each entry says whether it exists.",
         {"properties": {"appid": APPID}, "required": ["appid"]},
     )
-    async def game_dirs(appid: int) -> dict[str, Any]:
+    async def app_dirs(appid: int) -> dict[str, Any]:
         return await lib.dirs(appid)
 
     @reg.add(
-        "game_saves",
+        "app_saves",
         "Likely save files for a title, best first: files Steam Cloud tracks (remotecache.vdf, mapped to local "
         "paths) and the cloud remote dir, then dirs Steam Auto-Cloud marked (steam_autocloud.vdf), then heuristics "
         "(save-like names under dirs named after the game). Each has path, size, mtime and found_by.",
         {"properties": {"appid": APPID, "limit": {"type": "integer", "default": 40, "minimum": 1, "maximum": 500}},
          "required": ["appid"]},
     )
-    async def game_saves(appid: int, limit: int = 40) -> dict[str, Any]:
+    async def app_saves(appid: int, limit: int = 40) -> dict[str, Any]:
         return await lib.saves(appid, limit)
-
-    @reg.add(
-        "proton_log",
-        "Logs for one title: ~/steam-<appid>.log (written when the game runs with PROTON_LOG=1) plus the lines "
-        "mentioning the appid in Steam's logs/ (compat, gameprocess, console, content, cloud, shader).",
-        {"properties": {"appid": APPID, "lines": {"type": "integer", "default": 200, "minimum": 1, "maximum": 5000}},
-         "required": ["appid"]},
-    )
-    async def proton_log(appid: int, lines: int = 200) -> dict[str, Any]:
-        if isinstance(appid, bool) or not isinstance(appid, int) or appid <= 0:
-            raise ValueError("appid must be a positive integer")
-        return await asyncio.to_thread(games.proton_log, appid, max(1, min(int(lines), 5000)))
 
     @reg.add(
         "fs_list",
         "List a directory on the device (as root; ~ is the desktop user's home): name, type, size, mtime, up to "
         f"depth levels deep (1-{games.MAX_LIST_DEPTH}), optionally filtered by a glob on the name (or on the relative "
-        f"path if the glob has a '/'). At most {games.MAX_LIST_ENTRIES} entries. Read files with read_file.",
+        f"path if the glob has a '/'). At most {games.MAX_LIST_ENTRIES} entries. Read files with fs_read.",
         {"properties": {"path": {"type": "string"}, "depth": {"type": "integer", "default": 1, "minimum": 1,
                                                                 "maximum": games.MAX_LIST_DEPTH},
                         "glob": {"type": "string"}},

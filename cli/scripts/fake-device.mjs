@@ -114,7 +114,7 @@ async function deviceFetch(url, init = {}) {
     s.rpc.push(method === 'tools/call' ? `tools/call ${params.name}` : method);
     if (method === 'tools/list') return done(json({ jsonrpc: '2.0', id, result: { tools: s.tools } }));
     if (method !== 'tools/call') return done(json({ jsonrpc: '2.0', id, error: { code: -32601, message: `Method not found: ${method}` } }));
-    if (params.name === 'decky_status') return done(json({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: JSON.stringify({ loader: 'v3.3.1', args: params.arguments }) }], isError: false } }));
+    if (params.name === 'device_info') return done(json({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: JSON.stringify({ loader: 'v3.3.1', args: params.arguments }) }], isError: false } }));
     if (params.name === 'screen_capture') {
       return done(json({ jsonrpc: '2.0', id, result: { content: [{ type: 'image', data: s.frameB64, mimeType: 'image/jpeg' }, { type: 'text', text: '1920x1080' }], isError: false } }));
     }
