@@ -256,6 +256,8 @@ await check('mcp over stdio', async () => {
     '{not json',
     { jsonrpc: '2.0', id: 7, method: 'ping' },
     { jsonrpc: '2.0', id: 8, method: 'tools/call', params: { name: 'deploy_plugin', arguments: { dir: plugin, restart: 'none' } } },
+    '[{"jsonrpc":"2.0","id":9,"method":"ping"}]',
+    { jsonrpc: '2.0', id: 10, method: 'tools/call', params: { name: 'deploy_plugin', arguments: { restart: 'sometimes' } } },
   ]);
   assert.equal(r.code, 0, r.stderr);
   assert.equal(r.trailing, '', 'stdout ends with a newline');
@@ -264,7 +266,10 @@ await check('mcp over stdio', async () => {
     assert.equal(msg.jsonrpc, '2.0', line);
     assert.ok('result' in msg || 'error' in msg, line);
   }
-  assert.equal(r.lines.length, 9, `one line per request: ${r.stdout}`);
+  assert.equal(r.lines.length, 11, `one line per request: ${r.stdout}`);
+  assert.deepEqual(r.lines.map(l => JSON.parse(l)).filter(m => m.id === null).map(m => m.error.code), [-32700, -32600], 'a parse error, then a batch as an Invalid Request');
+  assert.ok(!r.replies.has(9), 'nothing in the batch ran');
+  assert.deepEqual([r.replies.get(10).result.isError, r.replies.get(10).result.content[0].text], [true, 'restart must be one of none, plugin, loader']);
   const init = r.replies.get(1).result;
   assert.equal(init.protocolVersion, '2025-06-18');
   assert.deepEqual(init.serverInfo, { name: 'decky-toolkit', version: pkg.version });
@@ -276,7 +281,6 @@ await check('mcp over stdio', async () => {
   assert.deepEqual(r.replies.get('four').result.content[0], { type: 'image', data: frame.toString('base64'), mimeType: 'image/jpeg' });
   assert.equal(JSON.parse(r.replies.get(5).result.content[0].text).paired, true);
   assert.equal(r.replies.get(6).error.code, -32601);
-  assert.equal(r.replies.get(null).error.code, -32700);
   assert.deepEqual(r.replies.get(7).result, {});
   const dep = r.replies.get(8).result;
   assert.equal(dep.isError, false, dep.content[0].text);

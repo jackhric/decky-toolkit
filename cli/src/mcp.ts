@@ -1,8 +1,12 @@
+import { once } from 'events';
 import * as readline from 'readline';
 import type { Readable, Writable } from 'stream';
-import type { RestartMode, ToolCallResult, ToolDescription } from '@decky-toolkit/client/api';
-import { DeckyClient } from '@decky-toolkit/client/client';
-import { PAIR_HINT, RESTART_MODES, deploy, deviceStatus, explain, pairedClient } from './device';
+import type { ToolCallResult, ToolDescription } from '@decky-toolkit/client/api';
+import type { DeckyClient } from '@decky-toolkit/client/client';
+import * as identityFile from '@decky-toolkit/client/identity';
+import {
+  InvalidOption, NotPairedError, PAIR_HINT, Paired, RESTART_MODES, deploy, deviceStatus, explain, onDevice, pairedWith, parseRestart,
+} from './device';
 import { VERSION } from './version';
 
 export const PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
@@ -11,13 +15,13 @@ const LOCAL_TOOLS: ToolDescription[] = [
   {
     name: 'deploy_plugin',
     description: 'Package a Decky plugin folder (plugin.json, dist/, main.py, py_modules/, ...) from this machine, install it on the paired device '
-      + 'and wait until the device lists it. Run the plugin\'s own build first; dist/ must exist. Without `restart`, a new plugin restarts '
-      + 'Decky Loader and an installed one is reloaded on its own.',
+      + 'and confirm the device loaded it. Run the plugin\'s own build first; dist/ must exist. Without `restart`, a new plugin restarts '
+      + 'Decky Loader, a plugin with the debug flag is left to the loader\'s file watcher, and any other installed one is reloaded.',
     inputSchema: {
       type: 'object',
       properties: {
         dir: { type: 'string', description: 'Plugin folder on this machine; relative paths start at the working directory. Default: the working directory.' },
-        restart: { type: 'string', enum: RESTART_MODES, description: 'none: only swap the files (a plugin with the debug flag may still be reloaded by the loader\'s file watcher); plugin: reload this plugin; loader: restart Decky Loader.' },
+        restart: { type: 'string', enum: RESTART_MODES, description: 'none: only swap the files (a plugin with the debug flag is still reloaded by the loader\'s file watcher); plugin: reload this plugin; loader: restart Decky Loader.' },
       },
       additionalProperties: false,
     },
@@ -29,18 +33,48 @@ const LOCAL_TOOLS: ToolDescription[] = [
   },
 ];
 
+type Id = string | number | null;
 type Message = { jsonrpc?: unknown; id?: unknown; method?: unknown; params?: unknown };
-type Reply = { jsonrpc: '2.0'; id: unknown; result?: unknown; error?: { code: number; message: string } };
 
 const text = (t: string, isError = false): ToolCallResult => ({ content: [{ type: 'text', text: t }], isError });
+const result = (id: Id, value: unknown) => JSON.stringify({ jsonrpc: '2.0', id, result: value });
+const failure = (id: Id, code: number, message: string) => JSON.stringify({ jsonrpc: '2.0', id, error: { code, message } });
+
+class InvalidParams extends Error {}
+
+/** The device was asked with the client's id, so its reply line is ours as it stands once the envelope checks out. */
+function relay(id: Id, tool: string, body: string): string {
+  let msg: { jsonrpc?: unknown; id?: unknown; result?: unknown; error?: { message?: unknown } } | null;
+  try {
+    msg = JSON.parse(body);
+  } catch {
+    return result(id, text(`${tool}: the device answered with something that is not JSON`, true));
+  }
+  if (msg?.error) return result(id, text(`${tool}: tools/call: ${msg.error.message}`, true));
+  if (msg?.jsonrpc !== '2.0' || msg.id !== id || !msg.result || typeof msg.result !== 'object') {
+    return result(id, text(`${tool}: the device answered with a malformed reply`, true));
+  }
+  const line = body.trim();
+  // stdio framing is one message per line.
+  return line.includes('\n') ? result(id, msg.result) : line;
+}
 
 export class McpServer {
   private deviceTools?: { key: string; tools: Promise<ToolDescription[]> };
+  /** Read on first use, then replaced by `serve`'s watch of the identity file. */
+  private paired?: Promise<Paired | null>;
 
-  constructor(private readonly log: (s: string) => void) {}
+  constructor(private readonly log: (line: string) => void) {}
+
+  private readonly current = async (): Promise<Paired> => {
+    this.paired ??= identityFile.read().then(f => f && pairedWith(f));
+    const p = await this.paired;
+    if (!p) throw new NotPairedError();
+    return p;
+  };
 
   /** The device's list, fetched once per device per process; a failed fetch is retried on the next request. */
-  private async toolsOf(client: DeckyClient): Promise<ToolDescription[]> {
+  private toolsOf(client: DeckyClient): Promise<ToolDescription[]> {
     const key = `${client.address.host}:${client.address.port}`;
     if (this.deviceTools?.key !== key) {
       const tools = client.listTools();
@@ -52,59 +86,46 @@ export class McpServer {
 
   private async listTools(): Promise<ToolDescription[]> {
     const local = new Set(LOCAL_TOOLS.map(t => t.name));
-    try {
-      const { client, file } = await pairedClient();
-      try {
-        return [...(await this.toolsOf(client)).filter(t => !local.has(t.name)), ...LOCAL_TOOLS];
-      } catch (e) {
-        this.log(`decky-toolkit: device tools unavailable: ${explain(e, file.device)}\n`);
-      }
-    } catch (e) {
-      this.log(`decky-toolkit: ${explain(e)}\n`);
-    }
+    const r = await onDevice(this.current, p => this.toolsOf(p.client));
+    if ('value' in r) return [...r.value.filter(t => !local.has(t.name)), ...LOCAL_TOOLS];
+    this.log(`decky-toolkit: device tools unavailable: ${r.error}`);
     return LOCAL_TOOLS;
   }
 
-  private async callTool(params: Record<string, unknown>): Promise<ToolCallResult> {
+  private async callTool(id: Id, params: Record<string, unknown>): Promise<string> {
     const name = params.name;
     const args = (params.arguments ?? {}) as Record<string, unknown>;
-    if (typeof name !== 'string') throw Object.assign(new Error('tools/call needs a tool name'), { code: -32602 });
-    if (typeof args !== 'object' || Array.isArray(args)) throw Object.assign(new Error('tools/call arguments must be an object'), { code: -32602 });
-    if (name === 'device_status') return text(JSON.stringify(await deviceStatus(), null, 2));
+    if (typeof name !== 'string') throw new InvalidParams('tools/call needs a tool name');
+    if (typeof args !== 'object' || Array.isArray(args)) throw new InvalidParams('tools/call arguments must be an object');
+    if (name === 'device_status') return result(id, text(JSON.stringify(await deviceStatus(), null, 2)));
     if (name === 'deploy_plugin') {
-      const dir = args.dir ?? '.';
-      const restart = args.restart;
-      if (typeof dir !== 'string') return text('dir must be a string', true);
-      if (restart !== undefined && !RESTART_MODES.includes(restart as RestartMode)) return text(`restart must be one of ${RESTART_MODES.join(', ')}`, true);
       try {
-        return text(JSON.stringify(await deploy(dir, restart as RestartMode | undefined, s => this.log(s)), null, 2));
+        const dir = args.dir ?? '.';
+        if (typeof dir !== 'string') throw new InvalidOption('dir must be a string');
+        return result(id, text(JSON.stringify(await deploy(dir, parseRestart(args.restart), this.log), null, 2)));
       } catch (e) {
-        return text(`deploy failed: ${explain(e)}`, true);
+        return result(id, text(e instanceof InvalidOption ? e.message : `deploy failed: ${explain(e)}`, true));
       }
     }
-    let device;
-    try {
-      const { client, file } = await pairedClient();
-      device = file.device;
-      return await client.callTool(name, args, 300000);
-    } catch (e) {
-      return text(`${name}: ${explain(e, device)}`, true);
-    }
+    const r = await onDevice(this.current, p => p.client.rpcText('tools/call', { name, arguments: args }, 300000, id));
+    return 'error' in r ? result(id, text(`${name}: ${r.error}`, true)) : relay(id, name, r.value);
   }
 
-  async handle(msg: Message): Promise<Reply | undefined> {
-    if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid Request' } };
+  /** The reply line, if the message gets one. `initialize` and `ping` never touch the device. */
+  async handle(msg: Message): Promise<string | undefined> {
+    // JSON-RPC batches went away in MCP 2025-06-18.
+    if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return failure(null, -32600, 'Invalid Request');
     // Responses to requests we never send, and anything else without a method.
     if (typeof msg.method !== 'string') return undefined;
     const notification = !('id' in msg);
-    const id = msg.id ?? null;
+    const id = (msg.id ?? null) as Id;
     const params = (msg.params && typeof msg.params === 'object' ? msg.params : {}) as Record<string, unknown>;
-    const ok = (result: unknown): Reply | undefined => (notification ? undefined : { jsonrpc: '2.0', id, result });
+    if (notification) return undefined;
     try {
       switch (msg.method) {
         case 'initialize': {
           const requested = params.protocolVersion;
-          return ok({
+          return result(id, {
             protocolVersion: typeof requested === 'string' && PROTOCOL_VERSIONS.includes(requested) ? requested : PROTOCOL_VERSIONS[0],
             capabilities: { tools: { listChanged: false } },
             serverInfo: { name: 'decky-toolkit', version: VERSION },
@@ -113,49 +134,45 @@ export class McpServer {
           });
         }
         case 'ping':
-          return ok({});
+          return result(id, {});
         case 'tools/list':
-          return ok({ tools: await this.listTools() });
+          return result(id, { tools: await this.listTools() });
         case 'tools/call':
-          return ok(await this.callTool(params));
+          return await this.callTool(id, params);
         default:
-          if (notification) return undefined;
-          return { jsonrpc: '2.0', id, error: { code: -32601, message: `Method not found: ${msg.method}` } };
+          return failure(id, -32601, `Method not found: ${msg.method}`);
       }
     } catch (e) {
-      if (notification) return undefined;
-      const code = typeof (e as { code?: unknown }).code === 'number' ? (e as { code: number }).code : -32603;
-      return { jsonrpc: '2.0', id, error: { code, message: e instanceof Error ? e.message : String(e) } };
+      return failure(id, e instanceof InvalidParams ? -32602 : -32603, e instanceof Error ? e.message : String(e));
     }
   }
 
   /** Newline-delimited JSON-RPC; requests are answered as they complete, so a slow tool call does not hold up a ping. */
   serve(input: Readable, output: Writable): Promise<void> {
-    const send = (reply: unknown) => { output.write(JSON.stringify(reply) + '\n'); };
+    const watcher = identityFile.watch(f => { this.paired = Promise.resolve(f && pairedWith(f)); });
+    const send = async (line: string) => {
+      if (!output.write(line + '\n')) await once(output, 'drain');
+    };
     const pending = new Set<Promise<void>>();
     const rl = readline.createInterface({ input, crlfDelay: Infinity });
     rl.on('line', line => {
       if (!line.trim()) return;
-      let msg: unknown;
+      let msg: Message;
       try {
         msg = JSON.parse(line);
       } catch {
-        send({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } });
+        void send(failure(null, -32700, 'Parse error'));
         return;
       }
-      const job = (async () => {
-        if (Array.isArray(msg)) {
-          if (!msg.length) return send({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid Request' } });
-          const replies = (await Promise.all(msg.map(m => this.handle(m as Message)))).filter(r => r);
-          if (replies.length) send(replies);
-        } else {
-          const reply = await this.handle(msg as Message);
-          if (reply) send(reply);
-        }
-      })().catch(e => this.log(`decky-toolkit: ${e instanceof Error ? e.stack : e}\n`));
+      const job = this.handle(msg)
+        .then(reply => (reply === undefined ? undefined : send(reply)))
+        .catch(e => this.log(`decky-toolkit: ${e instanceof Error ? e.stack : e}`));
       pending.add(job);
       void job.finally(() => pending.delete(job));
     });
-    return new Promise(resolve => rl.on('close', () => void Promise.all(pending).then(() => resolve())));
+    return new Promise(resolve => rl.on('close', () => void Promise.all(pending).then(() => {
+      watcher.close();
+      resolve();
+    })));
   }
 }
