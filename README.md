@@ -42,7 +42,7 @@
 - Remote screen with sound and keyboard, mouse and gamepad input
 - Decky Loader, plugin and Steam UI logs in VS Code
 - Launch games and browse their files and saves
-- An MCP server for coding agents
+- An extendable MCP server for coding agents: add your plugin's own tools
 
 ## Getting started
 
