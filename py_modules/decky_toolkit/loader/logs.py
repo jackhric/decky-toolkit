@@ -6,7 +6,7 @@ import time
 from datetime import datetime
 from typing import AsyncIterator
 
-from ..tools.system import clean_env, run, tail
+from ..system import clean_env, run, tail
 
 DEFAULT_TAIL = 100
 MAX_TAIL = 5000

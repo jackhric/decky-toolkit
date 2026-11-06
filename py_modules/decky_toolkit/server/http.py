@@ -14,7 +14,8 @@ from aiohttp import web
 from . import API_PREFIX, API_VERSIONS, audit
 from ..steam import cdp
 from ..games import files as games
-from ..loader import live, logs
+from ..loader import live, logs, plugins
+from ..loader.plugins import list_plugins, schedule_loader_restart
 from .identity import identity
 from ..media.audio import FORMAT as AUDIO_FORMAT, AudioCapturer, AudioDisabled, AudioUnavailable
 from .auth import CertAuth
@@ -28,9 +29,7 @@ from .pairing import MAX_WAIT_SECONDS, POLL_AFTER_MS, PairingLimit, PairingReque
 from .protocol import SERVER_INFO, McpServer
 from ..steam.apps import Apps
 from ..steam.ui import UiNavigator
-from ..tools import plugins
 from ..tools.cef import toast
-from ..tools.system import list_plugins, schedule_loader_restart
 
 LOG_KEEPALIVE_SECONDS = 15.0
 HEARTBEAT_SECONDS = 15.0

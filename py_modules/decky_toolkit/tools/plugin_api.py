@@ -7,8 +7,7 @@ from typing import Any
 
 from ..steam import cdp
 from . import ToolRegistry
-from .plugins import resolve_plugin
-from .system import plugins_dir
+from ..loader.plugins import plugins_dir, resolve_plugin
 
 SOURCE_SUFFIXES = (".ts", ".tsx")
 MAX_SOURCE_BYTES = 8 * 1024 * 1024

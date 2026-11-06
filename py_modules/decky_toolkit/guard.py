@@ -51,9 +51,9 @@ def is_write_protected(path: str) -> bool:
 
 def check_read(path: str) -> None:
     if is_sensitive(path):
-        raise SensitivePath(f"refusing to read {path}: Steam credential/session or key file (tools/guard.py)")
+        raise SensitivePath(f"refusing to read {path}: Steam credential/session or key file (guard.py)")
 
 
 def check_write(path: str) -> None:
     if is_write_protected(path):
-        raise SensitivePath(f"refusing to write {path}: protected Steam config, credential or key file (tools/guard.py)")
+        raise SensitivePath(f"refusing to write {path}: protected Steam config, credential or key file (guard.py)")

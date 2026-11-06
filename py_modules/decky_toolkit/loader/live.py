@@ -10,9 +10,8 @@ import os
 from typing import Any
 
 from ..steam import cdp
-from ..tools.guard import check_write
-from ..tools.plugins import plugin_name, reload_plugin
-from ..tools.system import plugins_dir
+from ..guard import check_write
+from .plugins import plugin_name, plugins_dir, reload_plugin
 
 RELOAD_MODES = ("frontend", "backend")
 QUICK_ACCESS = "QuickAccess_uid2"

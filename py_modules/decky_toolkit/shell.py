@@ -13,7 +13,7 @@ import time
 from typing import Any
 
 from .server.audit import request_origin
-from .tools.system import clean_env
+from .system import clean_env
 
 DEFAULT_TIMEOUT = 60
 MAX_TIMEOUT = 600
