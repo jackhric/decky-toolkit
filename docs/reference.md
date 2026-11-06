@@ -214,7 +214,7 @@ described in [docs/api.md](api.md#pairing).
   only mirror state.
 
 The plugin runs with the `root` flag so it can restart the loader, read every plugin's logs and write
-anywhere. The `debug` flag makes the loader hot-reload the plugin when its files change, which is how
+anywhere. The `debug` flag makes the loader reload the plugin when its files change, which is how
 a fast deploy of a debug-flagged plugin takes effect without an explicit reload.
 
 ## Development

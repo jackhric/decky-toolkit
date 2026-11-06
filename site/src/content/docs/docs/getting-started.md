@@ -43,4 +43,4 @@ Nothing has to be typed in. A request waits as long as the editor is waiting.
 ## 4. Deploy your plugin
 
 Open your plugin's folder (any folder with a `plugin.json`) and press <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd>.
-See [Hot reload your plugin](../features/deploy/) for what happens.
+See [Live reload your plugin](../features/deploy/) for what happens.

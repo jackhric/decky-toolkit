@@ -29,7 +29,7 @@ const clips: Tile[] = order.map(([, f]) => ({ kind: 'clip', webm: f.webm, mp4: f
 // One card per feature.
 const features: Tile[] = [
   { kind: 'feature', title: 'One-click deploy', sub: 'Reloads just your plugin', glyph: 'deploy', tone: 3 },
-  { kind: 'feature', title: 'Hot reload', sub: 'Your device follows every save', glyph: 'reload', tone: 1 },
+  { kind: 'feature', title: 'Live reload', sub: 'Your device follows every save', glyph: 'reload', tone: 1 },
   { kind: 'feature', title: 'Live screen', sub: '60 fps, inside your editor', glyph: 'screen', tone: 2 },
   { kind: 'feature', title: 'Remote input', sub: 'Keyboard, mouse and gamepad', glyph: 'input', tone: 0 },
   { kind: 'feature', title: 'Virtual controllers', sub: 'Managed through Steam Input', glyph: 'pad', tone: 3 },
