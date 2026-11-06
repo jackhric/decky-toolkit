@@ -32,15 +32,15 @@ const redact = s => String(s).split(identity.key).join('<key>');
 
 const outfile = path.join(root, 'out', 'deploylib.cjs');
 await esbuild.build({
-  stdin: { contents: "export * from '../packages/client/src/client'; export * from './src/pluginDeploy';", resolveDir: root, loader: 'ts' },
+  stdin: { contents: "export * from '../packages/client/src/client'; export * from '../packages/client/src/deploy'; export * from './src/pluginDeploy';", resolveDir: root, loader: 'ts' },
   bundle: true, platform: 'node', format: 'cjs', outfile, logLevel: 'warning',
 });
 const lib = createRequire(import.meta.url)(outfile);
-const { DeckyClient, isConnectionError, readWorkspacePlugin, deployPlugin, newLines, sleep } = lib;
+const { DeckyClient, isConnectionError, readWorkspacePlugin, buildAndDeploy, newLines, sleep } = lib;
 const client = new DeckyClient({ host, port }, identity);
 
 const verbose = !!process.env.VERBOSE;
-const log = s => { if (verbose) process.stdout.write('      ' + s); };
+const log = line => { if (verbose) console.log('      ' + line); };
 const results = [];
 const timings = [];
 
@@ -119,7 +119,7 @@ async function round(label, v, restart, opts = {}) {
   const p = await readWorkspacePlugin(pluginRoot, 'decky-toolkit-test');
   const before = await journal();
   const t0 = Date.now();
-  const r = await deployPlugin(client, p, { restart, build: 'auto', log, confirmTimeoutMs: 10000 });
+  const r = await buildAndDeploy(client, p, { restart, build: 'auto', log, confirmTimeoutMs: 10000 });
   const deployMs = Date.now() - t0;
   const full = r.restarted === 'loader';
   const fe = await frontendState(v, full ? 30000 : 10000);

@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import type { ConnectionState } from './connection';
 import { DeployController, pluginSummary } from './deploy';
-import type { WorkspacePlugin } from './pluginDeploy';
+import type { WorkspacePlugin } from '@decky-toolkit/client/deploy';
 
 export interface PluginSource {
   ready(): Promise<WorkspacePlugin[]>;
