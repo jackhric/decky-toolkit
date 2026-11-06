@@ -12,22 +12,22 @@ from aiohttp import web
 
 sys.path.append(decky.DECKY_PLUGIN_DIR + "/py_modules")  # the loader does this too; kept for IDE/type tooling parity
 
-from decky_toolkit.advertise import Advertiser, txt_records  # noqa: E402
-from decky_toolkit.audio import AudioCapturer  # noqa: E402
-from decky_toolkit.auth import CertAuth, Connections  # noqa: E402
-from decky_toolkit.capture import ScreenCapturer  # noqa: E402
-from decky_toolkit.console import ConsoleCollector  # noqa: E402
-from decky_toolkit.http import API_VERSION, Api  # noqa: E402
-from decky_toolkit.identity import identity  # noqa: E402
-from decky_toolkit.controllers import ControllerService  # noqa: E402
+from decky_toolkit.server.advertise import Advertiser, txt_records  # noqa: E402
+from decky_toolkit.media.audio import AudioCapturer  # noqa: E402
+from decky_toolkit.server.auth import CertAuth, Connections  # noqa: E402
+from decky_toolkit.media.capture import ScreenCapturer  # noqa: E402
+from decky_toolkit.steam.console import ConsoleCollector  # noqa: E402
+from decky_toolkit.server.http import API_VERSION, Api  # noqa: E402
+from decky_toolkit.server.identity import identity  # noqa: E402
+from decky_toolkit.input.controllers import ControllerService  # noqa: E402
 from decky_toolkit.input.service import InputService  # noqa: E402
-from decky_toolkit import loader_fixes  # noqa: E402
-from decky_toolkit.pairing import PairingRequest, PairingRequests  # noqa: E402
-from decky_toolkit.protocol import SERVER_INFO, McpServer  # noqa: E402
+from decky_toolkit.loader import fixes as loader_fixes  # noqa: E402
+from decky_toolkit.server.pairing import PairingRequest, PairingRequests  # noqa: E402
+from decky_toolkit.server.protocol import SERVER_INFO, McpServer  # noqa: E402
 from decky_toolkit.settings import Settings  # noqa: E402
-from decky_toolkit.tls import Identity, PairedClients, TlsError, fingerprint  # noqa: E402
+from decky_toolkit.server.tls import Identity, PairedClients, TlsError, fingerprint  # noqa: E402
 from decky_toolkit.tools import build_registry  # noqa: E402
-from decky_toolkit.ui import UiNavigator  # noqa: E402
+from decky_toolkit.steam.ui import UiNavigator  # noqa: E402
 
 
 def _primary_ip() -> str:

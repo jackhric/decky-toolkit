@@ -2,7 +2,7 @@
 import base64
 from typing import Any
 
-from ..capture import CaptureUnavailable, ScreenCapturer
+from ..media.capture import CaptureUnavailable, ScreenCapturer
 from . import ToolRegistry
 
 

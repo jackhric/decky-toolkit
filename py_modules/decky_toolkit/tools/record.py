@@ -2,8 +2,8 @@
 import asyncio
 from typing import Any
 
-from ..capture import CaptureUnavailable, ScreenCapturer
-from ..record import MAX_SECONDS, recorder_for
+from ..media.capture import CaptureUnavailable, ScreenCapturer
+from ..media.record import MAX_SECONDS, recorder_for
 from . import ToolRegistry
 
 

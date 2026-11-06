@@ -3,8 +3,8 @@ import asyncio
 import os
 from typing import Any
 
-from .. import games
-from ..apps import Apps
+from ..games import files as games
+from ..steam.apps import Apps
 from . import ToolRegistry
 
 APPID = {"type": "integer", "description": "Steam appid"}

@@ -5,7 +5,7 @@ import os
 import re
 from typing import Any
 
-from .. import cdp
+from ..steam import cdp
 from . import ToolRegistry
 from .system import plugins_dir
 

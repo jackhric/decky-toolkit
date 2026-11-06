@@ -8,8 +8,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
 from aiohttp import WSMsgType  # noqa: E402
 
-from decky_toolkit import audio as audio_mod  # noqa: E402
-from decky_toolkit.audio import CHUNK_BYTES, FORMAT, MAX_BACKLOG_CHUNKS, AudioCapturer, AudioDisabled  # noqa: E402
+from decky_toolkit.media import audio as audio_mod  # noqa: E402
+from decky_toolkit.media.audio import CHUNK_BYTES, FORMAT, MAX_BACKLOG_CHUNKS, AudioCapturer, AudioDisabled  # noqa: E402
 from decky_toolkit.settings import Settings  # noqa: E402
 
 from test_routes import H, FakeCapturer, with_server  # noqa: E402

@@ -7,23 +7,26 @@ import tempfile
 
 from aiohttp import web
 
-from . import audit, cdp, games, logs
+from . import audit
+from ..steam import cdp
+from ..games import files as games
+from ..loader import logs
 from .identity import identity
-from .apps import Apps
-from .audio import FORMAT as AUDIO_FORMAT, AudioCapturer, AudioDisabled, AudioUnavailable
+from ..steam.apps import Apps
+from ..media.audio import FORMAT as AUDIO_FORMAT, AudioCapturer, AudioDisabled, AudioUnavailable
 from .auth import CertAuth
-from .capture import BOUNDARY, CaptureUnavailable, ScreenCapturer
-from .console import DEFAULT_LEVEL, ConsoleCollector
-from .controllers import ControllerService
-from .input.ei import EiError
-from .input.service import InputDisabled, InputService, InputUnavailable
+from ..media.capture import BOUNDARY, CaptureUnavailable, ScreenCapturer
+from ..steam.console import DEFAULT_LEVEL, ConsoleCollector
+from ..input.controllers import ControllerService
+from ..input.ei import EiError
+from ..input.service import InputDisabled, InputService, InputUnavailable
 from .long_lived import LongLivedRequests
 from .pairing import MAX_WAIT_SECONDS, POLL_AFTER_MS, PairingLimit, PairingRequests
 from .protocol import SERVER_INFO, McpServer
-from .record import check_name, recorder_for
-from .tools import plugins
-from .tools.system import list_plugins, schedule_loader_restart
-from .ui import UiNavigator
+from ..media.record import check_name, recorder_for
+from ..tools import plugins
+from ..tools.system import list_plugins, schedule_loader_restart
+from ..steam.ui import UiNavigator
 
 API_VERSION = 2
 LOG_KEEPALIVE_SECONDS = 15.0

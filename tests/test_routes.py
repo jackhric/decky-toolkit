@@ -16,10 +16,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 from aiohttp import ClientSession, ClientTimeout, CookieJar, FormData, web  # noqa: E402
 
 from certauth import H, PUBLIC_KEY, stub_auth  # noqa: E402
-from decky_toolkit.capture import ScreenCapturer  # noqa: E402
-from decky_toolkit.http import Api  # noqa: E402
-from decky_toolkit.pairing import PairingRequests  # noqa: E402
-from decky_toolkit.protocol import McpServer  # noqa: E402
+from decky_toolkit.media.capture import ScreenCapturer  # noqa: E402
+from decky_toolkit.server.http import Api  # noqa: E402
+from decky_toolkit.server.pairing import PairingRequests  # noqa: E402
+from decky_toolkit.server.protocol import McpServer  # noqa: E402
 from decky_toolkit.settings import Settings  # noqa: E402
 from decky_toolkit.tools import ToolRegistry, build_registry  # noqa: E402
 
@@ -200,7 +200,7 @@ def test_logs_stream_plugin(decky_home):
 
 
 def test_logs_stream_stops_follower_on_disconnect(monkeypatch):
-    from decky_toolkit import logs
+    from decky_toolkit.loader import logs
 
     closed = asyncio.Event()
 

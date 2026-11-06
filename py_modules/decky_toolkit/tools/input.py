@@ -3,7 +3,7 @@ import asyncio
 import base64
 from typing import Any
 
-from ..capture import CaptureUnavailable, ScreenCapturer
+from ..media.capture import CaptureUnavailable, ScreenCapturer
 from ..input import keymap
 from ..input.service import InputDisabled, InputService, InputUnavailable, Session, mouse_button, pad_values
 from . import ToolRegistry
