@@ -9,10 +9,10 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
-from aiohttp import ClientSession, ClientTimeout, web  # noqa: E402
+from aiohttp import ClientError, ClientSession, ClientTimeout, web  # noqa: E402
 
 from decky_toolkit import audit  # noqa: E402
-from certauth import H, stub_auth  # noqa: E402
+from certauth import H, PEER_HEADER, stub_auth  # noqa: E402
 from decky_toolkit.http import Api  # noqa: E402
 from decky_toolkit.protocol import McpServer  # noqa: E402
 from decky_toolkit.tools import ToolRegistry, build_registry, guard, system  # noqa: E402
@@ -170,3 +170,44 @@ def test_audit_log_lines_over_http(caplog):
     assert lines == ['audit tool=cef_evaluate origin=127.0.0.1 client="test client" via=mcp args=expression',
                      'audit route=POST /plugins/nope/reload origin=127.0.0.1 client="test client" via=http']
     assert not any("document.cookie" in r.getMessage() for r in caplog.records)
+
+
+def test_forgetting_a_client_closes_its_open_streams():
+    auth = stub_auth()
+    fp = H[PEER_HEADER]
+
+    async def stream(request):
+        resp = web.StreamResponse()
+        await resp.prepare(request)
+        while True:
+            await resp.write(b"frame\n")
+            await asyncio.sleep(0.05)
+
+    async def drain(r):
+        try:
+            while await r.content.readline():
+                pass
+        except ClientError:
+            pass
+
+    async def run():
+        app = web.Application(middlewares=[auth.middleware()])
+        app.router.add_get("/stream", stream)
+        runner = web.AppRunner(app, shutdown_timeout=0.5)
+        await runner.setup()
+        await web.TCPSite(runner, "127.0.0.1", 0).start()
+        base = f"http://127.0.0.1:{runner.addresses[0][1]}"
+        try:
+            async with ClientSession(timeout=ClientTimeout(total=5)) as s:
+                async with s.get(f"{base}/stream", headers=H) as r:
+                    assert await r.content.readline() == b"frame\n"
+                    assert auth.connections.count(fp) == 1
+                    assert auth.clients.remove(fp) and auth.connections.close(fp) == 1
+                    await asyncio.wait_for(drain(r), 1)
+                async with s.get(f"{base}/stream", headers=H) as r:
+                    assert r.status == 401
+            assert auth.connections.count(fp) == 0
+        finally:
+            await runner.cleanup()
+
+    asyncio.run(run())
