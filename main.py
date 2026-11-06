@@ -14,7 +14,7 @@ sys.path.append(decky.DECKY_PLUGIN_DIR + "/py_modules")  # the loader does this 
 
 from decky_toolkit.advertise import Advertiser, txt_records  # noqa: E402
 from decky_toolkit.audio import AudioCapturer  # noqa: E402
-from decky_toolkit.auth import CertAuth  # noqa: E402
+from decky_toolkit.auth import CertAuth, Connections  # noqa: E402
 from decky_toolkit.capture import ScreenCapturer  # noqa: E402
 from decky_toolkit.console import ConsoleCollector  # noqa: E402
 from decky_toolkit.http import API_VERSION, Api  # noqa: E402
@@ -86,6 +86,7 @@ class Plugin:
     identity: Identity
     clients: PairedClients
     pairing: PairingRequests
+    connections: Connections
     pruner: asyncio.Task | None = None
     advertiser: Advertiser | None = None
     last_error: str | None = None
@@ -101,7 +102,7 @@ class Plugin:
             decky.logger.error(self.last_error)
             return
         api = Api(
-            auth=CertAuth(self.clients),
+            auth=CertAuth(self.clients, connections=self.connections),
             mcp=McpServer(build_registry(self.capturer, self.input, self.controllers, self.ui,
                                         console=self.console), decky.logger),
             capturer=self.capturer,
@@ -191,7 +192,8 @@ class Plugin:
     async def forget_paired_client(self, fp: str) -> list[dict[str, Any]]:
         if not self.clients.remove(fp):
             raise ValueError("unknown paired client")
-        decky.logger.info("pairing: forgot client %s", fp[:16])
+        closed = self.connections.close(fp)
+        decky.logger.info("pairing: forgot client %s, closed %d connection(s)", fp[:16], closed)
         return self.clients.list()
 
     async def _on_input_session(self, remote: str) -> None:
@@ -208,6 +210,10 @@ class Plugin:
         assert self.input is not None
         return await self.input.set_enabled(bool(enabled))
 
+    def _connected_client(self) -> dict[str, Any] | None:
+        c = self.clients.connected()
+        return c and {k: c[k] for k in ("name", "kind", "remote", "connected_since")}
+
     async def get_status(self) -> dict[str, Any]:
         return {
             "enabled": self.settings.enabled,
@@ -220,6 +226,7 @@ class Plugin:
             "input": self.input.status() if self.input else None,
             "error": self.last_error,
             "connected": self.clients.any_connected(),
+            "client": self._connected_client(),
         }
 
     async def set_stream_settings(self, fps: int | None = None, quality: int | None = None, width: int | None = None,
@@ -261,6 +268,7 @@ class Plugin:
             self.last_error = f"could not create the device identity: {e}"
             decky.logger.error(self.last_error)
         self.clients = PairedClients(self.identity.clients_path, on_change=self._on_clients_change)
+        self.connections = Connections()
         self.pairing = PairingRequests(self.identity.cert_pem, on_change=self._on_pairing_change)
         self.pruner = asyncio.create_task(self.pairing.run_pruner())
         self.capturer = ScreenCapturer(lambda: self.settings, decky.logger, save_settings=save)

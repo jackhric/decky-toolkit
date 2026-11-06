@@ -164,13 +164,26 @@ class PairedClients:
         except (FileNotFoundError, json.JSONDecodeError, TypeError):
             self._clients = {}
         self._active: dict[str, float] = {}
+        self._since: dict[str, float] = {}
+        self._remote: dict[str, str] = {}
 
     def _connected(self, fp: str, now: float) -> bool:
         return now - self._active.get(fp, float("-inf")) < CONNECTED_SECONDS
 
+    def _entry(self, c: dict, now: float) -> dict:
+        fp = c["fingerprint"]
+        connected = self._connected(fp, now)
+        return {**c, "connected": connected, "connected_since": int(self._since[fp]) if connected else None,
+                "remote": self._remote.get(fp)}
+
     def list(self) -> list[dict]:
         now = self.clock()
-        return [{**c, "connected": self._connected(c["fingerprint"], now)} for c in self._clients.values()]
+        return [self._entry(c, now) for c in self._clients.values()]
+
+    def connected(self) -> dict | None:
+        """The connected client (there is at most one paired client), or None."""
+        now = self.clock()
+        return next((self._entry(c, now) for fp, c in self._clients.items() if self._connected(fp, now)), None)
 
     def any_connected(self) -> bool:
         now = self.clock()
@@ -189,23 +202,28 @@ class PairedClients:
         """Make this the only paired client; returns the clients it replaced."""
         replaced = [dict(c) for f, c in self._clients.items() if f != fp]
         self._clients = {}
-        self._active = {}
+        self._active, self._since, self._remote = {}, {}, {}
         self.add(fp, name, kind)
         return replaced
 
     def remove(self, fp: str) -> bool:
-        self._active.pop(fp, None)
+        for d in (self._active, self._since, self._remote):
+            d.pop(fp, None)
         if self._clients.pop(fp, None) is None:
             return False
         self._save()
         return True
 
-    def touch(self, fp: str) -> dict | None:
+    def touch(self, fp: str, remote: str | None = None) -> dict | None:
         """The client with this fingerprint, if paired, recording that it was seen (written at most once a minute)."""
         client = self._clients.get(fp)
         if client is None:
             return None
+        if not self._connected(fp, self.clock()):
+            self._since[fp] = self.clock()
         self._active[fp] = self.clock()
+        if remote:
+            self._remote[fp] = remote
         now = int(self.clock())
         if client["last_seen"] is None or now - client["last_seen"] >= SEEN_EVERY_SECONDS:
             client["last_seen"] = now
