@@ -93,16 +93,17 @@ async def _swap_while_stopped(staged: str, target: str) -> None:
         raise RuntimeError(out)
 
 
-async def install(src: str | bytes, restart: str = "loader", logger: logging.Logger = log,
-                  events: "EventHub | None" = None) -> dict[str, Any]:
+async def install(src: str | bytes, restart: str, events: "EventHub", logger: logging.Logger = log) -> dict[str, Any]:
     if restart not in RESTART_MODES:
         raise ValueError(f"restart must be one of {', '.join(RESTART_MODES)}")
     if restart != "loader":
         installed = await asyncio.to_thread(install_plugin_zip, src, plugins_dir(), logger=logger)
-        if events is not None:
-            events.refresh("plugins")
+        events.refresh("plugins")
         if restart == "plugin":
-            await reload_plugin(installed["dir"])
+            try:
+                await reload_plugin(installed["dir"])
+            except cdp.CdpError as e:
+                raise cdp.CdpError(f"installed, but plugin reload failed: {e}") from e
         return {"installed": installed, "restarted": restart}
     # Same filesystem as plugins/, so the final mv is a rename.
     pending = os.path.join(os.path.dirname(plugins_dir()), ".decky-toolkit-pending")

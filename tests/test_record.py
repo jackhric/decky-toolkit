@@ -17,7 +17,7 @@ from decky_toolkit.media import record as record_mod  # noqa: E402
 from decky_toolkit.media.capture import CaptureUnavailable  # noqa: E402
 from decky_toolkit.media.record import MkvWriter, Recorder, RecordingBusy, check_name, recorder_for  # noqa: E402
 
-from decky_toolkit.tools import build_registry  # noqa: E402
+from harness import make_registry  # noqa: E402
 
 LOG = logging.getLogger("t")
 JPEG = (Path(__file__).parent / "fixtures" / "tiny.jpg").read_bytes()
@@ -256,5 +256,5 @@ def test_record_no_frames_cleans_up(runtime, monkeypatch):
 def test_recording_list_tool(runtime):
     cap = FakeCapturer()
     asyncio.run(recorder_for(cap).record(seconds=0.3, name="dl"))
-    res = asyncio.run(build_registry(cap).call("recording_list", {}))
+    res = asyncio.run(make_registry(capturer=cap).call("recording_list", {}))
     assert [x["name"] for x in json.loads(res["content"][0]["text"])["recordings"]] == ["dl"]

@@ -193,10 +193,10 @@ def merge(evdev: list[EvdevDevice], steam: dict[str, Any] | None, pads: list[Vir
 
 
 class ControllerService:
-    def __init__(self, input_service: InputService, logger: logging.Logger, *,
+    def __init__(self, input_service: InputService, logger: logging.Logger, events: "EventHub", *,
                  read_devices: ReadDevices = read_proc_devices, steam_query: SteamQuery = steam_input_controllers,
                  poll: float = POLL_SECONDS, steam_poll: float = STEAM_POLL_SECONDS,
-                 confirm_seconds: float = STEAM_CONFIRM_SECONDS, events: "EventHub | None" = None):
+                 confirm_seconds: float = STEAM_CONFIRM_SECONDS):
         self.input = input_service
         self.log = logger
         self._read_devices = read_devices
@@ -210,9 +210,8 @@ class ControllerService:
         self._lock = asyncio.Lock()
         self._gone: dict[str, float] = {}
         input_service.add_pad_listener(self._wake.set)
-        if events is not None:
-            # Watching costs a /proc read a second and a Steam UI query every few; only while someone listens.
-            events.on_subscribe.append(self._watch)
+        # Watching costs a /proc read a second and a Steam UI query every few; only while someone listens.
+        events.on_subscribe.append(self._watch)
 
     def _evdev(self) -> list[EvdevDevice]:
         try:
@@ -290,7 +289,7 @@ class ControllerService:
         last_emitted: str | None = None
         steam: dict[str, Any] | None = None
         steam_at = -1e9
-        while self.events is not None and len(self.events):
+        while len(self.events):
             evdev = [(d.sysname, d.name) for d in self._evdev()]
             changed = evdev != last_evdev or self._wake.is_set()
             self._wake.clear()

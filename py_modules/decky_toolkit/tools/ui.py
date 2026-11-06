@@ -4,7 +4,7 @@ import base64
 import json
 from typing import Any
 
-from ..media.capture import CaptureUnavailable, ScreenCapturer
+from ..media.capture import ScreenCapturer
 from ..steam import cdp
 from ..input.activity import InputActivity
 from ..steam.ui import ACTIONS, QUERY_TARGET, QUICK_ACCESS_TABS, UiInspector
@@ -17,12 +17,12 @@ AT_DEVICE_SECONDS = 60
 class Orientation:
     """Where the device is: the Steam UI state plus whether someone is using it by hand."""
 
-    def __init__(self, inspector: UiInspector, activity: InputActivity | None):
+    def __init__(self, inspector: UiInspector, activity: InputActivity):
         self.inspector, self.activity = inspector, activity
 
     async def __call__(self) -> dict[str, Any]:
         state = await self.inspector.snapshot()
-        last = self.activity.snapshot()["last"] if self.activity else None
+        last = self.activity.snapshot()["last"]
         state["someone_at_device"] = bool(last and last["seconds_ago"] <= AT_DEVICE_SECONDS)
         return state
 
@@ -51,7 +51,7 @@ class Orientation:
             return {"error": f"Steam UI state unavailable: {e}"}
 
 
-def register(reg: ToolRegistry, inspector: UiInspector, capturer: ScreenCapturer | None, orient: Orientation) -> None:
+def register(reg: ToolRegistry, inspector: UiInspector, capturer: ScreenCapturer, orient: Orientation) -> None:
     nav = inspector.nav
 
     @reg.add(
@@ -97,8 +97,6 @@ def register(reg: ToolRegistry, inspector: UiInspector, capturer: ScreenCapturer
         result = await nav.navigate(path=path, action=action, tab=tab, plugin=plugin, appid=appid)
         if not capture:
             return result
-        if capturer is None:
-            raise CaptureUnavailable("screen capture not configured")
         await asyncio.sleep(max(0.0, CAPTURE_SETTLE_SECONDS - nav.settle))
         frame = await capturer.grab()
         return [{"type": "text", "text": json.dumps(result, indent=2)},

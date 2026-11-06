@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
 from decky_toolkit.media import capture as capture_mod  # noqa: E402
 from decky_toolkit.media.capture import ScreenCapturer, parse_node_info  # noqa: E402
+from decky_toolkit.server.events import EventHub  # noqa: E402
 from decky_toolkit.settings import Settings  # noqa: E402
 
 from test_audio import FakeProc  # noqa: E402
@@ -22,7 +23,7 @@ def part(data: bytes) -> bytes:
 
 class Cap(ScreenCapturer):
     def __init__(self) -> None:
-        super().__init__(lambda: Settings(), LOG)
+        super().__init__(lambda: Settings(), LOG, EventHub())
         self.procs: list[FakeProc] = []
 
     def unavailable_reason(self):

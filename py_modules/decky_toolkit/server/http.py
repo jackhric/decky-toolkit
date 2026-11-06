@@ -12,23 +12,22 @@ import tempfile
 from aiohttp import web
 
 from . import API_PREFIX, API_VERSIONS, audit
+from .. import errors
 from ..steam import cdp
 from ..games import files as games
 from ..loader import live, logs, plugins
 from ..loader.plugins import list_plugins, schedule_loader_restart
 from .identity import identity
-from ..media.audio import FORMAT as AUDIO_FORMAT, AudioCapturer, AudioDisabled, AudioUnavailable
+from ..media.audio import FORMAT as AUDIO_FORMAT, AudioDisabled, AudioUnavailable
 from .auth import CertAuth
-from ..media.capture import BOUNDARY, CaptureUnavailable, ScreenCapturer
-from ..input.controllers import ControllerService
+from ..media.capture import BOUNDARY, CaptureUnavailable
 from ..input.ei import EiError
-from ..input.service import InputDisabled, InputService, InputUnavailable
-from .events import EventHub, frame
+from ..input.service import InputDisabled, InputUnavailable
+from .events import frame
 from .long_lived import LongLivedRequests
-from .pairing import MAX_WAIT_SECONDS, POLL_AFTER_MS, PairingLimit, PairingRequests
+from .pairing import MAX_WAIT_SECONDS, POLL_AFTER_MS
 from .protocol import SERVER_INFO, McpServer
-from ..steam.apps import Apps
-from ..steam.ui import UiNavigator
+from ..services import Services
 from ..tools.cef import toast
 
 LOG_KEEPALIVE_SECONDS = 15.0
@@ -59,21 +58,16 @@ async def _not_found(request: web.Request, handler):
     return await handler(request)
 
 
-# First match wins, so subclasses come before their bases.
-_STATUS = ((PermissionError, 403), (FileNotFoundError, 404), (ValueError, 400),
-           (cdp.CdpError, 502), (InputUnavailable, 503), (CaptureUnavailable, 503))
-
-
-async def _json(make, status: int = 200) -> web.Response:
-    """Await `make()` and answer with its result, mapping the shared functions' exceptions to status codes."""
+@web.middleware
+async def _errors(request: web.Request, handler):
     try:
-        return web.json_response(await make(), status=status)
-    except tuple(t for t, _ in _STATUS) as e:
-        return _error(next(code for t, code in _STATUS if isinstance(e, t)), str(e))
+        return await handler(request)
+    except errors.HANDLED as e:
+        return web.json_response(errors.body(e), status=errors.status_of(e)[0])
 
 
-async def _body(request: web.Request, allowed: set[str]) -> dict:
-    """The JSON object body (empty when there is none); unknown fields are a ValueError."""
+async def _object(request: web.Request) -> dict:
+    """The JSON object body (empty when there is none)."""
     if not request.can_read_body:
         return {}
     try:
@@ -82,16 +76,27 @@ async def _body(request: web.Request, allowed: set[str]) -> dict:
         raise ValueError("expected a JSON object") from None
     if not isinstance(body, dict):
         raise ValueError("expected a JSON object")
-    if unknown := set(body) - allowed:
-        raise ValueError(f"unknown field(s): {', '.join(sorted(unknown))}")
     return body
 
 
-async def _with_body(request: web.Request, allowed: set[str], fn, required: tuple[str, ...] = ()):
-    body = await _body(request, allowed)
+async def _body(request: web.Request, allowed: set[str], required: tuple[str, ...] = ()) -> dict:
+    body = await _object(request)
+    if unknown := set(body) - allowed:
+        raise ValueError(f"unknown field(s): {', '.join(sorted(unknown))}")
     if missing := [k for k in required if k not in body]:
         raise ValueError(f"missing field(s): {', '.join(missing)}")
-    return await fn(**body)
+    return body
+
+
+def _query(request: web.Request, name: str) -> str:
+    if not (value := request.query.get(name)):
+        raise ValueError(f"{name} is required")
+    return value
+
+
+def _flag(request: web.Request, name: str, default: bool) -> bool:
+    raw = request.query.get(name)
+    return default if raw is None else raw not in ("0", "false", "")
 
 
 def _appid(request: web.Request) -> int:
@@ -102,30 +107,21 @@ def _appid(request: web.Request) -> int:
 
 
 class Api:
-    def __init__(self, *, auth: CertAuth, mcp: McpServer, capturer: ScreenCapturer | None, logger: logging.Logger, pairing: PairingRequests | None = None, log_keepalive: float = LOG_KEEPALIVE_SECONDS,
-                 input_service: InputService | None = None, audio: AudioCapturer | None = None,
-                 controllers: ControllerService | None = None, ui: UiNavigator | None = None,
-                 events: EventHub | None = None, heartbeat: float = HEARTBEAT_SECONDS):
+    def __init__(self, services: Services, *, auth: CertAuth, mcp: McpServer, logger: logging.Logger,
+                 log_keepalive: float = LOG_KEEPALIVE_SECONDS, heartbeat: float = HEARTBEAT_SECONDS):
+        self.s = services
         self.auth = auth
         self.mcp = mcp
-        self.capturer = capturer
         self.log = logger
-        self.pairing = pairing or PairingRequests()
         self.log_keepalive = log_keepalive
-        self.input = input_service
-        self.audio = audio
-        self.controllers = controllers
-        self.ui = ui
-        self.events = events if events is not None else EventHub(logger=logger)
         self.heartbeat = heartbeat
-        self._apps: Apps | None = None
         self.long_lived = LongLivedRequests()
 
     def build_app(self) -> web.Application:
         app = web.Application(client_max_size=64 * 1024 * 1024,
-                              middlewares=[_not_found, self.auth.middleware(), audit.middleware(self.log)])
+                              middlewares=[_not_found, self.auth.middleware(), audit.middleware(self.log), _errors])
         # Before long_lived drops the transports, so event streams get to write `shutdown`.
-        app.on_shutdown.append(lambda _app: self.events.close())
+        app.on_shutdown.append(lambda _app: self.s.events.close())
         self.long_lived.install(app)
         live = self.long_lived.track
         v1 = [
@@ -199,19 +195,9 @@ class Api:
     async def handle_pair_request(self, request: web.Request) -> web.Response:
         if denied := self._foreign_origin(request):
             return denied
-        try:
-            body = await request.json()
-        except ValueError:
-            return _error(400, "expected a JSON object")
-        if not isinstance(body, dict):
-            return _error(400, "expected a JSON object")
-        try:
-            req = self.pairing.create(body.get("client_name"), body.get("client_kind", "other"), body.get("public_key"),
-                                      request.remote or "?")
-        except ValueError as e:
-            return _error(400, str(e))
-        except PairingLimit as e:
-            return _error(429, str(e))
+        body = await _object(request)
+        req = self.s.pairing.create(body.get("client_name"), body.get("client_kind", "other"), body.get("public_key"),
+                                    request.remote or "?")
         self.log.info("pairing: request %s from %s (%s, %s)", req.code, req.remote, req.client_name, req.client_kind)
         return web.json_response({"id": req.id, "code": req.code, "poll_after_ms": POLL_AFTER_MS}, status=201,
                                  headers={"Cache-Control": "no-store"})
@@ -223,31 +209,32 @@ class Api:
         try:
             wait = max(0.0, min(MAX_WAIT_SECONDS, float(request.query.get("wait", 0))))
         except ValueError:
-            return _error(400, "wait must be a number of seconds")
-        req = self.pairing.touch(request_id)
+            raise ValueError("wait must be a number of seconds") from None
+        pairing = self.s.pairing
+        req = pairing.touch(request_id)
         if req is not None and wait:
-            await self.pairing.wait(req, wait)
-        req = self.pairing.touch(request_id)
+            await pairing.wait(req, wait)
+        req = pairing.touch(request_id)
         if req is None:
             return _error(404, "unknown or expired pairing request")
         no_store = {"Cache-Control": "no-store"}
-        if self.pairing.claim_credentials(req):
+        if pairing.claim_credentials(req):
             self.log.info("pairing: delivered credentials to %s (%s)", req.remote, req.client_name)
             return web.json_response({"status": "approved", "client_cert": req.client_cert,
-                                      "server_cert": self.pairing.server_cert},
+                                      "server_cert": pairing.server_cert},
                                      headers=no_store)
         return web.json_response({"status": req.status}, headers=no_store)
 
     async def handle_pair_cancel(self, request: web.Request) -> web.Response:
         if denied := self._foreign_origin(request):
             return denied
-        if not self.pairing.cancel(request.match_info["id"]):
+        if not self.s.pairing.cancel(request.match_info["id"]):
             return _error(404, "no pending pairing request with that id")
         return web.json_response({"cancelled": True})
 
+    # ---- stream ----
+
     async def handle_stream(self, request: web.Request) -> web.StreamResponse:
-        if self.capturer is None:
-            return web.Response(status=404, text="capture not available")
         res = web.StreamResponse(headers={
             "Content-Type": f"multipart/x-mixed-replace; boundary={BOUNDARY.decode()}",
             "Cache-Control": "no-store",
@@ -256,7 +243,7 @@ class Api:
         await res.prepare(request)
         try:
             with self.auth.connections.watching_screen():
-                async for frame in self.capturer.subscribe(tick=True):
+                async for frame in self.s.capturer.subscribe(tick=True):
                     if not frame:
                         if request.transport is None or request.transport.is_closing():
                             break
@@ -270,44 +257,33 @@ class Api:
         return res
 
     async def handle_frame(self, _request: web.Request) -> web.Response:
-        if self.capturer is None:
-            return _error(404, "capture not available")
-        try:
-            frame = await self.capturer.grab()
-        except CaptureUnavailable as e:
-            return _error(503, str(e))
+        frame = await self.s.capturer.grab()
         return web.Response(body=frame, content_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
     async def handle_stream_stats(self, _request: web.Request) -> web.Response:
-        if self.capturer is None:
-            return web.json_response({"available": False, "error": "capture not available"})
-        return web.json_response(self.capturer.stats())
+        return web.json_response(self.s.capturer.stats())
 
     async def handle_stream_settings_get(self, _request: web.Request) -> web.Response:
-        if self.capturer is None:
-            return _error(404, "capture not available")
-        return web.json_response(self.capturer.stream_settings())
+        return web.json_response(self.s.capturer.stream_settings())
 
     async def handle_stream_settings_put(self, request: web.Request) -> web.Response:
-        if (capturer := self.capturer) is None:
-            return _error(404, "capture not available")
-        return await _json(lambda: _with_body(request, {"fps", "quality", "width", "audio"}, capturer.update_settings))
+        body = await _body(request, {"fps", "quality", "width", "audio"})
+        return web.json_response(await self.s.capturer.update_settings(**body))
 
     # ---- audio ----
 
     async def handle_audio_ws(self, request: web.Request) -> web.StreamResponse:
-        if self.audio is None:
-            return _error(404, "audio not available")
+        audio = self.s.audio
         ws = web.WebSocketResponse(heartbeat=20, max_msg_size=4096)
         await ws.prepare(request)
-        if not self.audio.enabled:
+        if not audio.enabled:
             await ws.close(code=AUDIO_REFUSED, message=b"audio is disabled")
             return ws
         await ws.send_json(AUDIO_FORMAT)
 
         async def pump() -> None:
             try:
-                async for chunk in self.audio.subscribe():
+                async for chunk in audio.subscribe():
                     if ws.closed:
                         break
                     await ws.send_bytes(chunk)
@@ -336,19 +312,14 @@ class Api:
     # ---- input ----
 
     async def handle_input_settings_get(self, _request: web.Request) -> web.Response:
-        if self.input is None:
-            return _error(404, "input not available")
-        return web.json_response(self.input.status())
+        return web.json_response(self.s.input.status())
 
     async def handle_input_settings_put(self, request: web.Request) -> web.Response:
-        if (svc := self.input) is None:
-            return _error(404, "input not available")
-        return await _json(lambda: _with_body(request, {"enabled"}, svc.set_enabled, ("enabled",)))
+        body = await _body(request, {"enabled"}, ("enabled",))
+        return web.json_response(await self.s.input.set_enabled(body["enabled"]))
 
     async def handle_input_ws(self, request: web.Request) -> web.StreamResponse:
-        if self.input is None:
-            return _error(404, "input not available")
-        svc = self.input
+        svc = self.s.input
         ws = web.WebSocketResponse(heartbeat=20, max_msg_size=64 * 1024)
         await ws.prepare(request)
         # Refuse after the upgrade so browsers see the close code instead of a generic failure.
@@ -405,20 +376,15 @@ class Api:
     # ---- controllers ----
 
     async def handle_controllers(self, _request: web.Request) -> web.Response:
-        if self.controllers is None:
-            return _error(404, "controllers not available")
-        return await _json(self.controllers.snapshot)
+        return web.json_response(await self.s.controllers.snapshot())
 
     async def handle_controller_add(self, request: web.Request) -> web.Response:
-        if (controllers := self.controllers) is None:
-            return _error(404, "controllers not available")
-        return await _json(lambda: _with_body(request, {"name"}, controllers.add_virtual), status=201)
+        body = await _body(request, {"name"})
+        return web.json_response(await self.s.controllers.add_virtual(body.get("name")), status=201)
 
     async def handle_controller_remove(self, request: web.Request) -> web.Response:
-        if self.controllers is None:
-            return _error(404, "controllers not available")
         pad_id = request.match_info["id"]
-        if not self.controllers.remove_virtual(pad_id):
+        if not self.s.controllers.remove_virtual(pad_id):
             return _error(404, f"no virtual gamepad {pad_id!r}")
         return web.json_response({"removed": pad_id})
 
@@ -428,10 +394,11 @@ class Api:
         res = web.StreamResponse(headers=SSE_HEADERS)
         await res.prepare(request)
         loop = asyncio.get_running_loop()
-        with self.events.subscribe() as sub:
+        events = self.s.events
+        with events.subscribe() as sub:
             try:
                 await res.write(frame("hello", {"version": SERVER_INFO["version"], "api": list(API_VERSIONS),
-                                                "state": await self.events.snapshot()}))
+                                                "state": await events.snapshot()}))
                 last_write = loop.time()
                 while True:
                     try:
@@ -455,33 +422,29 @@ class Api:
     # ---- steam ui ----
 
     async def handle_ui_routes(self, _request: web.Request) -> web.Response:
-        if self.ui is None:
-            return _error(404, "ui navigation not available")
-        return await _json(self.ui.routes)
+        return web.json_response(await self.s.ui.routes())
 
     async def handle_ui_navigate(self, request: web.Request) -> web.Response:
-        if (ui := self.ui) is None:
-            return _error(404, "ui navigation not available")
-        return await _json(lambda: _with_body(request, {"path", "action", "tab", "plugin", "appid"}, ui.navigate))
+        body = await _body(request, {"path", "action", "tab", "plugin", "appid"})
+        return web.json_response(await self.s.ui.navigate(**body))
 
     async def handle_ui_toast(self, request: web.Request) -> web.Response:
-        async def run(title: str, body: str, duration_ms: int = 5000) -> dict:
-            return {"result": await toast(title, body, duration_ms)}
-        return await _json(lambda: _with_body(request, {"title", "body", "duration_ms"}, run, ("title", "body")))
+        body = await _body(request, {"title", "body", "duration_ms"}, ("title", "body"))
+        return web.json_response({"result": await toast(body["title"], body["body"], body.get("duration_ms", 5000))})
 
     async def handle_cef_evaluate(self, request: web.Request) -> web.Response:
-        async def run(expression: str, target: str | None = None, timeout: float = 15) -> dict:
-            return {"value": await cdp.evaluate_in(target, expression, timeout=timeout)}
-        return await _json(lambda: _with_body(request, {"expression", "target", "timeout"}, run, ("expression",)))
+        body = await _body(request, {"expression", "target", "timeout"}, ("expression",))
+        return web.json_response({"value": await cdp.evaluate_in(body.get("target"), body["expression"],
+                                                                 timeout=body.get("timeout", 15))})
 
     # ---- plugins ----
 
     async def handle_plugins(self, _request: web.Request) -> web.Response:
-        return await _json(list_plugins)
+        return web.json_response(await list_plugins())
 
     async def handle_plugin_reload(self, request: web.Request) -> web.Response:
         mode = request.query.get("mode", "backend")
-        return await _json(lambda: live.reload(request.match_info["dir"], mode))
+        return web.json_response(await live.reload(request.match_info["dir"], mode))
 
     async def handle_loader_restart(self, _request: web.Request) -> web.Response:
         await schedule_loader_restart()
@@ -490,9 +453,9 @@ class Api:
     async def handle_plugin_install(self, request: web.Request) -> web.Response:
         restart = request.query.get("restart", "loader")
         if restart not in plugins.RESTART_MODES:
-            return _error(400, f"restart must be one of {', '.join(plugins.RESTART_MODES)}")
+            raise ValueError(f"restart must be one of {', '.join(plugins.RESTART_MODES)}")
         if not request.content_type.startswith("multipart/"):
-            return _error(400, "expected multipart/form-data with a 'file' field")
+            raise ValueError("expected multipart/form-data with a 'file' field")
         reader = await request.multipart()
         with tempfile.NamedTemporaryFile(prefix="decky-toolkit-upload-", suffix=".zip") as tmp:
             found = False
@@ -504,27 +467,14 @@ class Api:
                 found = True
                 break
             if not found:
-                return _error(400, "missing multipart field 'file'")
+                raise ValueError("missing multipart field 'file'")
             tmp.flush()
-            try:
-                result = await plugins.install(tmp.name, restart, self.log, self.events)
-            except (ValueError, FileNotFoundError) as e:
-                return _error(400, str(e))
-            except cdp.CdpError as e:
-                return _error(502, f"installed, but plugin reload failed: {e}")
-        return web.json_response(result)
+            return web.json_response(await plugins.install(tmp.name, restart, self.s.events, self.log))
 
     async def handle_plugin_file_put(self, request: web.Request) -> web.Response:
         rel = request.query.get("path", "")
         data = await request.read()
-        try:
-            return web.json_response(await asyncio.to_thread(live.write_file, request.match_info["dir"], rel, data))
-        except ValueError as e:
-            return _error(400, str(e))
-        except PermissionError as e:
-            return _error(403, str(e))
-        except FileNotFoundError as e:
-            return _error(404, str(e))
+        return web.json_response(await asyncio.to_thread(live.write_file, request.match_info["dir"], rel, data))
 
     # ---- logs ----
 
@@ -543,16 +493,11 @@ class Api:
         return source, plugin, max(0, min(n, logs.MAX_TAIL))
 
     async def handle_logs_tail(self, request: web.Request) -> web.Response:
-        async def tail() -> dict:
-            source, plugin, n = self._log_query(request)
-            return {"lines": await logs.tail_lines(source, plugin, n)}
-        return await _json(tail)
+        source, plugin, n = self._log_query(request)
+        return web.json_response({"lines": await logs.tail_lines(source, plugin, n)})
 
     async def handle_logs_stream(self, request: web.Request) -> web.StreamResponse:
-        try:
-            source, plugin, n = self._log_query(request)
-        except ValueError as e:
-            return _error(400, str(e))
+        source, plugin, n = self._log_query(request)
         if source == "plugin" and not os.path.isdir(logs.plugin_log_dir(plugin or "")):
             return _error(404, f"no log dir {logs.plugin_log_dir(plugin or '')}")
         return await self._sse(request, logs.follow(source, plugin, n))
@@ -599,119 +544,72 @@ class Api:
 
     # ---- apps and game files ----
 
-    @property
-    def apps(self) -> Apps:
-        if self._apps is None:
-            self._apps = Apps()
-        return self._apps
-
     async def handle_apps(self, request: web.Request) -> web.Response:
         installed = request.query.get("installed_only", "1") not in ("0", "false")
         tools = request.query.get("include_tools", "0") in ("1", "true")
-        return await _json(lambda: self.apps.list(installed, request.query.get("query"), tools))
+        return web.json_response(await self.s.apps.list(installed, request.query.get("query"), tools))
 
     async def handle_app_dirs(self, request: web.Request) -> web.Response:
-        return await _json(lambda: self.apps.dirs(_appid(request)))
+        return web.json_response(await self.s.apps.dirs(_appid(request)))
 
     async def handle_app_saves(self, request: web.Request) -> web.Response:
-        return await _json(lambda: self.apps.saves(_appid(request), int(request.query.get("limit", 40))))
+        return web.json_response(await self.s.apps.saves(_appid(request), int(request.query.get("limit", 40))))
 
     async def handle_app_proton_log(self, request: web.Request) -> web.Response:
-        return await _json(lambda: asyncio.to_thread(games.proton_log, _appid(request), int(request.query.get("lines", 200))))
+        appid, lines = _appid(request), int(request.query.get("lines", 200))
+        return web.json_response(await asyncio.to_thread(games.proton_log, appid, lines))
 
     async def handle_app_launch(self, request: web.Request) -> web.Response:
-        return await _json(lambda: _with_body(request, {"wait"}, lambda wait=15: self.apps.launch(_appid(request), wait)))
+        body = await _body(request, {"wait"})
+        return web.json_response(await self.s.apps.launch(_appid(request), body.get("wait", 15)))
 
     async def handle_app_terminate(self, request: web.Request) -> web.Response:
-        return await _json(lambda: _with_body(request, {"confirm", "wait"},
-                                              lambda confirm=False, wait=15: self.apps.terminate(_appid(request), confirm, wait)))
+        body = await _body(request, {"confirm", "wait"})
+        return web.json_response(await self.s.apps.terminate(_appid(request), body.get("confirm", False),
+                                                             body.get("wait", 15)))
 
     async def handle_fs(self, request: web.Request) -> web.Response:
-        path = request.query.get("path")
-        if not path:
-            return _error(400, "path is required")
+        path = _query(request, "path")
         try:
             depth = int(request.query.get("depth", 1))
         except ValueError:
-            return _error(400, "depth must be an integer")
+            raise ValueError("depth must be an integer") from None
         glob = request.query.get("glob") or None
-        return await self._fs_call(request, lambda: games.fs_list(path, depth, glob))
-
-    async def _fs_call(self, request: web.Request, fn) -> web.Response:
-        try:
-            result = await asyncio.to_thread(fn)
-        except PermissionError as e:
-            return web.json_response({"error": str(e), "code": "EACCES"}, status=403)
-        except FileExistsError as e:
-            return web.json_response({"error": str(e), "code": "EEXIST"}, status=409)
-        except IsADirectoryError as e:
-            return web.json_response({"error": str(e), "code": "EISDIR"}, status=409)
-        except NotADirectoryError as e:
-            return web.json_response({"error": str(e), "code": "ENOTDIR"}, status=409)
-        except FileNotFoundError as e:
-            return web.json_response({"error": str(e), "code": "ENOENT"}, status=404)
-        except games.TooLarge as e:
-            return web.json_response({"error": str(e), "code": "EFBIG"}, status=413)
-        except ValueError as e:
-            return _error(400, str(e))
-        except OSError as e:
-            return _error(500, str(e))
-        if isinstance(result, bytes):
-            return web.Response(body=result, content_type="application/octet-stream")
-        return web.json_response(result)
-
-    @staticmethod
-    def _flag(request: web.Request, name: str, default: bool) -> bool:
-        raw = request.query.get(name)
-        return default if raw is None else raw not in ("0", "false", "")
+        return web.json_response(await asyncio.to_thread(games.fs_list, path, depth, glob))
 
     async def handle_fs_read(self, request: web.Request) -> web.Response:
-        path = request.query.get("path")
-        if not path:
-            return _error(400, "path is required")
-        return await self._fs_call(request, lambda: games.fs_read(path)[0])
+        data, _ = await asyncio.to_thread(games.fs_read, _query(request, "path"))
+        return web.Response(body=data, content_type="application/octet-stream")
 
     async def handle_fs_write(self, request: web.Request) -> web.Response:
-        path = request.query.get("path")
-        if not path:
-            return _error(400, "path is required")
+        path = _query(request, "path")
         data = await request.read()
-        create, overwrite = self._flag(request, "create", True), self._flag(request, "overwrite", True)
+        create, overwrite = _flag(request, "create", True), _flag(request, "overwrite", True)
         raw_mode = request.query.get("mode")
-        try:
-            mode = None if raw_mode is None else games.parse_mode(raw_mode)
-        except ValueError as e:
-            return _error(400, str(e))
-        return await self._fs_call(request, lambda: games.fs_write(path, data, games.device_write_scope(), create=create,
-                                                                   overwrite=overwrite, mode=mode))
+        mode = None if raw_mode is None else games.parse_mode(raw_mode)
+        return web.json_response(await asyncio.to_thread(
+            lambda: games.fs_write(path, data, games.device_write_scope(), create=create, overwrite=overwrite, mode=mode)))
 
     async def handle_fs_mkdir(self, request: web.Request) -> web.Response:
-        try:
-            body = await _body(request, {"path", "parents"})
-        except ValueError as e:
-            return _error(400, str(e))
+        body = await _body(request, {"path", "parents"})
         path = body.get("path")
         if not isinstance(path, str) or not path:
-            return _error(400, "path is required")
+            raise ValueError("path is required")
         parents = body.get("parents") is True
-        return await self._fs_call(request, lambda: games.fs_mkdir(path, games.device_write_scope(), parents=parents))
+        return web.json_response(await asyncio.to_thread(
+            lambda: games.fs_mkdir(path, games.device_write_scope(), parents=parents)))
 
     async def handle_fs_rename(self, request: web.Request) -> web.Response:
-        try:
-            body = await _body(request, {"from", "to", "overwrite"})
-        except ValueError as e:
-            return _error(400, str(e))
+        body = await _body(request, {"from", "to", "overwrite"})
         src, dst = body.get("from"), body.get("to")
         if not isinstance(src, str) or not src or not isinstance(dst, str) or not dst:
-            return _error(400, "from and to are required")
+            raise ValueError("from and to are required")
         overwrite = body.get("overwrite") is True
-        return await self._fs_call(request, lambda: games.fs_rename(src, dst, games.device_write_scope(), overwrite=overwrite))
+        return web.json_response(await asyncio.to_thread(
+            lambda: games.fs_rename(src, dst, games.device_write_scope(), overwrite=overwrite)))
 
     async def handle_fs_delete(self, request: web.Request) -> web.Response:
-        path = request.query.get("path")
-        if not path:
-            return _error(400, "path is required")
+        path = _query(request, "path")
         if request.query.get("confirm") != "1":
-            return _error(400, "deleting is destructive: add confirm=1")
-        return await self._fs_call(request, lambda: games.fs_delete(path, True, games.device_delete_roots()))
-
+            raise ValueError("deleting is destructive: add confirm=1")
+        return web.json_response(await asyncio.to_thread(games.fs_delete, path, True, games.device_delete_roots()))

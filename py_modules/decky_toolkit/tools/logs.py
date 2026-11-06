@@ -53,11 +53,7 @@ def _check_source(source: str, given: dict[str, Any], allowed: dict[str, set[str
         raise ValueError(f"source {source!r} does not take {', '.join(extra)} (it takes {takes})")
 
 
-def register(reg: ToolRegistry, console: "ConsoleCollector | None" = None) -> None:
-    def collector() -> "ConsoleCollector":
-        if console is None:
-            raise ValueError("console capture is not running in this server")
-        return console
+def register(reg: ToolRegistry, console: "ConsoleCollector") -> None:
 
     @reg.add(
         "logs_read",
@@ -102,7 +98,7 @@ def register(reg: ToolRegistry, console: "ConsoleCollector | None" = None) -> No
                 raise ValueError("source 'plugin' needs plugin")
             return _plugin(resolve_plugin(plugin)[0], lines, run or 0, file, grep, match)
         if source == "steam_console":
-            out = collector().query(target, lines if not match else 4000, level or DEFAULT_LEVEL, since, grep)
+            out = console.query(target, lines if not match else 4000, level or DEFAULT_LEVEL, since, grep)
             if match:
                 rx = _regex(match)
                 out["entries"] = [e for e in out["entries"] if rx.search(e.get("text", ""))][-lines:]
@@ -147,7 +143,7 @@ def register(reg: ToolRegistry, console: "ConsoleCollector | None" = None) -> No
                 raise ValueError("source 'plugin' needs plugin")
             dirname = resolve_plugin(plugin)[0] if plugin else None
             return {"source": source, **await logs.wait_for(source, dirname, pattern, timeout, count, since_s)}
-        return {"source": source, **await _wait_console(collector(), pattern, target, level, timeout, count, since_s)}
+        return {"source": source, **await _wait_console(console, pattern, target, level, timeout, count, since_s)}
 
     async def _loader(lines: int, grep: str | None, match: str | None, since: Any, until: str | None) -> dict[str, Any]:
         filtered = bool(grep or match)

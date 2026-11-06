@@ -10,9 +10,12 @@ import shutil
 import ssl
 import tempfile
 import time
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from ..system import run
+
+if TYPE_CHECKING:
+    from .events import EventHub
 
 VALID_DAYS = "36500"
 SEEN_EVERY_SECONDS = 60
@@ -148,11 +151,10 @@ class Identity:
 
 
 class PairedClients:
-    def __init__(self, path: str, clock: Callable[[], float] = time.time,
-                 on_change: Callable[[list[dict]], None] | None = None):
+    def __init__(self, path: str, events: "EventHub", clock: Callable[[], float] = time.time):
         self.path = path
+        self.events = events
         self.clock = clock
-        self.on_change = on_change
         try:
             with open(path) as f:
                 data = json.load(f)
@@ -226,5 +228,5 @@ class PairedClients:
         tmp = self.path + ".tmp"
         _write_private(tmp, json.dumps(list(self._clients.values()), indent=2))
         os.replace(tmp, self.path)
-        if self.on_change:
-            self.on_change(self.list())
+        self.events.frontend("decky_toolkit_paired_clients", self.list())
+        self.events.refresh("pairing")

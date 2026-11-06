@@ -22,9 +22,25 @@ class Clock:
         return self.t
 
 
+class Events:
+    """Records the Decky panel events a change sends."""
+
+    def __init__(self):
+        self.sent: list[str] = []
+
+    def frontend(self, name, *args):
+        self.sent.append(name)
+
+    def refresh(self, event):
+        pass
+
+
+CHANGED = "decky_toolkit_pair_requests"
+
+
 def make():
-    clock, events = Clock(), []
-    return PairingRequests(clock=clock, on_change=lambda e, r: events.append(e)), clock, events
+    clock, events = Clock(), Events()
+    return PairingRequests(events, clock=clock), clock, events.sent
 
 
 def create(p, name, kind, remote, key=PUBLIC_KEY):
@@ -36,7 +52,7 @@ def test_create_validates_and_notifies():
     req = create(p, "  VS Code   on  box ", "vscode", "10.0.0.2")
     assert req.client_name == "VS Code on box" and req.status == "pending" and len(req.code) == 4 and req.code.isdigit()
     assert len(req.id) >= 20
-    assert events == ["create"]
+    assert events == ["decky_toolkit_pair_request", CHANGED]
     for name, kind in (("", "vscode"), (None, "vscode"), ("x" * 65, "vscode"), ("x", "toaster")):
         with pytest.raises(ValueError):
             create(p, name, kind, "10.0.0.2")
@@ -64,7 +80,7 @@ def test_limits_and_replacement():
 
 def test_code_binds_server_cert_client_key_and_id(monkeypatch):
     server_cert = PUBLIC_KEY.replace("PUBLIC KEY", "CERTIFICATE")  # any DER will do for the derivation
-    p = PairingRequests(server_cert)
+    p = PairingRequests(Events(), server_cert)
     monkeypatch.setattr(P.secrets, "token_urlsafe", lambda n: "fixed-id")
     req = create(p, "a", "vscode", "1")
     digest = hashlib.sha256(pem_to_der(server_cert, "CERTIFICATE") + pem_to_der(PUBLIC_KEY, "PUBLIC KEY") + b"fixed-id")
@@ -81,7 +97,7 @@ def test_credentials_delivered_once():
     req = create(p, "a", "vscode", "1")
     assert not p.claim_credentials(req)
     p.approve(req.id, "CERT")
-    assert events[-1] == "approve" and req.client_cert == "CERT"
+    assert events[-1] == CHANGED and req.client_cert == "CERT"
     assert p.claim_credentials(req) and not p.claim_credentials(req)
     with pytest.raises(ValueError):
         p.deny(req.id)
@@ -98,7 +114,7 @@ def test_prune_idle_pending_and_old_resolved():
     clock.t += 50
     p.touch(polled.id)
     clock.t += 11
-    assert p.prune() == 1 and p.get(idle.id) is None and events[-1] == "prune"
+    assert p.prune() == 1 and p.get(idle.id) is None and events[-1] == CHANGED
     assert p.get(polled.id) and p.get(done.id)
     events.clear()
     assert p.prune() == 0 and events == []
@@ -130,5 +146,5 @@ def test_wait_times_out_and_cancel():
         await p.wait(req, 0.05)
         assert req.status == "pending"
     asyncio.run(run())
-    assert p.cancel(req.id) and events[-1] == "cancel" and p.get(req.id) is None
+    assert p.cancel(req.id) and events[-1] == CHANGED and p.get(req.id) is None
     assert not p.cancel(req.id)

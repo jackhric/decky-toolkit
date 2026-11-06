@@ -4,9 +4,12 @@ import hashlib
 import secrets
 import time
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from .tls import der_to_pem, parse_public_key, pem_to_der
+
+if TYPE_CHECKING:
+    from .events import EventHub
 
 CLIENT_KINDS = ("vscode", "mcp", "other")
 MAX_PENDING = 10
@@ -17,10 +20,6 @@ RESOLVED_KEEP_SECONDS = 300.0
 PRUNE_EVERY_SECONDS = 10.0
 MAX_WAIT_SECONDS = 25.0
 POLL_AFTER_MS = 1000
-
-# (event, request): event is "create", "approve", "deny", "cancel" or "prune" (request None).
-OnChange = Callable[[str, "PairingRequest | None"], None]
-
 
 def pairing_code(server_cert_der: bytes, client_spki_der: bytes, request_id: str) -> str:
     """Both ends derive this from what they saw, so a relay that swaps either key shows a different code."""
@@ -57,17 +56,20 @@ class PairingRequest:
 
 
 class PairingRequests:
-    def __init__(self, server_cert: str = "", clock: Callable[[], float] = time.monotonic,
-                 on_change: OnChange | None = None):
+    def __init__(self, events: "EventHub", server_cert: str = "", clock: Callable[[], float] = time.monotonic):
+        self.events = events
         self.server_cert = server_cert
         self._server_cert_der = pem_to_der(server_cert, "CERTIFICATE") if server_cert else b""
         self.clock = clock
-        self.on_change = on_change
         self._requests: dict[str, PairingRequest] = {}
 
-    def _notify(self, event: str, req: PairingRequest | None) -> None:
-        if self.on_change:
-            self.on_change(event, req)
+    def _changed(self, created: PairingRequest | None = None) -> None:
+        if created is not None:
+            self.events.frontend("decky_toolkit_pair_request", {
+                "id": created.id, "code": created.code, "client_name": created.client_name,
+                "client_kind": created.client_kind, "remote": created.remote})
+        self.events.frontend("decky_toolkit_pair_requests", self.list())
+        self.events.refresh("pairing")
 
     def pending(self) -> list[PairingRequest]:
         return [r for r in self._requests.values() if r.status == "pending"]
@@ -105,7 +107,7 @@ class PairingRequests:
                              client_name=client_name, client_kind=client_kind,
                              public_key=der_to_pem(spki, "PUBLIC KEY"), remote=remote, created_at=now, last_poll=now)
         self._requests[req.id] = req
-        self._notify("create", req)
+        self._changed(req)
         return req
 
     def touch(self, request_id: str) -> PairingRequest | None:
@@ -140,7 +142,7 @@ class PairingRequests:
         req.status = status
         req.resolved_at = self.clock()
         req.changed.set()
-        self._notify("approve" if status == "approved" else "deny", req)
+        self._changed()
         return req
 
     def approve(self, request_id: str, client_cert: str) -> PairingRequest:
@@ -159,7 +161,7 @@ class PairingRequests:
         if req is None or req.status != "pending":
             return False
         self._drop(req)
-        self._notify("cancel", req)
+        self._changed()
         return True
 
     def claim_credentials(self, req: PairingRequest) -> bool:
@@ -179,7 +181,7 @@ class PairingRequests:
         for r in stale:
             self._drop(r)
         if stale:
-            self._notify("prune", None)
+            self._changed()
         return len(stale)
 
     async def run_pruner(self, every: float = PRUNE_EVERY_SECONDS) -> None:

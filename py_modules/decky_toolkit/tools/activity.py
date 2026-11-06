@@ -11,9 +11,8 @@ from ..steam.ui import UiNavigator
 from . import ToolRegistry
 
 
-def register(reg: ToolRegistry, activity: InputActivity | None, input_service: InputService | None,
-             capturer: ScreenCapturer | None, navigator: UiNavigator | None) -> None:
-    nav = navigator or UiNavigator()
+def register(reg: ToolRegistry, activity: InputActivity, input_service: InputService, capturer: ScreenCapturer,
+             nav: UiNavigator) -> None:
 
     @reg.add(
         "device_activity",
@@ -27,10 +26,10 @@ def register(reg: ToolRegistry, activity: InputActivity | None, input_service: I
     )
     async def device_activity(active_within: float = 60) -> dict[str, Any]:
         now = time.time()
-        physical = activity.snapshot() if activity else None
-        last_physical = (physical or {}).get("last")
+        physical = activity.snapshot()
+        last_physical = physical["last"]
         remote = None
-        if input_service and input_service.last_remote:
+        if input_service.last_remote:
             r = input_service.last_remote
             remote = {"client": r["client"], "kind": r["kind"], "seconds_ago": round(now - r["at"], 1)}
         try:
@@ -44,5 +43,5 @@ def register(reg: ToolRegistry, activity: InputActivity | None, input_service: I
             "physical": physical,
             "remote": remote,
             "foreground": foreground,
-            "screen_viewers": capturer.stats()["subscribers"] if capturer else 0,
+            "screen_viewers": capturer.stats()["subscribers"],
         }

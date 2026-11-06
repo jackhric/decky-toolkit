@@ -18,7 +18,8 @@ from decky_toolkit.server.events import EventHub, frame  # noqa: E402
 from decky_toolkit.server.http import Api  # noqa: E402
 from decky_toolkit.server.protocol import McpServer  # noqa: E402
 from decky_toolkit.settings import Settings  # noqa: E402
-from decky_toolkit.tools import ToolRegistry, build_registry  # noqa: E402
+from decky_toolkit.tools import ToolRegistry  # noqa: E402
+from harness import make_registry, make_services  # noqa: E402
 from decky_toolkit.loader import plugins as plugin_ops  # noqa: E402
 from decky_toolkit.tools.plugin_tools import PluginTools  # noqa: E402
 
@@ -115,7 +116,7 @@ def test_on_subscribe_hooks_run_per_subscriber():
 
 
 async def serve(hub: EventHub, heartbeat: float = 15.0):
-    api = Api(auth=stub_auth(), mcp=McpServer(ToolRegistry(), LOG), capturer=None, logger=LOG, events=hub,
+    api = Api(make_services(events=hub), auth=stub_auth(), mcp=McpServer(ToolRegistry(), LOG), logger=LOG,
               heartbeat=heartbeat)
     runner = web.AppRunner(api.build_app(), shutdown_timeout=2)
     await runner.setup()
@@ -199,10 +200,9 @@ def test_client_leaving_unsubscribes():
 def test_stream_settings_changes_are_reported():
     async def run():
         settings = Settings()
-        cap = ScreenCapturer(lambda: settings, LOG)
         hub = EventHub()
+        cap = ScreenCapturer(lambda: settings, LOG, hub)
         hub.sources["stream_settings"] = cap.stream_settings
-        cap.on_settings_change = lambda: hub.refresh("stream_settings")
         with hub.subscribe() as sub:
             await cap.update_settings(fps=settings.stream_fps)
             await asyncio.sleep(0.01)
@@ -221,8 +221,8 @@ def test_plugin_tools_changes_refresh_the_tools_hash(tmp_path, monkeypatch):
 
     async def run():
         hub = EventHub()
-        pt = PluginTools(LOG, events=hub)
-        reg = build_registry(plugin_tools=pt, events=hub)
+        pt = PluginTools(LOG, hub)
+        reg = make_registry(plugin_tools=pt, events=hub)
         hub.sources["tools"] = lambda: {"hash": reg.fingerprint()}
         with hub.subscribe() as sub:
             before = reg.fingerprint()
@@ -241,7 +241,7 @@ def test_plugin_install_refreshes_plugins(tmp_path, monkeypatch):
         reads = []
         hub.sources["plugins"] = lambda: reads.append(1) or {"plugins": []}
         monkeypatch.setattr(plugin_ops, "install_plugin_zip", lambda *a, **k: {"dir": "x", "name": "X", "version": "1"})
-        reg = build_registry(events=hub)
+        reg = make_registry(events=hub)
         monkeypatch.setenv("DECKY_HOME", str(tmp_path))
         zip_path = tmp_path / "x.zip"
         zip_path.write_bytes(b"zip")

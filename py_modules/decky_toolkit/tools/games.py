@@ -10,8 +10,7 @@ from . import ToolRegistry
 APPID = {"type": "integer", "description": "Steam appid"}
 
 
-def register(reg: ToolRegistry, apps: Apps | None = None) -> None:
-    lib = apps or Apps()
+def register(reg: ToolRegistry, lib: Apps) -> None:
 
     @reg.add(
         "app_dirs",

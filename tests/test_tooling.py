@@ -10,7 +10,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
 from decky_toolkit import diagnostics  # noqa: E402
-from decky_toolkit.tools import ToolRegistry, build_registry  # noqa: E402
+from decky_toolkit.tools import ToolRegistry  # noqa: E402
+from harness import make_registry  # noqa: E402
 
 LOG = logging.getLogger("t")
 
@@ -53,7 +54,7 @@ def test_a_typeerror_inside_a_tool_is_reported_as_a_bug():
 
 
 def test_every_real_tool_signature_matches_its_schema():
-    reg = build_registry()
+    reg = make_registry()
     for t in reg._tools.values():
         import inspect
         params = {n for n, p in inspect.signature(t.fn).parameters.items() if p.kind is p.KEYWORD_ONLY or p.kind is p.POSITIONAL_OR_KEYWORD}
@@ -230,8 +231,12 @@ def test_device_activity_tool():
         async def state(self):
             return {"current": "/library/home", "side_menu": "none", "running_app": {"appid": 1, "name": "Game"}}
 
+    class Cap:
+        def stats(self):
+            return {"subscribers": 0}
+
     reg = ToolRegistry()
-    activity_tools.register(reg, Mon(), Svc(), None, Nav())
+    activity_tools.register(reg, Mon(), Svc(), Cap(), Nav())
     out = json.loads(text(run(reg.call("device_activity", {}))))
     assert out["someone_at_device"] is True and out["remote_input_active"] is False
     assert out["remote"]["client"] == "10.0.0.30" and 119 < out["remote"]["seconds_ago"] < 125
@@ -272,9 +277,7 @@ def test_wait_for_log_and_previous_runs(tmp_path, monkeypatch):
     assert recent["matched"] and "Hello World" in recent["lines"][0]
     assert miss == {"matched": False, "lines": [], "waited_ms": miss["waited_ms"]}
 
-    reg = ToolRegistry()
-    from decky_toolkit.tools import logs as log_tools
-    log_tools.register(reg)
+    reg = make_registry()
     prev = json.loads(text(run(reg.call("logs_read", {"source": "plugin", "plugin": "demo", "run": 1}))))
     assert prev["file"] == old.name and "Goodnight" in prev["text"]
     only = json.loads(text(run(reg.call("logs_read", {"source": "plugin", "plugin": "demo", "match": "^\\[.*ready"}))))
@@ -291,12 +294,12 @@ AREAS = ("app", "cef", "controller", "device", "fs", "input", "loader", "logs", 
 def test_tool_names_are_area_then_action():
     import re
     rx = re.compile(rf"^({'|'.join(AREAS)})_[a-z]+(_[a-z]+)*$")
-    bad = [n for n in build_registry()._tools if not rx.match(n)]
+    bad = [n for n in make_registry()._tools if not rx.match(n)]
     assert bad == []
 
 
 def test_logs_read_takes_only_the_arguments_of_its_source():
-    reg = build_registry()
+    reg = make_registry()
     r = run(reg.call("logs_read", {"source": "loader", "plugin": "x"}))
     assert r["isError"] and "source 'loader' does not take plugin (it takes since, until)" in text(r)
     r = run(reg.call("logs_read", {"source": "plugin"}))
@@ -326,7 +329,7 @@ def test_orientation_reports_person_and_one_line_summary():
     state = asyncio.run(Orientation(Inspector(), Activity(5))())
     assert state["someone_at_device"] is True
     assert asyncio.run(Orientation(Inspector(), Activity(600))())["someone_at_device"] is False
-    assert asyncio.run(Orientation(Inspector(), None)())["someone_at_device"] is False
+    assert asyncio.run(Orientation(Inspector(), Activity(None))())["someone_at_device"] is False
     assert Orientation.line(state) == ("route /library/home · menu none · no game running · dialog Disconnect? · "
                                        "focus 'OK' · someone is using the device")
     assert Orientation.line({"error": "Steam UI state unavailable: x"}) == "Steam UI state unavailable: x"
