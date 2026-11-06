@@ -29,10 +29,17 @@ type Status = {
   input: InputSettings | null;
   error: string | null;
   connected?: boolean;
-  client?: ConnectedClient | null;
+  clients?: ConnectedClient[];
 };
 
-type ConnectedClient = { name: string; kind: string; remote: string | null; connected_since: number | null };
+type ConnectedClient = {
+  fingerprint: string;
+  name: string;
+  kind: string;
+  remote: string | null;
+  connected_since: number | null;
+  streaming?: boolean;
+};
 
 type PairRequest = {
   id: string;
@@ -193,7 +200,7 @@ function useToolkit() {
           }
         />,
       ),
-    disconnect: (name: string) =>
+    disconnect: ({ name, fingerprint }: ConnectedClient) =>
       showModal(
         <ConfirmModal
           strTitle={`Disconnect ${name}?`}
@@ -201,8 +208,7 @@ function useToolkit() {
           strOKButtonText="Disconnect"
           onOK={() =>
             guarded(async () => {
-              // get_status names the connected client but not its fingerprint; only one client is ever paired.
-              for (const c of await listPairedClients()) setClients(await forgetPairedClient(c.fingerprint));
+              setClients(await forgetPairedClient(fingerprint));
               setStatus(await getStatus());
               toast(`Disconnected ${name}`);
             })
@@ -281,7 +287,7 @@ const hint = { color: MUTED, fontSize: "15px", lineHeight: 1.45, margin: 0, maxW
 
 function ConnectionCard({ client, status, busy, onDisconnect }: { client: ConnectedClient; status: Status; busy: boolean; onDisconnect: () => void }) {
   const now = useNow(15000);
-  const stream = status.stream?.running ? status.stream : null;
+  const stream = status.stream?.running && client.streaming ? status.stream : null;
   const line = { fontSize: "14px", color: MUTED, marginTop: "2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } as const;
   return (
     <Focusable
@@ -310,7 +316,7 @@ function ConnectionCard({ client, status, busy, onDisconnect }: { client: Connec
 }
 
 function Panel() {
-  const { status, pending, clients, busy, decide, disconnect } = useToolkit();
+  const { status, pending, busy, decide, disconnect } = useToolkit();
   const current = pending[0];
   const up = !!status && status.enabled && status.running && !status.error;
 
@@ -324,7 +330,6 @@ function Panel() {
           Code <span style={{ color: "#fff", fontSize: "18px", fontWeight: 600, letterSpacing: "0.12em" }}>{current.code}</span>
           {" · "}
           {current.remote}
-          {clients.length > 0 && <div style={{ marginTop: "4px" }}>Replaces {clients.map((c) => c.name).join(", ")}</div>}
         </div>
         <DialogButton style={{ width: "100%" }} disabled={busy} onClick={() => decide(current, false)}>
           Deny
@@ -345,11 +350,12 @@ function Panel() {
     );
   }
 
-  if (up && status.client) {
-    const client = status.client;
+  if (up && status.clients?.length) {
     return (
       <Centered mark="connected">
-        <ConnectionCard client={client} status={status} busy={busy} onDisconnect={() => disconnect(client.name)} />
+        {status.clients.map((c) => (
+          <ConnectionCard key={c.fingerprint} client={c} status={status} busy={busy} onDisconnect={() => disconnect(c)} />
+        ))}
       </Centered>
     );
   }
