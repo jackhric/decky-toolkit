@@ -3,6 +3,7 @@ import * as dgram from 'dgram';
 import * as os from 'os';
 import type { Health } from './api';
 import type { SavedDevice } from './connection';
+import { deviceFetch } from './transport';
 
 export const SERVICE = '_decky-toolkit._tcp.local';
 export const DEFAULT_PORT = 8765;
@@ -26,7 +27,7 @@ export interface MdnsSocket {
 /** Mutable so tests can fake the network. */
 export const discoveryHooks = {
   interfaces: (): NodeJS.Dict<os.NetworkInterfaceInfo[]> => os.networkInterfaces(),
-  fetch: (url: string, init: RequestInit): Promise<Response> => fetch(url, init),
+  fetch: (url: string, init: RequestInit): Promise<Response> => deviceFetch(url, init),
   createSocket: (): MdnsSocket => dgram.createSocket({ type: 'udp4' }),
 };
 
@@ -122,7 +123,7 @@ export function isToolkitHealth(h: unknown): h is Health {
 
 async function probe(host: string, port: number, signal: AbortSignal): Promise<Health | undefined> {
   try {
-    const res = await discoveryHooks.fetch(`http://${host}:${port}/health`, {
+    const res = await discoveryHooks.fetch(`https://${host}:${port}/health`, {
       signal: AbortSignal.any([AbortSignal.timeout(discoveryTimings.probeTimeoutMs), signal]), redirect: 'error',
     });
     if (!res.ok) return undefined;

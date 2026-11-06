@@ -27,12 +27,12 @@ export class StatusBar implements vscode.Disposable {
       return;
     }
     const h = this.conn.health;
-    if (h.kind === 'unreachable' || this.conn.tokenRejected) {
+    if (h.kind === 'unreachable' || this.conn.rejected) {
       const lost = h.kind === 'unreachable';
-      this.item.text = `$(${lost ? 'debug-disconnect' : 'key'}) ${d.name}: ${lost ? 'connection lost' : 'token rejected'}`;
+      this.item.text = `$(${lost ? 'debug-disconnect' : 'key'}) ${d.name}: ${lost ? 'connection lost' : 'pairing rejected'}`;
       this.item.tooltip = lost
         ? `Decky: lost connection to ${d.name} (${d.host}:${d.port}): ${h.error}. Reconnecting as soon as it answers. Click to reconnect now`
-        : `Decky: ${d.name} (${d.host}:${d.port}) rejected the stored token. Click to pair again`;
+        : `Decky: ${d.name} (${d.host}:${d.port}) no longer accepts this editor. Click to pair again`;
       this.item.backgroundColor = new vscode.ThemeColor(lost ? 'statusBarItem.warningBackground' : 'statusBarItem.errorBackground');
       this.item.command = 'decky-toolkit.reconnect';
       return;

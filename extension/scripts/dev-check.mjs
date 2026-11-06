@@ -1,5 +1,5 @@
 // Integration check against a live device, without VS Code.
-// Usage: DECKY_TOKEN_FILE=/path/to/token node scripts/dev-check.mjs [host] [port]
+// Usage: DECKY_IDENTITY_FILE=/path/to/identity.json node scripts/dev-check.mjs [host] [port]
 import * as esbuild from 'esbuild';
 import { execFileSync } from 'child_process';
 import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'fs';
@@ -12,12 +12,13 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
 const host = process.argv[2] ?? process.env.DECKY_HOST;
 const port = Number(process.argv[3] ?? process.env.DECKY_PORT ?? 8765);
-const tokenFile = process.env.DECKY_TOKEN_FILE;
-if (!tokenFile || !host) {
-  console.error('Usage: DECKY_TOKEN_FILE=<file> node scripts/dev-check.mjs <host> [port]  (or set DECKY_HOST)');
+const identityFile = process.env.DECKY_IDENTITY_FILE;
+if (!identityFile || !host) {
+  console.error('Usage: DECKY_IDENTITY_FILE=<file> node scripts/dev-check.mjs <host> [port]  (or set DECKY_HOST)');
   process.exit(2);
 }
-const token = readFileSync(tokenFile, 'utf8').trim();
+// The JSON the extension keeps in secret storage under decky-toolkit.identity:<host:port>: {key, cert, serverCert}.
+const identity = JSON.parse(readFileSync(identityFile, 'utf8'));
 
 const outfile = path.join(root, 'out', 'devlib.cjs');
 await esbuild.build({
@@ -35,7 +36,7 @@ await esbuild.build({
 const { DeviceProxy, DeckyClient, isConnectionError, stagePlugin, parseSse } = createRequire(import.meta.url)(outfile);
 
 const results = [];
-const redact = s => String(s).split(token).join('<token>');
+const redact = s => String(s).split(identity.key).join('<key>');
 
 async function check(name, fn) {
   for (let attempt = 1; attempt <= 2; attempt++) {
@@ -58,7 +59,7 @@ async function check(name, fn) {
   }
 }
 
-const proxy = new DeviceProxy(() => ({ host, port, token }));
+const proxy = new DeviceProxy(() => ({ host, port, identity }), new Map(), () => 0);
 const base = await proxy.start();
 console.log(`proxy listening on ${new URL(base).origin}/<secret>, device ${host}:${port}`);
 
@@ -109,7 +110,7 @@ await check('/stream.mjpeg via proxy (5 s)', async () => {
   }
   const mbps = (bytes * 8 / 5 / 1e6).toFixed(1);
   // The stream fps is configurable on the device; expect two thirds of its cap (100 parts at 30 fps).
-  const cap = (await new DeckyClient({ host, port }, token).streamStats()).settings?.fps || 30;
+  const cap = (await new DeckyClient({ host, port }, identity).streamStats()).settings?.fps || 30;
   const min = Math.floor(cap * 5 * 2 / 3);
   if (parts < min) throw new Error(`only ${parts} parts in 5 s, expected ${min} at the ${cap} fps cap (${mbps} Mbit/s, ${ctype})`);
   return `${parts} parts in 5 s (${(parts / 5).toFixed(1)} fps, cap ${cap}, min ${min}, ${mbps} Mbit/s, ${ctype})`;
@@ -119,7 +120,7 @@ await check('/plugins via proxy and client', async () => {
   const res = await fetch(base + '/plugins', { headers: { Origin: 'vscode-webview://dev-check' } });
   if (!res.ok) throw new Error(`HTTP ${res.status} ${await res.text()}`);
   const viaProxy = await res.json();
-  const viaClient = await new DeckyClient({ host, port }, token).listPlugins();
+  const viaClient = await new DeckyClient({ host, port }, identity).listPlugins();
   if (!Array.isArray(viaProxy) || viaProxy.length !== viaClient.length) throw new Error(`proxy ${viaProxy.length} vs client ${viaClient.length}`);
   const bad = viaClient.find(p => typeof p.dir !== 'string');
   if (bad) throw new Error(`entry without dir: ${JSON.stringify(bad)}`);
@@ -141,7 +142,7 @@ await check('/frame.jpg via proxy (sidebar preview)', async () => {
 });
 
 await check('/frame.jpg via client (Snapshot to file)', async () => {
-  const jpeg = await new DeckyClient({ host, port }, token).frame();
+  const jpeg = await new DeckyClient({ host, port }, identity).frame();
   if (jpeg[0] !== 0xff || jpeg[1] !== 0xd8 || jpeg.at(-2) !== 0xff || jpeg.at(-1) !== 0xd9) throw new Error('not a complete JPEG');
   return `${(jpeg.length / 1024).toFixed(0)} KiB JPEG`;
 });
@@ -175,7 +176,7 @@ await check('screen panel fps readout matches the device', async () => {
   const shown = Number(el('fps').textContent);
   const frames = Number(el('frames').textContent);
   post({ type: 'visible', visible: false });
-  const s = await new DeckyClient({ host, port }, token).streamStats();
+  const s = await new DeckyClient({ host, port }, identity).streamStats();
   const ref = s.settings?.fps ? Math.min(s.fps, s.settings.fps) : s.fps;
   const diff = Math.abs(shown - ref) / ref;
   if (!(diff <= 0.1)) throw new Error(`page shows ${shown} fps, device reports ${s.fps} (cap ${s.settings?.fps}); ${frames} frames in 6 s`);
@@ -184,7 +185,7 @@ await check('screen panel fps readout matches the device', async () => {
 
 // Reads the device's input flag but never changes it: input must stay off on the shared device.
 await check('/input WebSocket through the proxy upgrades and is closed with 4003 while input is off', async () => {
-  const st = await new DeckyClient({ host, port }, token).getInputSettings();
+  const st = await new DeckyClient({ host, port }, identity).getInputSettings();
   if (st.enabled) throw new Error('input is enabled on the device; this check needs it off and does not change it');
   const wsUrl = base.replace(/^http/, 'ws') + '/input';
   const outcome = url => new Promise(resolve => {
@@ -206,7 +207,7 @@ await check('/input WebSocket through the proxy upgrades and is closed with 4003
 
 // Reads the device's audio flag but never changes it.
 await check('/audio WebSocket through the proxy: format frame and >= 10 PCM chunks in 1 s', async () => {
-  const st = await new DeckyClient({ host, port }, token).getStreamSettings();
+  const st = await new DeckyClient({ host, port }, identity).getStreamSettings();
   if (st.audio === undefined) throw new Error('device predates audio streaming (no "audio" in /stream/settings)');
   if (!st.audio) throw new Error('audio is off on the device; this check needs it on and does not change it');
   const ws = new WebSocket(base.replace(/^http/, 'ws') + '/audio');
@@ -235,19 +236,19 @@ await check('/audio WebSocket through the proxy: format frame and >= 10 PCM chun
 });
 
 await check('MCP tools/list via client', async () => {
-  const tools = await new DeckyClient({ host, port }, token).listTools();
+  const tools = await new DeckyClient({ host, port }, identity).listTools();
   if (tools.length < 13) throw new Error(`only ${tools.length} tools`);
   return `${tools.length} tools: ${tools.map(t => t.name).join(', ')}`;
 });
 
 await check('MCP tools/call loader_log via client', async () => {
-  const text = await new DeckyClient({ host, port }, token).callToolText('loader_log', { lines: 5 });
+  const text = await new DeckyClient({ host, port }, identity).callToolText('loader_log', { lines: 5 });
   return `${text.split('\n').length} lines`;
 });
 
 // Read-only: never adds pads or navigates on the shared device. Passes on 404 (older device).
 await check('controllers and Steam UI routes probe (informational)', async () => {
-  const c = new DeckyClient({ host, port }, token);
+  const c = new DeckyClient({ host, port }, identity);
   const parts = [];
   try {
     const l = await c.controllers();
@@ -277,7 +278,7 @@ await check('controllers and Steam UI routes probe (informational)', async () =>
 });
 
 await check('planned routes probe (informational)', async () => {
-  const c = new DeckyClient({ host, port }, token);
+  const c = new DeckyClient({ host, port }, identity);
   const probe = async (p, init) => (await c.fetch(p, { timeoutMs: 5000, ...init }).then(r => { r.body?.cancel(); return r.status; }));
   // Probes without filing a request, so nothing shows up under the device's Pairing requests.
   const pair = await new DeckyClient({ host, port }).pollPairing('dev-check-unknown', 0);
@@ -332,7 +333,7 @@ async function info(name, fn) {
     console.log(`INFO  ${name}: unavailable (${redact(e.message)})`);
   }
 }
-const devClient = new DeckyClient({ host, port }, token);
+const devClient = new DeckyClient({ host, port }, identity);
 await info('/fs?path=/home/jackh/.local/share/VVVVVV', async () => {
   const l = await devClient.fsList('/home/jackh/.local/share/VVVVVV');
   return `${l.count} entries (${l.entries.map(e => `${e.path}${e.type === 'dir' ? '/' : ''}`).join(', ')})`;

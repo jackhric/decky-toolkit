@@ -274,17 +274,12 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   command('decky-toolkit.writeMcpConfig', () => writeMcpConfig(c));
   command('decky-toolkit.copyMcpUrl', async () => {
     if (!(await c.client())) return;
-    const url = new DeckyClient(c.address).mcpUrl;
+    const url = await c.proxy.mcpUrl();
     await vscode.env.clipboard.writeText(url);
-    void vscode.window.showInformationMessage(`Decky Toolkit: copied ${url}. MCP clients also need the bearer token (MCP → Copy token).`);
+    void vscode.window.showInformationMessage(`Decky Toolkit: copied ${url}. It works while VS Code is open and reaches the connected device.`);
   });
-  command('decky-toolkit.copyToken', async () => {
-    const token = (await c.client()) && await c.token();
-    if (!token) return;
-    await vscode.env.clipboard.writeText(token);
-    void vscode.window.showWarningMessage(
-      `Decky Toolkit: copied the bearer token for ${c.label}. It is a secret: anyone with it can control the device, so keep it out of shared files and chats.`);
-  });
+  // MCP clients reach the device only through this window's proxy, so it runs from the start.
+  void c.proxy.start().then(() => refreshMcpConfig(c), () => undefined);
 
   await ScreenPanel.replaceOrphan(ctx, c, controllers);
   const last = c.lastSessionDevice;
@@ -402,36 +397,53 @@ async function evaluate(c: Connection, out: vscode.OutputChannel, ctx: vscode.Ex
   }
 }
 
-async function writeMcpConfig(c: Connection): Promise<void> {
-  const folder = vscode.workspace.workspaceFolders?.[0];
-  if (!folder) throw new Error('open a workspace folder first.');
-  const token = await c.token();
-  if (!token) {
-    await c.client();
-    if (!(await c.token())) return;
-    return writeMcpConfig(c);
-  }
-  const uri = vscode.Uri.joinPath(folder.uri, '.mcp.json');
-  const ok = await vscode.window.showWarningMessage(
-    `Write the Decky Toolkit server to ${vscode.workspace.asRelativePath(uri)}?`,
-    {
-      modal: true,
-      detail: 'The bearer token is stored in plain text in that file so MCP clients (Claude Code etc.) can use it. ' +
-        'Keep .mcp.json out of version control (add it to .gitignore) if the repository is shared.',
-    },
-    'Write .mcp.json');
-  if (!ok) return;
+type McpConfig = { mcpServers?: Record<string, unknown>; [k: string]: unknown };
 
-  let config: { mcpServers?: Record<string, unknown>; [k: string]: unknown } = {};
+function mcpConfigUri(): vscode.Uri | undefined {
+  const folder = vscode.workspace.workspaceFolders?.[0];
+  return folder && vscode.Uri.joinPath(folder.uri, '.mcp.json');
+}
+
+/** Undefined when the file does not exist. */
+async function readMcpConfig(uri: vscode.Uri): Promise<McpConfig | undefined> {
+  let raw: Uint8Array;
   try {
-    config = JSON.parse(Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8'));
+    raw = await vscode.workspace.fs.readFile(uri);
   } catch (e) {
-    if (!(e instanceof vscode.FileSystemError)) throw new Error(`existing .mcp.json is not valid JSON: ${describeError(e)}`);
+    if (e instanceof vscode.FileSystemError) return undefined;
+    throw e;
   }
-  config.mcpServers = {
-    ...(config.mcpServers ?? {}),
-    decky: { type: 'http', url: new DeckyClient(c.address).mcpUrl, headers: { Authorization: `Bearer ${token}` } },
-  };
+  try {
+    return JSON.parse(Buffer.from(raw).toString('utf8'));
+  } catch (e) {
+    throw new Error(`existing .mcp.json is not valid JSON: ${describeError(e)}`);
+  }
+}
+
+async function writeMcpEntry(uri: vscode.Uri, config: McpConfig, entry: Record<string, unknown>): Promise<void> {
+  config.mcpServers = { ...(config.mcpServers ?? {}), decky: entry };
   await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(config, null, 2) + '\n'));
+}
+
+async function writeMcpConfig(c: Connection): Promise<void> {
+  const uri = mcpConfigUri();
+  if (!uri) throw new Error('open a workspace folder first.');
+  if (!(await c.client())) return;
+  await writeMcpEntry(uri, (await readMcpConfig(uri)) ?? {}, { type: 'http', url: await c.proxy.mcpUrl() });
   void vscode.window.showInformationMessage('Decky Toolkit: wrote mcpServers.decky to .mcp.json.');
+}
+
+/** Points a `.mcp.json` written by an earlier session at this window's proxy port, if that moved. */
+export async function refreshMcpConfig(c: Pick<Connection, 'proxy'>): Promise<void> {
+  const uri = mcpConfigUri();
+  if (!uri) return;
+  let config: McpConfig | undefined;
+  try {
+    config = await readMcpConfig(uri);
+  } catch {
+    return;
+  }
+  const entry = config?.mcpServers?.decky as Record<string, unknown> | undefined;
+  const url = typeof entry?.url === 'string' ? await c.proxy.rebase(entry.url) : undefined;
+  if (config && entry && url) await writeMcpEntry(uri, config, { ...entry, url });
 }

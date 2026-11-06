@@ -136,7 +136,7 @@
       },
       {
         "view": "decky-toolkit.actions",
-        "contents": "The device rejected the stored token, so nothing can be loaded. Reconnect, then approve this editor on the device.\n[Reconnect](command:decky-toolkit.reconnect)",
+        "contents": "The device no longer accepts this editor, so nothing can be loaded. Reconnect, then approve this editor on the device.\n[Reconnect](command:decky-toolkit.reconnect)",
         "when": "decky-toolkit.link == rejected"
       },
       {
@@ -156,7 +156,7 @@
       },
       {
         "view": "decky-toolkit.plugins",
-        "contents": "The device rejected the stored token, so nothing can be loaded. Reconnect, then approve this editor on the device.\n[Reconnect](command:decky-toolkit.reconnect)",
+        "contents": "The device no longer accepts this editor, so nothing can be loaded. Reconnect, then approve this editor on the device.\n[Reconnect](command:decky-toolkit.reconnect)",
         "when": "decky-toolkit.link == rejected"
       },
       {
@@ -176,7 +176,7 @@
       },
       {
         "view": "decky-toolkit.games",
-        "contents": "The device rejected the stored token, so nothing can be loaded. Reconnect, then approve this editor on the device.\n[Reconnect](command:decky-toolkit.reconnect)",
+        "contents": "The device no longer accepts this editor, so nothing can be loaded. Reconnect, then approve this editor on the device.\n[Reconnect](command:decky-toolkit.reconnect)",
         "when": "decky-toolkit.link == rejected"
       },
       {
@@ -196,7 +196,7 @@
       },
       {
         "view": "decky-toolkit.controllers",
-        "contents": "The device rejected the stored token, so nothing can be loaded. Reconnect, then approve this editor on the device.\n[Reconnect](command:decky-toolkit.reconnect)",
+        "contents": "The device no longer accepts this editor, so nothing can be loaded. Reconnect, then approve this editor on the device.\n[Reconnect](command:decky-toolkit.reconnect)",
         "when": "decky-toolkit.link == rejected"
       },
       {
@@ -378,12 +378,6 @@
         "icon": "$(link)"
       },
       {
-        "command": "decky-toolkit.copyToken",
-        "title": "Copy token",
-        "category": "Decky",
-        "icon": "$(key)"
-      },
-      {
         "command": "decky-toolkit.refresh",
         "title": "Refresh",
         "category": "Decky",
@@ -528,6 +522,13 @@
           "type": "number",
           "default": 8765,
           "description": "Port of the Decky Toolkit HTTP server."
+        },
+        "decky-toolkit.mcpPort": {
+          "type": "number",
+          "default": 8766,
+          "minimum": 1024,
+          "maximum": 65535,
+          "description": "Local port MCP clients (Claude Code etc.) connect to; the extension relays their requests to the connected device. When another VS Code window already uses it, the next free port is taken. Takes effect after a window reload."
         },
         "decky-toolkit.pluginDirName": {
           "type": "string",

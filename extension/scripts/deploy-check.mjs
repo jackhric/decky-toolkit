@@ -1,6 +1,6 @@
 // Deploys a throwaway skeleton plugin through the extension's own deploy code (no VS Code) and
 // checks that a fast deploy (restart=plugin) replaces both the backend and the frontend bundle.
-// Usage: DECKY_TOKEN_FILE=/path/to/token node scripts/deploy-check.mjs <plugin-root> [host] [port]
+// Usage: DECKY_IDENTITY_FILE=/path/to/identity.json node scripts/deploy-check.mjs <plugin-root> [host] [port]
 //   <plugin-root> is a decky-plugin-template checkout named "Decky Toolkit Test" whose src/version.ts
 //   exports VERSION, whose py_modules/testver/__init__.py defines VERSION and whose frontend sets
 //   window.__deckyToolkitTestVersion = VERSION. The script rewrites those files for each round.
@@ -19,13 +19,14 @@ const pluginRoot = process.argv[2];
 const host = process.argv[3] ?? process.env.DECKY_HOST;
 const port = Number(process.argv[4] ?? process.env.DECKY_PORT ?? 8765);
 const sshTarget = process.env.DECKY_SSH ?? (process.env.DECKY_USER && `${process.env.DECKY_USER}@${host}`);
-const tokenFile = process.env.DECKY_TOKEN_FILE;
-if (!tokenFile || !pluginRoot || !host || !sshTarget) {
-  console.error('Usage: DECKY_TOKEN_FILE=<file> DECKY_USER=<ssh user> node scripts/deploy-check.mjs <plugin-root> <host> [port]\n(DECKY_HOST and DECKY_SSH=<user@host> also work)');
+const identityFile = process.env.DECKY_IDENTITY_FILE;
+if (!identityFile || !pluginRoot || !host || !sshTarget) {
+  console.error('Usage: DECKY_IDENTITY_FILE=<file> DECKY_USER=<ssh user> node scripts/deploy-check.mjs <plugin-root> <host> [port]\n(DECKY_HOST and DECKY_SSH=<user@host> also work)');
   process.exit(2);
 }
-const token = readFileSync(tokenFile, 'utf8').trim();
-const redact = s => String(s).split(token).join('<token>');
+// The JSON the extension keeps in secret storage under decky-toolkit.identity:<host:port>: {key, cert, serverCert}.
+const identity = JSON.parse(readFileSync(identityFile, 'utf8'));
+const redact = s => String(s).split(identity.key).join('<key>');
 
 const outfile = path.join(root, 'out', 'deploylib.cjs');
 await esbuild.build({
@@ -34,7 +35,7 @@ await esbuild.build({
 });
 const lib = createRequire(import.meta.url)(outfile);
 const { DeckyClient, isConnectionError, readWorkspacePlugin, deployPlugin, newLines, sleep } = lib;
-const client = new DeckyClient({ host, port }, token);
+const client = new DeckyClient({ host, port }, identity);
 
 const verbose = !!process.env.VERBOSE;
 const log = s => { if (verbose) process.stdout.write('      ' + s); };

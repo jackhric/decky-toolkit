@@ -58,13 +58,13 @@ class LogSession {
         this.note(`Connected to ${this.conn.linkLabel} again.`);
         paused = undefined;
       }
-      const token = await this.conn.token();
-      if (!token) {
-        this.channel.appendLine('[decky-toolkit] not paired; waiting for a token…');
+      const identity = await this.conn.identity();
+      if (!identity) {
+        this.channel.appendLine('[decky-toolkit] not paired; waiting for pairing…');
         await this.untilChanged(signal);
         continue;
       }
-      const client = new DeckyClient(this.conn.address, token);
+      const client = new DeckyClient(this.conn.address, identity);
       const attempt = this.attempt = new AbortController();
       const stop = () => attempt.abort();
       signal.addEventListener('abort', stop);

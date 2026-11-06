@@ -24,6 +24,9 @@ import type {
   UiRoutes,
   VirtualPadCreated,
 } from './api';
+import { DeviceResponse, Identity, PeerCert, TrustError, deviceFetch, isPlainHttpDevice } from './transport';
+
+export { TrustError } from './transport';
 
 export interface DeviceAddress {
   host: string;
@@ -89,7 +92,13 @@ export function isConnectionError(e: unknown): boolean {
   );
 }
 
+/** The device no longer accepts this editor: it forgot the pairing (401) or is not the device we paired with. */
+export function isRejection(e: unknown): boolean {
+  return e instanceof TrustError || (e instanceof HttpError && e.status === 401);
+}
+
 export function describeError(e: unknown): string {
+  if (isPlainHttpDevice(e)) return 'the device runs an older Decky Toolkit; update it';
   if (isConnectionError(e)) {
     const cause = (e as { cause?: { message?: string } }).cause?.message;
     return `cannot reach the device${cause ? ` (${cause})` : ''}`;
@@ -121,23 +130,17 @@ function logQueryString(q: LogQuery): string {
 export class DeckyClient {
   private rpcId = 0;
 
-  constructor(public readonly address: DeviceAddress, private readonly token?: string) {}
+  constructor(public readonly address: DeviceAddress, private readonly identity?: Identity) {}
 
   get baseUrl(): string {
-    return `http://${this.address.host}:${this.address.port}`;
+    return `https://${this.address.host}:${this.address.port}`;
   }
 
-  get mcpUrl(): string {
-    return `${this.baseUrl}/mcp`;
-  }
-
-  async fetch(path: string, init: RequestInit & { timeoutMs?: number } = {}): Promise<Response> {
-    const headers = new Headers(init.headers);
-    if (this.token) headers.set('Authorization', `Bearer ${this.token}`);
+  async fetch(path: string, init: RequestInit & { timeoutMs?: number } = {}): Promise<DeviceResponse> {
     const { timeoutMs, ...rest } = init;
-    return fetch(this.baseUrl + path, {
+    return deviceFetch(this.baseUrl + path, {
       ...rest,
-      headers,
+      identity: this.identity,
       signal: timeoutMs === 0 ? rest.signal : withTimeout(timeoutMs ?? 15000, rest.signal ?? undefined),
     });
   }
@@ -153,16 +156,29 @@ export class DeckyClient {
     return this.json<Health>('/health', { timeoutMs });
   }
 
-  /** `unsupported` when the device predates pairing requests. */
-  async requestPairing(clientName: string, clientKind: PairClientKind = 'vscode'): Promise<PairRequestCreated | 'unsupported'> {
-    const res = await this.fetch('/pair/request', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ client_name: clientName, client_kind: clientKind }),
-      timeoutMs: 5000,
-    });
+  /**
+   * `unsupported` when the device predates this kind of pairing. `serverCert` is the certificate the
+   * device presented while answering, which the pairing code is derived from.
+   */
+  async requestPairing(clientName: string, publicKey: string, clientKind: PairClientKind = 'vscode'):
+    Promise<{ created: PairRequestCreated; serverCert: PeerCert } | 'unsupported'> {
+    let res: DeviceResponse;
+    try {
+      res = await this.fetch('/pair/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client_name: clientName, client_kind: clientKind, public_key: publicKey }),
+        timeoutMs: 5000,
+      });
+    } catch (e) {
+      if (isPlainHttpDevice(e)) return 'unsupported';
+      throw e;
+    }
     const text = await res.text();
-    if (res.ok) return JSON.parse(text) as PairRequestCreated;
+    if (res.ok) {
+      if (!res.peerCert) throw new Error('the device did not identify itself');
+      return { created: JSON.parse(text) as PairRequestCreated, serverCert: res.peerCert };
+    }
     // Older plugins: the auth middleware answers 401 before routing; very old ones may 404/405.
     if (res.status === 401 || res.status === 404 || res.status === 405) return 'unsupported';
     throw new HttpError(res.status, text, '/pair/request');
