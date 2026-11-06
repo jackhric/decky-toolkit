@@ -4,7 +4,7 @@ import * as esbuild from 'esbuild';
 import assert from 'assert/strict';
 import { execFileSync, spawn } from 'child_process';
 import { generateKeyPairSync } from 'crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
@@ -113,7 +113,7 @@ await check('--version and --help', async () => {
 });
 
 await check('usage errors exit 2', async () => {
-  for (const args of [['frobnicate'], ['status', '--restart', 'none'], ['deploy', '--restart', 'sometimes'], ['call'], ['call', 'x', '{bad'], ['pair', 'a:b:c'], ['pair', 'steamdeck:99999'], ['forget', 'extra']]) {
+  for (const args of [['frobnicate'], ['status', '--restart', 'none'], ['deploy', '--restart', 'sometimes'], ['deploy', '--build', 'sometimes'], ['call'], ['call', 'x', '{bad'], ['pair', 'a:b:c'], ['pair', 'steamdeck:99999'], ['forget', 'extra']]) {
     const r = await cli(args);
     assert.equal(r.code, 2, `${args.join(' ')} → ${r.code} ${r.stderr}`);
     assert.match(r.stderr, /--help/);
@@ -384,7 +384,7 @@ await check('mcp: a tools event sends tools/list_changed at once, also after the
   assert.ok(state().requests.filter(x => x === 'GET /api/v1/events').length >= 2, 'reconnected');
   const refused = msgs.find(m => m.id === 4).result;
   assert.equal(refused.isError, true);
-  assert.equal(refused.content[0].text, "Invalid arguments for plugin_deploy: unknown argument 'path'. Arguments: dir (string); restart (none|plugin|loader).");
+  assert.equal(refused.content[0].text, "Invalid arguments for plugin_deploy: unknown argument 'path'. Arguments: dir (string); build (auto|always|never); restart (none|plugin|loader).");
   return `list_changed ${latency} ms after the change, ${reconnectMs} ms after a restart`;
 });
 
@@ -444,6 +444,41 @@ await check('deploy', async () => {
   const missing = await cli(['deploy', path.join(scratch, 'nowhere')]);
   assert.equal(missing.code, 1);
   assert.match(missing.stderr, /no readable plugin\.json/);
+});
+
+await check('deploy builds when src/ is newer than dist/index.js, as the extension does', async () => {
+  const pkgFile = path.join(plugin, 'package.json');
+  const original = readFileSync(pkgFile);
+  const withBuild = script => writeFileSync(pkgFile, JSON.stringify({ name: 'my-plugin', version: '1.2.3', scripts: { build: script } }));
+  writeFileSync(path.join(plugin, 'package-lock.json'), '{}');
+  writeFileSync(path.join(plugin, 'plugin.json'), JSON.stringify({ name: 'My Plugin', flags: [] }));
+  setState({ installMeta: { name: 'My Plugin', version: '1.2.3' } });
+  try {
+    withBuild(`node -e "require('fs').writeFileSync('dist/index.js', 'export default 2;\\n')"`);
+    const old = Date.now() / 1000 - 60;
+    utimesSync(path.join(plugin, 'dist', 'index.js'), old, old);
+    const installs = state().installs.length;
+    const b = await cli(['deploy', plugin]);
+    assert.equal(b.code, 0, b.stderr);
+    assert.match(b.stdout, /^\$ npm run build {3}\(in .*checkout-of-my-plugin\)$/m);
+    assert.equal(readFileSync(path.join(plugin, 'dist', 'index.js'), 'utf8'), 'export default 2;\n');
+    const skipped = await cli(['deploy', plugin]);
+    assert.match(skipped.stdout, /^Build skipped: dist\/index\.js is up to date$/m);
+    withBuild(`node -e "console.error('src/index.tsx(3,1): error TS1005: oops'); process.exit(2)"`);
+    const never = await cli(['deploy', plugin, '--build', 'never']);
+    assert.equal(never.code, 0, never.stderr);
+    assert.match(never.stdout, /^Build skipped: build mode "never"$/m);
+    assert.equal(state().installs.length, installs + 3);
+    const failed = await cli(['deploy', plugin, '--build', 'always']);
+    assert.equal(failed.code, 1);
+    assert.match(failed.stderr, /^Deploy failed: npm run build exited with code 2: src\/index\.tsx\(3,1\): error TS1005: oops$/m);
+    assert.equal(state().installs.length, installs + 3, 'nothing uploaded after a failed build');
+    const m = await mcp([{ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'plugin_deploy', arguments: { dir: plugin, build: 'always' } } }]);
+    assert.match(m.replies.get(1).result.content[0].text, /^deploy failed: npm run build exited with code 2/);
+  } finally {
+    writeFileSync(pkgFile, original);
+    rmSync(path.join(plugin, 'package-lock.json'));
+  }
 });
 
 await check('forget', async () => {

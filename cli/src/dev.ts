@@ -45,7 +45,7 @@ export async function dev(dir: string, build: boolean, out: (l: string) => void,
 
   let installedDir = p.dir;
   const fullDeploy = async () => {
-    const s = await deployPlugin(client, p, { log: l => out(l), matchInstalledByName: true });
+    const s = await deployPlugin(client, p, { build: 'never', log: l => out(l) });
     installedDir = s.dir;
     out(`Deployed ${p.name} as ${s.dir} in ${(s.totalMs / 1000).toFixed(1)} s`);
   };

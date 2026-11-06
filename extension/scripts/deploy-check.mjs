@@ -32,11 +32,11 @@ const redact = s => String(s).split(identity.key).join('<key>');
 
 const outfile = path.join(root, 'out', 'deploylib.cjs');
 await esbuild.build({
-  stdin: { contents: "export * from '../packages/client/src/client'; export * from '../packages/client/src/deploy'; export * from './src/pluginDeploy';", resolveDir: root, loader: 'ts' },
+  stdin: { contents: "export * from '../packages/client/src/client'; export * from '../packages/client/src/deploy';", resolveDir: root, loader: 'ts' },
   bundle: true, platform: 'node', format: 'cjs', outfile, logLevel: 'warning',
 });
 const lib = createRequire(import.meta.url)(outfile);
-const { DeckyClient, isConnectionError, readWorkspacePlugin, buildAndDeploy, newLines, sleep } = lib;
+const { DeckyClient, isConnectionError, readWorkspacePlugin, deployPlugin, newLines, sleep } = lib;
 const client = new DeckyClient({ host, port }, identity);
 
 const verbose = !!process.env.VERBOSE;
@@ -122,7 +122,7 @@ async function round(label, v, restart, opts = {}) {
   const p = await readWorkspacePlugin(pluginRoot, 'decky-toolkit-test');
   const before = await journal();
   const t0 = Date.now();
-  const r = await buildAndDeploy(client, p, { restart, build: 'auto', log, confirmTimeoutMs: 10000 });
+  const r = await deployPlugin(client, p, { restart, build: 'auto', log, confirmTimeoutMs: 10000 });
   const deployMs = Date.now() - t0;
   const full = r.restarted === 'loader';
   const fe = await frontendState(v, full ? 30000 : 10000);
@@ -168,13 +168,13 @@ if (!(await noViewers())) {
   console.log('a stream viewer stayed connected for 5 min; the first install restarts the loader, giving up');
   process.exit(1);
 }
-await check('v1: first install (restarts the loader)', () => round('v1 first install', 'v1', 'fast'));
-await check('v2: fast deploy, debug flag (loader watcher reloads it)', () => round('v2 fast, debug', 'v2', 'fast'));
-await check('v3: fast deploy, no debug flag (restart=plugin)', () => round('v3 fast, no debug', 'v3', 'fast', { debug: false }));
+await check('v1: first install (restarts the loader)', () => round('v1 first install', 'v1', undefined));
+await check('v2: fast deploy, debug flag (loader watcher reloads it)', () => round('v2 fast, debug', 'v2', undefined));
+await check('v3: fast deploy, no debug flag (restart=plugin)', () => round('v3 fast, no debug', 'v3', undefined, { debug: false }));
 await check('v4: fast deploy, no debug flag, nothing to build', async () => {
   setVersion('v4', { debug: false });
   execFileSync('pnpm', ['run', 'build'], { cwd: pluginRoot, stdio: 'ignore' });
-  return round('v4 fast, prebuilt', 'v4', 'fast', { debug: false });
+  return round('v4 fast, prebuilt', 'v4', undefined, { debug: false });
 });
 if (process.env.SKIP_FULL) {
   console.log('SKIP  v5: full restart deploy (SKIP_FULL set)');
