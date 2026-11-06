@@ -65,7 +65,7 @@ writeFileSync(stateFile, JSON.stringify({
   journal: ['boot'], pairQueue: [], pairRequests: [], pairCancelled: [], requests: [], rpc: [], installs: [], reloads: [],
   plugins: [{ dir: 'my-plugin', name: 'My Plugin', version: '1.0.0', flags: [] }], installMeta: { name: 'My Plugin', version: '1.2.3' },
   tools: [
-    { name: 'decky_status', description: 'Loader status', inputSchema: { type: 'object', properties: {} } },
+    { name: 'device_info', description: 'Loader status', inputSchema: { type: 'object', properties: {} } },
     { name: 'screen_capture', description: 'Screenshot', inputSchema: { type: 'object', properties: {} } },
   ],
   frameB64: frame.toString('base64'),
@@ -125,7 +125,7 @@ await check('status and call before pairing', async () => {
   const j = JSON.parse(s.stdout);
   assert.equal(j.identity, false);
   assert.match(j.error, /decky-toolkit pair/);
-  const c = await cli(['call', 'decky_status']);
+  const c = await cli(['call', 'device_info']);
   assert.equal(c.code, 1);
   assert.match(c.stderr, /not paired.*decky-toolkit pair/);
 });
@@ -191,7 +191,7 @@ await check('status', async () => {
 });
 
 await check('call', async () => {
-  const t = await cli(['call', 'decky_status', '{"verbose":true}']);
+  const t = await cli(['call', 'device_info', '{"verbose":true}']);
   assert.equal(t.code, 0, t.stderr);
   assert.deepEqual(JSON.parse(t.stdout), { loader: 'v3.3.1', args: { verbose: true } });
   const target = path.join(scratch, 'shot.jpg');
@@ -281,15 +281,15 @@ await check('mcp over stdio', async () => {
     { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'smoke', version: '1' } } },
     { jsonrpc: '2.0', method: 'notifications/initialized' },
     { jsonrpc: '2.0', id: 2, method: 'tools/list' },
-    { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'decky_status', arguments: { a: 1 } } },
+    { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'device_info', arguments: { a: 1 } } },
     { jsonrpc: '2.0', id: 'four', method: 'tools/call', params: { name: 'screen_capture', arguments: {} } },
     { jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'device_status', arguments: {} } },
     { jsonrpc: '2.0', id: 6, method: 'resources/list' },
     '{not json',
     { jsonrpc: '2.0', id: 7, method: 'ping' },
-    { jsonrpc: '2.0', id: 8, method: 'tools/call', params: { name: 'deploy_plugin', arguments: { dir: plugin, restart: 'none' } } },
+    { jsonrpc: '2.0', id: 8, method: 'tools/call', params: { name: 'plugin_deploy', arguments: { dir: plugin, restart: 'none' } } },
     '[{"jsonrpc":"2.0","id":9,"method":"ping"}]',
-    { jsonrpc: '2.0', id: 10, method: 'tools/call', params: { name: 'deploy_plugin', arguments: { restart: 'sometimes' } } },
+    { jsonrpc: '2.0', id: 10, method: 'tools/call', params: { name: 'plugin_deploy', arguments: { restart: 'sometimes' } } },
   ]);
   assert.equal(r.code, 0, r.stderr);
   assert.equal(r.trailing, '', 'stdout ends with a newline');
@@ -307,7 +307,7 @@ await check('mcp over stdio', async () => {
   assert.deepEqual(init.serverInfo, { name: 'decky-toolkit', version: pkg.version });
   assert.deepEqual(init.capabilities, { tools: { listChanged: true } });
   assert.equal(typeof init.instructions, 'string');
-  assert.deepEqual(r.replies.get(2).result.tools.map(t => t.name), ['decky_status', 'screen_capture', 'deploy_plugin', 'device_status']);
+  assert.deepEqual(r.replies.get(2).result.tools.map(t => t.name), ['device_info', 'screen_capture', 'plugin_deploy', 'device_status']);
   assert.equal(r.replies.get(3).result.isError, false);
   assert.deepEqual(JSON.parse(r.replies.get(3).result.content[0].text).args, { a: 1 });
   assert.deepEqual(r.replies.get('four').result.content[0], { type: 'image', data: frame.toString('base64'), mimeType: 'image/jpeg' });
@@ -338,11 +338,11 @@ await check('mcp: unknown arguments are refused; a changed device tool list send
       if (step === 1 && lines.some(m => m.id === 2)) {
         step = 2;
         setState({ health: { ...health, tools_hash: 'bbbb' } });
-        send(child, { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'decky_status', arguments: {} } });
+        send(child, { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'device_info', arguments: {} } });
       }
       if (step === 2 && lines.some(m => m.method === 'notifications/tools/list_changed')) {
         step = 3;
-        send(child, { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'deploy_plugin', arguments: { path: plugin } } });
+        send(child, { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'plugin_deploy', arguments: { path: plugin } } });
       }
       if (step === 3 && lines.some(m => m.id === 4)) { step = 4; child.stdin.end(); }
     },
@@ -355,8 +355,8 @@ await check('mcp: unknown arguments are refused; a changed device tool list send
   assert.equal(msgs.filter(m => m.method === 'notifications/tools/list_changed').length, 1);
   const refused = msgs.find(m => m.id === 4).result;
   assert.equal(refused.isError, true);
-  assert.equal(refused.content[0].text, "Invalid arguments for deploy_plugin: unknown argument 'path'. Arguments: dir (string); restart (none|plugin|loader).");
-  return 'list_changed after the fingerprint moved; deploy_plugin {path} refused with the argument list';
+  assert.equal(refused.content[0].text, "Invalid arguments for plugin_deploy: unknown argument 'path'. Arguments: dir (string); restart (none|plugin|loader).");
+  return 'list_changed after the fingerprint moved; plugin_deploy {path} refused with the argument list';
 });
 
 await check('initialize answers without the device', async () => {
@@ -367,11 +367,11 @@ await check('initialize answers without the device', async () => {
     const r = await mcp([
       { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '1999-01-01' } },
       { jsonrpc: '2.0', id: 2, method: 'tools/list' },
-      { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'decky_status', arguments: {} } },
+      { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'device_info', arguments: {} } },
     ]);
     assert.equal(r.code, 0, r.stderr);
     assert.equal(r.replies.get(1).result.protocolVersion, '2025-11-25');
-    assert.deepEqual(r.replies.get(2).result.tools.map(t => t.name), ['deploy_plugin', 'device_status']);
+    assert.deepEqual(r.replies.get(2).result.tools.map(t => t.name), ['plugin_deploy', 'device_status']);
     const res = r.replies.get(3).result;
     assert.equal(res.isError, true);
     assert.match(res.content[0].text, /cannot reach steamdeck at 192\.168\.77\.20:8765.*decky-toolkit pair/);

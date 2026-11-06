@@ -14,8 +14,8 @@ request_origin: contextvars.ContextVar[tuple[str, str, str]] = contextvars.Conte
 paired_client: contextvars.ContextVar[str] = contextvars.ContextVar("paired_client", default="-")
 
 AUDITED_TOOLS = frozenset({
-    "cef_evaluate", "write_file", "install_plugin", "reload_plugin", "restart_loader", "call_plugin_method",
-    "set_input_enabled", "remove_virtual_controller", "ui_navigate",
+    "cef_evaluate", "fs_write", "plugin_install", "plugin_reload", "loader_restart", "plugin_call",
+    "input_settings", "controller_remove", "ui_navigate",
 })
 AUDITED_PREFIXES = ("input_",)
 _UNAUDITED_ROUTES = ("/mcp", "/pair/request")

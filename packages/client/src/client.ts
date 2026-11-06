@@ -291,14 +291,8 @@ export class DeckyClient {
     return text;
   }
 
-  /** Falls back to the `list_plugins` tool on devices without the REST route. */
-  async listPlugins(): Promise<PluginInfo[]> {
-    try {
-      return await this.json<PluginInfo[]>('/plugins');
-    } catch (e) {
-      if (isMissingRoute(e)) return JSON.parse(await this.callToolText('list_plugins')) as PluginInfo[];
-      throw e;
-    }
+  listPlugins(): Promise<PluginInfo[]> {
+    return this.json<PluginInfo[]>('/plugins');
   }
 
   installPlugin(zip: Uint8Array, filename: string, restart: RestartMode = 'loader'): Promise<InstallResult> {
@@ -327,15 +321,9 @@ export class DeckyClient {
     });
   }
 
-  /** Falls back to the `restart_loader` tool on devices without the REST route. */
   async restartLoader(): Promise<string> {
-    try {
-      const res = await this.json<unknown>('/loader/restart', { method: 'POST' });
-      return typeof res === 'string' ? res : JSON.stringify(res);
-    } catch (e) {
-      if (isMissingRoute(e)) return this.callToolText('restart_loader', { confirm: true });
-      throw e;
-    }
+    const res = await this.json<unknown>('/loader/restart', { method: 'POST' });
+    return typeof res === 'string' ? res : JSON.stringify(res);
   }
 
   controllers(): Promise<ControllersList> {

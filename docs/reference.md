@@ -9,53 +9,28 @@ loopback URL (`Decky: Copy MCP URL`), so any MCP client can use the tools below.
 
 ## MCP tools
 
-| Tool | What it does |
+Tools are named `<area>_<action>`. Each table row is one area.
+
+| Area | Tools |
 | --- | --- |
-| `decky_status` | Loader version, OS, Python runtime, uid, installed plugins |
-| `list_plugins` | Plugins under `~/homebrew/plugins` with their `plugin.json` metadata |
-| `read_plugin_log` | Tail a plugin's backend log from `~/homebrew/logs/<plugin>/`; `run` 1 is the previous backend run, `match` a regex filter |
-| `backend_stacks` | Decky Toolkit's own backend: every thread and asyncio task stack, event loop lag and stalls |
-| `loader_log` | Tail `journalctl -u plugin_loader`; `since`/`until` (journalctl times such as `-2min`), substring `grep` or regex `match` |
-| `wait_for_log` | Block until a loader journal or plugin log line matches a regex (`since_s` also accepts recent lines), instead of polling |
-| `run_command` | Run a shell command on the device as the desktop user (its `XDG_RUNTIME_DIR`, D-Bus, `DISPLAY=:0`), or as root with `root: true`; timeout, output cap, every command logged |
-| `device_activity` | Whether someone is using the device: last physical input (any non-virtual input device, times only), last remote input and client, the app in front, screen viewers |
-| `restart_loader` | Restart `plugin_loader.service` (scheduled 1 s out so the call returns); needs `confirm: true` |
-| `install_plugin` | Install a plugin zip (device path or base64) atomically, then restart the loader (needs `confirm: true`), reload the plugin, or neither |
-| `reload_plugin` | Reload one plugin's backend through Decky without restarting the loader |
-| `plugin_methods` | List a plugin's frontend-callable backend methods (public async methods of `class Plugin`, with args and docstrings) |
-| `call_plugin_method` | Call a plugin's backend method the way its frontend does; returns the result or Decky's Python traceback |
-| `plugin_frontend_check` | Find `callable("x")`/`call("x")` names in a plugin's frontend that have no backend method |
-| `cef_targets` | List Steam CEF DevTools tabs on `localhost:8080` |
-| `cef_evaluate` | Run JS in a Steam tab (default `SharedJSContext`, where `window.DeckyPluginLoader` lives) |
-| `cef_console` / `cef_console_clear` | Steam UI console output (console calls, uncaught exceptions, browser log), captured in the background per tab |
-| `cef_screenshot` | PNG screenshot of a Steam tab via `Page.captureScreenshot` |
-| `screen_capture` | JPEG of the full gamescope display (games included) from its PipeWire video node |
-| `stream_status` | Live stream state: running, fps, bitrate, resolution, viewer count, settings |
-| `set_stream_settings` | Change the stream's frame rate (1-60), JPEG quality and output width |
-| `toast` | Show a Decky toast in the Steam UI |
-| `set_input_enabled` | Turn remote input on or off (off by default) |
-| `input_key` / `input_text` | Press key combos (`"ctrl+shift+a"`, `"enter"`) or type ASCII text |
-| `input_mouse` | Move, click, double-click, hold or scroll the pointer (normalised or pixel coordinates) |
-| `input_gamepad` | Press buttons, move sticks and triggers on a virtual Xbox 360 pad (`pad` picks one), or run a sequence |
-| `list_controllers` | Gamepads as Steam Input sees them (type, slot, active), merged with evdev detail |
-| `add_virtual_controller` / `remove_virtual_controller` | Plug in or unplug a virtual Xbox 360 pad; returns once Steam Input lists it |
-| `ui_state` | Where the Steam UI is in one small answer: route, open menu, Quick Access tab, Decky panel, running game, focused element |
-| `ui_routes` | Steam and Decky pages you can navigate to, plugin routes, current page and menu state |
-| `ui_navigate` | Go to a page (`/settings/display`, `/decky/settings`), back, open Quick Access / a Decky plugin panel / a game page |
-| `ui_query` | Find elements by CSS selector or text, with screen coordinates ready for `input_mouse` |
-| `ui_focus` | The element that has gamepad focus, plus the current route |
-| `ui_wait_for` | Wait until an element appears or disappears, or a route is shown, instead of sleeping |
-| `read_file` / `write_file` | Read or write files on the device (runs as root); Steam credential/session files and SSH keys are refused |
-| `apps_list` / `app_info` | Steam library from the client: install dir, Proton or runtime, size, last played; one app with its dirs |
-| `apps_running` | Running apps with the pid of their `reaper` process and its children |
-| `app_launch` / `app_terminate` | Start a game like pressing Play; force-quit it (`confirm: true`) |
-| `game_dirs` | Install dir, Proton prefix and its AppData/Documents dirs, Steam Cloud userdata, shader cache, XDG dirs |
-| `game_saves` | Likely save files: Steam Cloud's own list first, then Auto-Cloud dirs, then heuristics |
-| `proton_log` | `~/steam-<appid>.log` (PROTON_LOG) and the app's lines in Steam's `logs/` |
-| `fs_list` / `fs_stat` / `fs_delete` | Browse the device; delete only inside game, prefix, userdata or plugin data dirs (`confirm: true`) |
-| `screen_record` / `screen_record_stop` | Record up to 120 s of screen and sound to an MKV (MJPEG + PCM) from the live stream |
-| `recordings_list` / `recording_delete` | Saved recordings (download via `GET /recordings/<name>`); delete with `confirm: true` |
-| `perf_overlay` / `perf_overlay_status` | Steam's performance overlay level 0-4, as on the Quick Access performance tab |
+| `device_` | `device_info` (Decky version, OS, Python, kernel, desktop user), `device_activity` (someone at the device: last physical input from any non-virtual input device, times only; last remote input and client; app in front; screen viewers), `device_run` (shell command as the desktop user with its `XDG_RUNTIME_DIR`, D-Bus and `DISPLAY=:0`, or as root with `root: true`; timeout, output cap, every command logged) |
+| `logs_` | `logs_read` (`source`: `loader` journal with `since`/`until`, a `plugin`'s log with `run` 1 = previous backend run, `steam_console` captured in the background with `target`/`level`/`since`, `proton` for an `appid`; all take `lines`, `grep`, `match`), `logs_wait` (block until a `loader`, `plugin` or `steam_console` line matches a regex; `since_s` also accepts recent lines) |
+| `plugin_` | `plugin_list`, `plugin_install` (zip from a device path or base64; restart the loader with `confirm: true`, reload the plugin, or neither), `plugin_reload` (`mode` `backend` (default, waits) or `frontend` (~10 ms); restores the plugin's panel, route, tab and focus), `plugin_methods` (frontend-callable backend methods), `plugin_call` (call one as the frontend does; result or Decky's Python traceback), `plugin_frontend_check` (`callable("x")` names with no backend method). All take `plugin`: the directory or the `plugin.json` name. |
+| `loader_` | `loader_restart` (scheduled 1 s out so the call returns; `confirm: true`) |
+| `toolkit_` | `toolkit_stacks` (Decky Toolkit's own threads and asyncio tasks, event loop lag and stalls) |
+| `ui_` | `ui_state` (route, menu, Quick Access tab, Decky panel, running game, focused element), `ui_routes`, `ui_navigate` (a page, back, Quick Access, a Decky plugin panel, a game page), `ui_query` (elements by CSS selector or text, with coordinates for `input_mouse`), `ui_focus`, `ui_wait` (an element, its absence or a route, instead of sleeping), `ui_toast` |
+| `cef_` | `cef_targets`, `cef_evaluate` (JS in a Steam tab, default `SharedJSContext`), `cef_screenshot` (PNG of one tab) |
+| `screen_` | `screen_capture` (JPEG of the whole gamescope display, games included), `screen_record` / `screen_record_stop` (up to 120 s of screen and sound to MKV) |
+| `recording_` | `recording_list`, `recording_delete` (`confirm: true`); download through `GET /recordings/<name>` |
+| `stream_` | `stream_status` (running, fps, bitrate, resolution, viewers, audio), `stream_settings` (no arguments: read; `fps`, `quality`, `width`, `audio`: change) |
+| `input_` | `input_settings` (no arguments: read; `enabled`: turn remote input on or off, off by default), `input_key`, `input_text`, `input_mouse`, `input_gamepad` |
+| `controller_` | `controller_list` (gamepads as Steam Input sees them, with evdev detail), `controller_add` / `controller_remove` (a virtual Xbox 360 pad; returns once Steam Input lists it) |
+| `app_` | `app_list` (Steam library; `running: true` lists running apps with the pid of their `reaper` process), `app_info`, `app_launch`, `app_terminate` (`confirm: true`), `app_dirs` (install dir, Proton prefix and its user dirs, Steam Cloud userdata, shader cache, XDG dirs), `app_saves` (likely save files, Steam Cloud's own list first) |
+| `fs_` | `fs_list`, `fs_stat`, `fs_read`, `fs_write` (as root; Steam credential/session files and SSH keys refused), `fs_delete` (only inside game, prefix, userdata or plugin data dirs; `confirm: true`) |
+| `perf_` | `perf_overlay` (no `level`: read; `level` 0-4 as on the Quick Access performance tab: set) |
+
+The CLI's `decky-toolkit mcp` adds `plugin_deploy` (package and install a plugin folder from the machine it runs on) and
+`device_status` (which device this machine is paired with and whether it answers).
 
 ## Pairing
 
@@ -121,7 +96,7 @@ gamescope only pushes a frame when it repaints, so the plugin nudges it with
 `gamescopectl debug_force_repaint` when a stream starts, and `pipewiresrc keepalive-time=100`
 re-emits the last frame so static screens still stream. Frame rate, JPEG quality and output width
 are stored in `settings.json` (`stream_fps`, `stream_quality`, `stream_width`) and can be changed
-from the screen panel, `PUT /stream/settings` or the `set_stream_settings` tool. Measured on the BC-250
+from the screen panel, `PUT /stream/settings` or the `stream_settings` tool. Measured on the BC-250
 at 1080p, JPEG quality 70, with a changing screen: 60 fps costs about 33-40 % of one CPU core and
 30-100 Mbit/s depending on content; 30 fps about 23 % and up to ~50 Mbit/s. On Wi-Fi, lower the
 width or quality.
@@ -140,7 +115,7 @@ listens.
   audio* until you click or press a key in it.
 - **Audio** in the stream settings turns the audio stream on or off for every client (device-wide,
   stored as `audio_enabled` in `settings.json`; also `PUT /stream/settings` with `{"audio": false}`
-  or the `set_stream_settings` tool). Turning it off closes every audio socket.
+  or the `stream_settings` tool). Turning it off closes every audio socket.
 - Playback runs in an AudioWorklet that keeps about 120 ms of sound buffered and drops back to that
   when it falls more than 300 ms behind, so sound and picture stay together.
 
@@ -148,7 +123,7 @@ listens.
 
 The screen panel and MCP clients can drive the Deck with keyboard, mouse and gamepad input. It is
 **off by default**. Turn it on with the **Allow remote input** toggle on the Decky Toolkit settings page (gear in the panel header), the
-keyboard icon in the screen panel's tab bar, `PUT /input/settings` or the `set_input_enabled` tool. The setting
+keyboard icon in the screen panel's tab bar, `PUT /input/settings` or the `input_settings` tool. The setting
 is stored in `settings.json` and applies to every client.
 
 In the screen panel, with input on:
@@ -180,11 +155,11 @@ Security notes for input:
 
 ## Controllers
 
-`list_controllers` (or `GET /controllers`) shows what Steam Input has: each controller's Steam type,
+`controller_list` (or `GET /controllers`) shows what Steam Input has: each controller's Steam type,
 player slot and whether it is the active one, plus the kernel device it maps to.
-`add_virtual_controller` plugs in a virtual Xbox 360 pad (up to 4) and only returns once Steam
+`controller_add` plugs in a virtual Xbox 360 pad (up to 4) and only returns once Steam
 Input lists it; drive it with `input_gamepad(pad=<id>)`, which goes through Steam Input like a real
-controller, and unplug it with `remove_virtual_controller`. Without `pad`, `input_gamepad` uses an
+controller, and unplug it with `controller_remove`. Without `pad`, `input_gamepad` uses an
 implicit pad that disappears after 60 s idle. `GET /controllers/events` streams every change.
 
 ## UI navigation
@@ -260,9 +235,9 @@ stays the same across restarts.
   1025-65535 inbound, so it is reachable from the LAN as soon as the plugin loads.
 - Only paired clients are served. Treat this as a development tool on a trusted LAN and disable it
   on the plugin settings page when not in use.
-- `write_file`, `read_file` and `cef_evaluate` are intentionally powerful: any paired client
+- `fs_write`, `fs_read` and `cef_evaluate` are intentionally powerful: any paired client
   has root on the device.
-- The file browser tools (`fs_*`, `game_saves`) refuse Steam's login files (`config/loginusers.vdf`,
+- The file browser tools (`fs_*`, `app_saves`) refuse Steam's login files (`config/loginusers.vdf`,
   `config/config.vdf`, `ssfn*`). Destructive tools (`fs_delete`, `app_terminate`, `recording_delete`) need
   `confirm: true`, and `fs_delete` only works inside game, Proton prefix, userdata and plugin data dirs.
 

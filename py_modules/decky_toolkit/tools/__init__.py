@@ -123,7 +123,8 @@ def build_registry(capturer: ScreenCapturer | None = None, input_service: InputS
                    controllers: "ControllerService | None" = None, navigator: "UiNavigator | None" = None,
                    console: "ConsoleCollector | None" = None, activity: "InputActivity | None" = None) -> ToolRegistry:
     from ..steam.apps import Apps as AppsLib
-    from . import activity as activity_tools, apps, cef, controllers as controller_tools, games, input, perf, plugin_api, plugins, record, screen, shell, system, ui
+    from . import (activity as activity_tools, apps, cef, controllers as controller_tools, games, input, logs, perf,
+                   plugin_api, plugins, record, screen, shell, system, ui)
 
     if controllers is None and input_service is not None:
         from ..input.controllers import ControllerService
@@ -132,7 +133,8 @@ def build_registry(capturer: ScreenCapturer | None = None, input_service: InputS
     reg = ToolRegistry()
     system.register(reg)
     plugins.register(reg)
-    cef.register(reg, console)
+    cef.register(reg)
+    logs.register(reg, console)
     plugin_api.register(reg)
     screen.register(reg, capturer)
     input.register(reg, input_service, capturer)

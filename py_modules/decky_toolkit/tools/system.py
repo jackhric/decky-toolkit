@@ -3,7 +3,6 @@ import asyncio
 import base64
 import json
 import os
-import re
 import platform
 import sys
 from typing import Any
@@ -85,17 +84,10 @@ async def list_plugins() -> list[dict[str, Any]]:
     return out
 
 
-def _grep(lines: list[str], pattern: str) -> list[str]:
-    try:
-        rx = re.compile(pattern, re.IGNORECASE)
-    except re.error as e:
-        raise ValueError(f"match is not a valid regex: {e}") from None
-    return [l for l in lines if rx.search(l)]
-
-
 def register(reg: ToolRegistry) -> None:
-    @reg.add("decky_status", "Report Decky Loader version, host OS, Python runtime and installed plugins.")
-    async def decky_status() -> dict[str, Any]:
+    @reg.add("device_info", "Decky Loader version and home, the desktop user, the backend's uid, Python runtime, "
+                            "kernel and OS release. Installed plugins: plugin_list; whether it answers: device_status.")
+    async def device_info() -> dict[str, Any]:
         os_release: dict[str, str] = {}
         try:
             with open("/etc/os-release") as f:
@@ -113,128 +105,41 @@ def register(reg: ToolRegistry) -> None:
             "python": sys.version,
             "kernel": platform.release(),
             "os": {k: os_release.get(k) for k in ("PRETTY_NAME", "IMAGE_ID", "VERSION_ID")},
-            "plugins": await list_plugins(),
         }
 
-    reg.add("list_plugins", "List plugins installed under ~/homebrew/plugins with their plugin.json metadata.")(list_plugins)
+    reg.add("plugin_list", "Plugins installed under ~/homebrew/plugins with their plugin.json metadata; 'dir' is what "
+                           "the plugin_* tools take as plugin.")(list_plugins)
 
     @reg.add(
-        "backend_stacks",
+        "toolkit_stacks",
         "Decky Toolkit's own backend: the stack of every thread and asyncio task, and event loop stalls (the loop "
         "watchdog logs a stack whenever the loop stops answering for 2 s, e.g. a hang during _unload). For finding "
         "hangs and leaked tasks in this plugin; other plugins' backends are separate processes.",
     )
-    async def backend_stacks() -> dict[str, Any]:
+    async def toolkit_stacks() -> dict[str, Any]:
         from .. import diagnostics
         return diagnostics.snapshot()
 
     @reg.add(
-        "read_plugin_log",
-        "Tail a plugin's backend log from ~/homebrew/logs/<plugin_dir>/. Decky starts a new file on every backend "
-        "start: 'run' 0 is the current one, 1 the previous run (where its _unload lines ended up), and so on; or name "
-        "a 'file'. 'match' keeps only lines matching a case-insensitive regex.",
-        {
-            "properties": {
-                "plugin_dir": {"type": "string", "description": "Plugin directory name, as returned by list_plugins"},
-                "lines": {"type": "integer", "default": 200, "minimum": 1, "maximum": 5000},
-                "run": {"type": "integer", "default": 0, "minimum": 0, "description": "0 newest, 1 previous, ..."},
-                "file": {"type": "string", "description": "Specific log file name inside the plugin's log dir"},
-                "match": {"type": "string", "description": "Case-insensitive regex; only matching lines are returned"},
-            },
-            "required": ["plugin_dir"],
-        },
-    )
-    async def read_plugin_log(plugin_dir: str, lines: int = 200, run: int = 0, file: str | None = None,
-                              match: str | None = None) -> dict[str, Any]:
-        from ..loader import logs
-        paths = logs.log_files(plugin_dir)
-        files = [os.path.basename(p) for p in paths]
-        if not files:
-            return {"log_dir": logs.plugin_log_dir(plugin_dir), "files": [], "text": ""}
-        if file is not None:
-            if file not in files:
-                raise FileNotFoundError(f"{file} not in {files}")
-            chosen = file
-        else:
-            if run < 0 or run >= len(files):
-                raise ValueError(f"run must be 0-{len(files) - 1} ({len(files)} log files)")
-            chosen = files[run]
-        path = os.path.join(logs.plugin_log_dir(plugin_dir), chosen)
-        text = tail(path, lines if not match else 20000)
-        if match:
-            text = "\n".join(_grep(text.splitlines(), match)[-lines:])
-        return {"log_dir": logs.plugin_log_dir(plugin_dir), "files": files[:20], "file": chosen, "text": text}
-
-    @reg.add(
-        "loader_log",
-        "Tail the Decky Loader systemd journal (plugin_loader.service). Includes every plugin's stdout/stderr and the "
-        "loader's own lines ('Loaded <name>', 'stopped in 0.1s', 'Sending SIGKILL'). since/until take journalctl "
-        "times ('-2min', '10 min ago', '2026-11-06 01:30:00', 'today'); 'match' is a case-insensitive regex.",
-        {"properties": {"lines": {"type": "integer", "default": 200, "minimum": 1, "maximum": 5000},
-                        "grep": {"type": "string", "description": "Case-insensitive substring filter"},
-                        "match": {"type": "string", "description": "Case-insensitive regex filter, e.g. 'Loaded|SIGKILL|stopped in'"},
-                        "since": {"type": "string", "description": "journalctl --since, e.g. '-2min'"},
-                        "until": {"type": "string", "description": "journalctl --until"}}},
-    )
-    async def loader_log(lines: int = 200, grep: str | None = None, match: str | None = None, since: str | None = None,
-                         until: str | None = None) -> str:
-        filtered = bool(grep or match)
-        argv = ["journalctl", "-u", "plugin_loader", "--no-pager", "-o", "short-iso"]
-        argv += [f"--since={since}"] if since else ["-n", str(lines if not filtered else max(lines * 10, 2000))]
-        if until:
-            argv.append(f"--until={until}")
-        code, out = await run(*argv)
-        if code != 0:
-            raise ValueError(out.strip()) if (since or until) else RuntimeError(out)
-        out_lines = out.splitlines()
-        if grep:
-            needle = grep.lower()
-            out_lines = [l for l in out_lines if needle in l.lower()]
-        if match:
-            out_lines = _grep(out_lines, match)
-        return "\n".join(out_lines[-lines:])
-
-    @reg.add(
-        "wait_for_log",
-        "Block until a log line matches a regex (case-insensitive), then return it; use it instead of polling after a "
-        "reload, deploy or action. source 'loader' follows the journal, 'plugin' the newest log of plugin_dir. Calls "
-        "run one after another, so set since_s to also accept lines from the last few seconds (e.g. after a reload "
-        "you just triggered). Times out without error: check 'matched'.",
-        {"properties": {"pattern": {"type": "string", "description": "Regex, e.g. '\\bLoaded My Plugin' (\\b: not 'Unloaded')"},
-                        "source": {"type": "string", "enum": ["loader", "plugin"], "default": "loader"},
-                        "plugin_dir": {"type": "string", "description": "For source 'plugin'"},
-                        "timeout": {"type": "number", "default": 30, "minimum": 0.1, "maximum": 300},
-                        "count": {"type": "integer", "default": 1, "minimum": 1, "maximum": 100},
-                        "since_s": {"type": "number", "default": 0, "minimum": 0, "maximum": 3600}},
-         "required": ["pattern"]},
-    )
-    async def wait_for_log(pattern: str, source: str = "loader", plugin_dir: str | None = None, timeout: float = 30,
-                           count: int = 1, since_s: float = 0) -> dict[str, Any]:
-        from ..loader import logs
-        if source == "plugin" and not plugin_dir:
-            raise ValueError("source 'plugin' needs plugin_dir")
-        return await logs.wait_for(source, plugin_dir, pattern, min(max(timeout, 0.1), 300), count, since_s)
-
-    @reg.add(
-        "restart_loader",
+        "loader_restart",
         "Restart plugin_loader.service (reloads every plugin, including this server). "
         "The restart is scheduled 1s out so this call can return first; reconnect afterwards. "
         "Requires confirm: true.",
         {"properties": {"confirm": {"type": "boolean", "description": "must be true"}}, "required": ["confirm"]},
     )
-    async def restart_loader(confirm: bool = False) -> str:
-        require_confirm(confirm, "restart_loader restarts every plugin and drops this connection for a few seconds")
+    async def loader_restart(confirm: bool = False) -> str:
+        require_confirm(confirm, "loader_restart restarts every plugin and drops this connection for a few seconds")
         await schedule_loader_restart()
         return "plugin_loader restart scheduled in ~1s. The MCP server will drop and come back on the same port."
 
     @reg.add(
-        "write_file",
+        "fs_write",
         "Write a text file on the device (runs as root). Intended for dropping config or test fixtures during development. "
         "Refuses Steam credential/session files, Steam library folder lists and SSH keys.",
         {"properties": {"path": {"type": "string"}, "content": {"type": "string"}, "mode": {"type": "string", "default": "0644"}},
          "required": ["path", "content"]},
     )
-    async def write_file(path: str, content: str, mode: str = "0644") -> str:
+    async def fs_write(path: str, content: str, mode: str = "0644") -> str:
         if not os.path.isabs(path):
             raise ValueError("path must be absolute")
         check_write(path)
@@ -245,12 +150,12 @@ def register(reg: ToolRegistry) -> None:
         return f"wrote {len(content.encode())} bytes to {path}"
 
     @reg.add(
-        "read_file",
+        "fs_read",
         "Read a text file on the device (runs as root). Large files are truncated to max_bytes from the start. "
         "Refuses Steam credential/session files (loginusers.vdf, config.vdf, local.vdf, ssfn*) and SSH keys.",
         {"properties": {"path": {"type": "string"}, "max_bytes": {"type": "integer", "default": 200000}}, "required": ["path"]},
     )
-    async def read_file(path: str, max_bytes: int = 200_000) -> dict[str, Any]:
+    async def fs_read(path: str, max_bytes: int = 200_000) -> dict[str, Any]:
         if not os.path.isabs(path):
             raise ValueError("path must be absolute")
         check_read(path)

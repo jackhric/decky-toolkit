@@ -22,7 +22,7 @@ the device. Related tools:
 | `cef_targets` | List Steam's DevTools tabs |
 | `cef_evaluate` | Run JavaScript in a Steam tab (default `SharedJSContext`) |
 | `cef_screenshot` | PNG screenshot of a Steam tab |
-| `toast` | Show a Decky toast in the Steam UI |
+| `ui_toast` | Show a Decky toast in the Steam UI |
 
 :::caution
 `cef_evaluate` is intentionally powerful: anyone paired with the device can run code in the Steam UI.

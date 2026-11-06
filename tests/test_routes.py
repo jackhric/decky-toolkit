@@ -344,11 +344,11 @@ def test_stream_settings_404_without_capturer():
 def test_set_stream_settings_tool_and_status():
     cap = FakeCapturer(running=True)
     reg = build_registry(cap)
-    res = asyncio.run(reg.call("set_stream_settings", {"fps": 45, "quality": 80}))
+    res = asyncio.run(reg.call("stream_settings", {"fps": 45, "quality": 80}))
     assert not res["isError"]
     assert json.loads(res["content"][0]["text"]) == {"fps": 45, "quality": 80, "width": 0, "audio": True, "limits": LIMITS}
     assert cap.restarts == 1
-    bad = asyncio.run(reg.call("set_stream_settings", {"fps": "x"}))
+    bad = asyncio.run(reg.call("stream_settings", {"fps": "x"}))
     assert bad["isError"] and "fps must be an integer" in bad["content"][0]["text"]
     status = json.loads(asyncio.run(reg.call("stream_status", {}))["content"][0]["text"])
     assert status["settings"] == {"fps": 45, "quality": 80, "width": 0, "audio": True} and status["limits"] == LIMITS

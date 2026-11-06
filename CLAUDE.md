@@ -8,8 +8,8 @@ See README.md for setup and docs/reference.md for the tool list and architecture
 ## Layout
 - `main.py` — Decky `Plugin` class: settings, aiohttp server lifecycle, frontend-callable methods.
 - `py_modules/decky_toolkit/` — grouped by area; `settings.py` and `diagnostics.py` (thread/task stacks for the
-  `backend_stacks` tool, a watchdog thread that logs the loop thread's stack when the event loop stops answering
-  for 2 s, SIGUSR1 faulthandler dump to `<runtime dir>/stacks.txt`) and `shell.py` (`run_command` / `POST /exec`:
+  `toolkit_stacks` tool, a watchdog thread that logs the loop thread's stack when the event loop stops answering
+  for 2 s, SIGUSR1 faulthandler dump to `<runtime dir>/stacks.txt`) and `shell.py` (`device_run` / `POST /exec`:
   bash as the desktop user, or root with `root: true`; every command logged) at the top.
   - `server/`: `protocol.py` (JSON-RPC + HTTP transport), `http.py` (REST routes, see `docs/api.md`), `auth.py`
     (client-certificate auth), `tls.py` (device identity, client certs, paired-client store), `pairing.py`,
@@ -36,7 +36,7 @@ See README.md for setup and docs/reference.md for the tool list and architecture
 - `packages/client/` — device client source shared by bundling (transport, API types, discovery, pairing,
   identity file, plugin staging; no `vscode`); the extension and the CLI import it as `@decky-toolkit/client/*`.
 - `cli/` — the `decky-toolkit` npm package: `pair`, `status`, `mcp` (hand-written stdio MCP server that answers
-  `initialize`/`ping` locally and relays `tools/*` to the device's `/mcp`, plus local `deploy_plugin`/`device_status`),
+  `initialize`/`ping` locally and relays `tools/*` to the device's `/mcp`, plus local `plugin_deploy`/`device_status`),
   `deploy`, `dev` (watch build + deploy once + live sync until Ctrl-C), `call`, `forget`. One esbuild bundle `dist/cli.js`, no runtime dependencies. `scripts/smoke.mjs` runs
   the built CLI as a child process against `scripts/fake-device.mjs` (installed through the client's hooks).
   The extension's "Write MCP config" writes `npx -y decky-toolkit mcp` into `.mcp.json`.
@@ -86,7 +86,7 @@ See README.md for setup and docs/reference.md for the tool list and architecture
   install through `/plugins/install` swaps the whole dir, so for a debug-flagged plugin the watcher
   reloads its backend ~5 s later (twice, observed 2026-11-03) even with `restart=none`.
 - `window.DeckyBackend.call('loader/reload_plugin', '<plugin.json name>')` in SharedJSContext
-  reloads one backend in ~0.1 s (verified 2026-11-03); this is how `reload_plugin` avoids the
+  reloads one backend in ~0.1 s (verified 2026-11-03); this is how `plugin_reload` avoids the
   single-client loader websocket.
 
 ## Plugin reload facts (verified 2026-11-04)
@@ -149,7 +149,7 @@ See README.md for setup and docs/reference.md for the tool list and architecture
 - gamescope's caps say `pixel-aspect-ratio=1/2147483647`; `videoscale` to a width then picks height 1
   (or keeps 1080 with a non-square PAR), so the scaled branch sets PAR 1/1 with `capssetter` first.
 - Stream settings are device-wide (one pipeline). `ScreenCapturer.update_settings` is the single
-  path for the panel method, `PUT /stream/settings` and the `set_stream_settings` tool; a hot restart
+  path for the panel method, `PUT /stream/settings` and the `stream_settings` tool; a hot restart
   keeps subscribers attached (`_restarting`), so viewers see ~0.1 s without frames, no reconnect. Port 8080 (CEF) drops for a few seconds after every loader restart because
   Decky reloads the Steam UI.
 - Stock SteamOS 3.8.14 (Valve recovery image, inspected by a research agent) ships gstreamer 1.26.4,
@@ -367,7 +367,7 @@ several paired clients (like adb's `adb_keys`): approving appends to `clients.js
 re-pairing the same key keeps one entry. `get_status().clients` lists every client with a request in the last
 15 s, and the panel shows one connection card with its own disconnect button per connected client.
 Approving a request and forgetting a client are deliberately device-only (no HTTP/MCP route;
-`call_plugin_method` refuses them), the two exceptions to the remote-configurable rule below. `/mcp` needs a
+`plugin_call` refuses them), the two exceptions to the remote-configurable rule below. `/mcp` needs a
 paired client certificate like every other route; external MCP agents reach it through the extension's
 loopback proxy (`decky-toolkit.mcpPort`, default 8766). Events: `decky_toolkit_pair_request` (toast with name
 and code), `decky_toolkit_pair_requests` (list changed), `decky_toolkit_paired` (remote IP, client name),
@@ -375,7 +375,7 @@ and code), `decky_toolkit_pair_requests` (list changed), `decky_toolkit_paired` 
 tokens; only `docs/api.md` explains the mechanism. To
 drive frontend methods from a test, evaluate
 `window.DeckyBackend.call('loader/call_plugin_method', 'Decky Toolkit', '<method>', ...args)` in
-SharedJSContext via the `cef_evaluate` tool, or use `call_plugin_method` (`plugin: "Decky Toolkit"`).
+SharedJSContext via the `cef_evaluate` tool, or use `plugin_call` (`plugin: "Decky Toolkit"`).
 
 ## CI and releases
 - Work branches off `dev` and PRs target `dev`; `dev` is merged into `main` to release. CI runs on PRs and
@@ -417,7 +417,11 @@ SharedJSContext via the `cef_evaluate` tool, or use `call_plugin_method` (`plugi
   'decky-toolkit.screen'`), toggles are command pairs switched by `decky-toolkit.screen.*` context keys, and
   choices go in QuickPicks. Don't add an in-page toolbar.
 - Keep the MCP server dependency-free beyond the loader bundle (aiohttp + stdlib).
-- Agents on the device: use `run_command` (root only when needed), `loader_log` / `read_plugin_log` / `wait_for_log`
+- MCP tools are named `<area>_<action>` (`tests/test_tooling.py` lists the areas). A plugin argument is `plugin` (directory
+  or plugin.json name, through `tools.plugins.resolve_plugin`), an app `appid`; `timeout`/`wait` in seconds, other
+  durations end in `_ms`; `grep` substring, `match` regex. A settings tool reads without arguments and writes what it
+  is given. Logs of every kind go through `logs_read`/`logs_wait` sources. No aliases for old names.
+- Agents on the device: use `device_run` (root only when needed), `logs_read` / `logs_wait`
   and `ui_state` instead of ssh, sleeps and screenshots. The owner also uses the device by hand: call
   `device_activity` before navigating, injecting input or launching anything, and leave the UI alone while
   `someone_at_device` is true.
