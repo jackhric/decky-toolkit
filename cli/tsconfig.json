@@ -12,5 +12,5 @@
     "types": ["node"],
     "paths": { "@decky-toolkit/client/*": ["../packages/client/src/*"] }
   },
-  "include": ["src", "../packages/client/src"]
+  "include": ["src", "test", "../packages/client/src"]
 }

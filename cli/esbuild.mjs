@@ -15,4 +15,17 @@ export const options = {
   logLevel: 'info',
 };
 
-if (process.argv[1] && new URL(import.meta.url).pathname === process.argv[1]) await esbuild.build(options);
+// `decky-toolkit/tools`, which plugins bundle into their frontend; Steam's CEF is Chrome 126.
+export const toolsOptions = {
+  entryPoints: ['src/tools.ts'],
+  bundle: true,
+  outfile: 'dist/tools.js',
+  platform: 'browser',
+  format: 'esm',
+  target: 'chrome126',
+  logLevel: 'info',
+};
+
+if (process.argv[1] && new URL(import.meta.url).pathname === process.argv[1]) {
+  await Promise.all([esbuild.build(options), esbuild.build(toolsOptions)]);
+}

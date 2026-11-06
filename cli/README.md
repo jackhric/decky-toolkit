@@ -35,6 +35,31 @@ Needs Node.js 20 or newer.
 
 Exit codes: 0 success, 1 failure, 2 wrong usage.
 
+## Tools from your own plugin
+
+The package also exports `decky-toolkit/tools` for your plugin's frontend: register MCP tools there and agents
+connected to the device can call them as `<plugin folder>_<name>`.
+
+```ts
+// src/tools.ts, imported once from src/index.tsx: import "./tools";
+import { registerTool } from "decky-toolkit/tools";
+import { callable } from "@decky/api";
+import { z } from "zod";
+
+const resetCache = callable<[appid?: number], number>("reset_cache");
+
+registerTool({
+  name: "reset_cache",
+  description: "Clear cached artwork and reload the library view.",
+  inputSchema: z.object({ appid: z.number().int().optional() }),
+  execute: async ({ appid }) => ({ cleared: await resetCache(appid) }),
+});
+```
+
+The input schema (Zod 4.2+, ArkType, Valibot, any Standard Schema with JSON Schema export, or plain JSON Schema) is the
+argument list agents see, the check before `execute` runs, and the type of `input`. Tools go away when the plugin
+reloads or unloads. See the [docs](https://jackhric.github.io/decky-toolkit/docs/features/plugin-tools/).
+
 ## Where the pairing lives
 
 One pairing per computer, in `~/.config/decky-toolkit/identity.json` (`$XDG_CONFIG_HOME/decky-toolkit` if set,

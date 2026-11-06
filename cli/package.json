@@ -14,6 +14,13 @@
   "bin": {
     "decky-toolkit": "dist/cli.js"
   },
+  "exports": {
+    "./tools": {
+      "types": "./dist/tools.d.ts",
+      "default": "./dist/tools.js"
+    },
+    "./package.json": "./package.json"
+  },
   "files": [
     "dist/",
     "README.md",
@@ -36,14 +43,15 @@
     "cli"
   ],
   "scripts": {
-    "build": "node esbuild.mjs",
+    "build": "node esbuild.mjs && tsc -p tsconfig.tools.json",
     "typecheck": "tsc --noEmit",
     "smoke": "node scripts/smoke.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
     "esbuild": "^0.28.2",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "zod": "^4.6.7"
   },
   "packageManager": "pnpm@12.18.0+sha512.9d7882d5dc82147ecfc4e062aa34834e0ad0296710a1837a1115ae012127d36b7109e321ac1598a1dd0a65597681b1e99917e12ed0d749eae91187943363beb3"
 }
