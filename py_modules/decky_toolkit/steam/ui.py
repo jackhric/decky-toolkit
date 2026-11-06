@@ -54,7 +54,15 @@ _STATE_JS = """(() => {
           quick_access_tab: menu?.GetQuickAccessTab?.() ?? null,
           active_plugin: window.DeckyPluginLoader?.deckyState?.publicState?.().activePlugin?.name ?? null,
           running_app: (() => { const id = window.SteamUIStore?.MainRunningAppID;
-            return id ? {appid: id, name: window.appStore?.GetAppOverviewByAppID?.(id)?.display_name ?? null} : null; })()};
+            return id ? {appid: id, name: window.appStore?.GetAppOverviewByAppID?.(id)?.display_name ?? null} : null; })(),
+          dialog: (() => {
+            const el = win?.m_BrowserWindow?.document?.querySelector('.ModalOverlayContent.active [role=dialog], .ModalOverlayContent.active .DialogContent');
+            if (!el) return null;
+            const text = (n) => (n?.innerText || '').trim();
+            return {title: text(el.querySelector('.DialogHeader')) || null, text: text(el).slice(0, 300),
+                    buttons: [...el.querySelectorAll('.DialogFooter .DialogButton, .DialogFooter button')].map(text).filter(Boolean)};
+          })(),
+          keyboard: !!win?.m_VirtualKeyboardManager?.m_bIsVirtualKeyboardShowing?.m_currentValue};
 })()"""
 
 _ROUTES_JS = """(() => {
@@ -157,7 +165,7 @@ def _state(raw: dict[str, Any] | None) -> dict[str, Any]:
     names = {v: k for k, v in QUICK_ACCESS_TABS.items()}
     return {"current": raw.get("current"), "side_menu": SIDE_MENUS.get(raw.get("side_menu"), raw.get("side_menu")),
             "quick_access_tab": names.get(tab, tab), "active_plugin": raw.get("active_plugin"),
-            "running_app": raw.get("running_app")}
+            "running_app": raw.get("running_app"), "dialog": raw.get("dialog"), "keyboard": bool(raw.get("keyboard"))}
 
 
 class UiNavigator:
@@ -401,8 +409,8 @@ class UiInspector:
         items.sort(key=lambda e: not e["visible"])
         return {"target": target, "total": raw.get("total", len(items)), "elements": items}
 
-    async def focus(self, target: str | None = None) -> dict[str, Any]:
-        state = await self.nav.state()
+    async def focus(self, target: str | None = None, state: dict[str, Any] | None = None) -> dict[str, Any]:
+        state = state or await self.nav.state()
         # The Quick Access and main menus are separate CEF windows with their own focus tree.
         target = target or SIDE_MENU_TARGETS.get(state.get("side_menu") or "", QUERY_TARGET)
         raw = await self._eval(target, _FOCUS_JS % _ELEMENT_JS)
@@ -462,3 +470,14 @@ class UiInspector:
             where = f"current route and focus unknown ({e})"
         extra = f"; last error: {last_error}" if last_error else ""
         raise UiTimeout(f"timed out after {timeout:g}s waiting for {what}{' to go' if gone else ''}; {where}{extra}")
+
+    async def snapshot(self) -> dict[str, Any]:
+        """ui_state: the navigator state plus the focused element, if any."""
+        state = await self.nav.state()
+        try:
+            f = await self.focus(state=state)
+        except (cdp.CdpError, OSError, asyncio.TimeoutError, ValueError):
+            f = None
+        el = (f or {}).get("element")
+        state["focus"] = {"text": (el.get("text") or "")[:80], "tag": el.get("tag"), "target": f["target"]} if el else None
+        return state

@@ -130,16 +130,21 @@ def build_registry(capturer: ScreenCapturer | None = None, input_service: InputS
         from ..input.controllers import ControllerService
         controllers = ControllerService(input_service, input_service.log)
 
+    from ..steam.ui import UiInspector, UiNavigator
+    navigator = navigator or UiNavigator()
+    inspector = UiInspector(navigator)
+    orient = ui.Orientation(inspector, activity)
+
     reg = ToolRegistry()
     system.register(reg)
     plugins.register(reg)
     cef.register(reg)
     logs.register(reg, console)
     plugin_api.register(reg)
-    screen.register(reg, capturer)
-    input.register(reg, input_service, capturer)
+    screen.register(reg, capturer, orient)
+    input.register(reg, input_service, capturer, orient)
     controller_tools.register(reg, controllers)
-    ui.register(reg, navigator, capturer)
+    ui.register(reg, inspector, capturer, orient)
     library = AppsLib()
     apps.register(reg, library)
     games.register(reg, library)

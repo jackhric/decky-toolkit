@@ -43,6 +43,7 @@ const failure = (id: Id, code: number, message: string) => JSON.stringify({ json
 class InvalidParams extends Error {}
 
 const TOOLS_CHECK_MS = 15000;
+const INSTRUCTIONS_TIMEOUT_MS = 1500;
 
 /** What identifies the device's tool list; older devices have no hash, so their version and count stand in. */
 const toolsKey = (h: { version: string; tools: number; tools_hash?: string }) => h.tools_hash ?? `${h.version}/${h.tools}`;
@@ -163,7 +164,7 @@ export class McpServer {
     return this.checking;
   }
 
-  /** The reply line, if the message gets one. `initialize` and `ping` never touch the device. */
+  /** The reply line, if the message gets one. `ping` never touches the device; `initialize` asks it briefly for its instructions. */
   async handle(msg: Message): Promise<string | undefined> {
     // JSON-RPC batches went away in MCP 2025-06-18.
     if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return failure(null, -32600, 'Invalid Request');
@@ -177,12 +178,14 @@ export class McpServer {
       switch (msg.method) {
         case 'initialize': {
           const requested = params.protocolVersion;
+          const device = await this.current().then(p => p.client.health(INSTRUCTIONS_TIMEOUT_MS)).catch(() => undefined);
           return result(id, {
             protocolVersion: typeof requested === 'string' && PROTOCOL_VERSIONS.includes(requested) ? requested : PROTOCOL_VERSIONS[0],
             capabilities: { tools: { listChanged: true } },
             serverInfo: { name: 'decky-toolkit', version: VERSION },
             instructions: 'Tools that inspect and control the paired Steam Deck running Decky Loader (screen, logs, plugins, Steam UI, input) '
-              + `plus plugin_deploy to install a Decky plugin from this machine; if a tool says the device is not paired, ${PAIR_HINT} in a terminal.`,
+              + `plus plugin_deploy to install a Decky plugin from this machine; if a tool says the device is not paired, ${PAIR_HINT} in a terminal.`
+              + (device?.instructions ? ` ${device.instructions}` : ''),
           });
         }
         case 'ping':
