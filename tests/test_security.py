@@ -1,4 +1,5 @@
 """Sensitive-path guard, confirm-required tools and audit logging. Run with: ./scripts/test.sh"""
+import json
 import asyncio
 import logging
 import os
@@ -92,6 +93,12 @@ def test_file_tools_apply_the_guard(tmp_path):
     ok = tmp_path / "notes.txt"
     assert not call("fs_write", path=str(ok), content="hi")["isError"]
     assert "hi" in call("fs_read", path=str(ok))["content"][0]["text"]
+    ok.write_text("0123456789")
+    read = json.loads(call("fs_read", path=str(ok), max_bytes=4)["content"][0]["text"])
+    assert read == {"path": str(ok), "size": 10, "truncated": True, "text": "0123"}
+    assert not call("fs_write", path=str(ok), content="#!/bin/sh", mode="0755")["isError"]
+    assert ok.stat().st_mode & 0o777 == 0o755
+    assert call("fs_write", path=str(ok), content="x", mode="rwx")["isError"]
 
 
 def test_confirm_required(monkeypatch):

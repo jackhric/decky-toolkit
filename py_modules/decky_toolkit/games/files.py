@@ -699,8 +699,9 @@ def _makedirs_owned(d: str) -> None:
         _chown_like(m, os.path.dirname(m))
 
 
-def fs_read(path: str, home: str | None = None, max_bytes: int = MAX_READ_BYTES, truncate: bool = False) -> bytes:
-    """The file's bytes; above max_bytes TooLarge, or with truncate the first max_bytes."""
+def fs_read(path: str, home: str | None = None, max_bytes: int = MAX_READ_BYTES,
+            truncate: bool = False) -> tuple[bytes, int]:
+    """The file's bytes and size; above max_bytes TooLarge, or with truncate the first max_bytes."""
     path = expand(path, home)
     check_read(path)
     st = os.stat(path)
@@ -711,11 +712,17 @@ def fs_read(path: str, home: str | None = None, max_bytes: int = MAX_READ_BYTES,
     if st.st_size > max_bytes and not truncate:
         raise TooLarge(f"{path} is {st.st_size} bytes; the limit is {max_bytes}")
     with open(path, "rb") as f:
-        return f.read(max_bytes + 1)[:max_bytes]
+        return f.read(max_bytes), st.st_size
+
+
+def parse_mode(mode: str) -> int:
+    if not re.fullmatch(r"0?[0-7]{3,4}", mode or ""):
+        raise ValueError(f"mode must be octal like 0644 or 0755, not {mode!r}")
+    return int(mode, 8)
 
 
 def fs_write(path: str, data: bytes, scope: WriteScope | None, home: str | None = None,
-             create: bool = True, overwrite: bool = True) -> dict[str, Any]:
+             create: bool = True, overwrite: bool = True, mode: int | None = None) -> dict[str, Any]:
     home = home or user_home()
     path = expand(path, home)
     _check_writable(path, scope, home)
@@ -734,11 +741,10 @@ def fs_write(path: str, data: bytes, scope: WriteScope | None, home: str | None 
         with open(tmp, "wb") as f:
             f.write(data)
         if exists:
-            st = os.stat(target)
-            os.chmod(tmp, stat.S_IMODE(st.st_mode))
+            os.chmod(tmp, stat.S_IMODE(os.stat(target).st_mode) if mode is None else mode)
             _chown_like(tmp, target)
         else:
-            os.chmod(tmp, 0o644)
+            os.chmod(tmp, 0o644 if mode is None else mode)
             _chown_like(tmp, parent)
         os.replace(tmp, target)
     except BaseException:

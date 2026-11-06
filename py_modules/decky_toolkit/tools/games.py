@@ -74,9 +74,8 @@ def register(reg: ToolRegistry, apps: Apps | None = None) -> None:
          "required": ["path"]},
     )
     async def fs_read(path: str, max_bytes: int = 200_000) -> dict[str, Any]:
-        data = await asyncio.to_thread(games.fs_read, path, max_bytes=max_bytes + 1, truncate=True)
-        out: dict[str, Any] = {"path": path, "truncated": len(data) > max_bytes}
-        data = data[:max_bytes]
+        data, size = await asyncio.to_thread(games.fs_read, path, max_bytes=max_bytes, truncate=True)
+        out: dict[str, Any] = {"path": path, "size": size, "truncated": size > len(data)}
         try:
             out["text"] = data.decode()
         except UnicodeDecodeError:
@@ -86,9 +85,12 @@ def register(reg: ToolRegistry, apps: Apps | None = None) -> None:
     @reg.add(
         "fs_write",
         "Write a text file anywhere on the device (as root; ~ is the desktop user's home), atomically, creating parent "
-        "dirs. An existing file keeps its mode and owner; a new one is 0644, owned like its parent dir. Refuses Steam "
-        "credential/session files, Steam library folder lists and SSH keys.",
-        {"properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]},
+        "dirs. Without mode an existing file keeps its mode and a new one is 0644 (e.g. 0755 for a script); either way "
+        "it is owned like the file it replaces or its parent dir. Refuses Steam credential/session files, Steam "
+        "library folder lists and SSH keys.",
+        {"properties": {"path": {"type": "string"}, "content": {"type": "string"}, "mode": {"type": "string"}},
+         "required": ["path", "content"]},
     )
-    async def fs_write(path: str, content: str) -> dict[str, Any]:
-        return await asyncio.to_thread(games.fs_write, path, content.encode(), None)
+    async def fs_write(path: str, content: str, mode: str | None = None) -> dict[str, Any]:
+        bits = None if mode is None else games.parse_mode(mode)
+        return await asyncio.to_thread(lambda: games.fs_write(path, content.encode(), None, mode=bits))

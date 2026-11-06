@@ -669,7 +669,7 @@ class Api:
         path = request.query.get("path")
         if not path:
             return _error(400, "path is required")
-        return await self._fs_call(request, lambda: games.fs_read(path))
+        return await self._fs_call(request, lambda: games.fs_read(path)[0])
 
     async def handle_fs_write(self, request: web.Request) -> web.Response:
         path = request.query.get("path")
@@ -677,8 +677,13 @@ class Api:
             return _error(400, "path is required")
         data = await request.read()
         create, overwrite = self._flag(request, "create", True), self._flag(request, "overwrite", True)
+        raw_mode = request.query.get("mode")
+        try:
+            mode = None if raw_mode is None else games.parse_mode(raw_mode)
+        except ValueError as e:
+            return _error(400, str(e))
         return await self._fs_call(request, lambda: games.fs_write(path, data, games.device_write_scope(), create=create,
-                                                                   overwrite=overwrite))
+                                                                   overwrite=overwrite, mode=mode))
 
     async def handle_fs_mkdir(self, request: web.Request) -> web.Response:
         try:
