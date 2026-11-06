@@ -10,8 +10,8 @@ from ..games import files as games
 from ..loader import logs
 from ..steam.console import DEFAULT_LEVEL, DEFAULT_TARGETS, LEVELS
 from . import ToolRegistry
-from .plugins import resolve_plugin
-from .system import run, tail
+from ..loader.plugins import resolve_plugin
+from ..system import run, tail
 
 if TYPE_CHECKING:
     from ..steam.console import ConsoleCollector

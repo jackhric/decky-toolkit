@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 from ..loader import sourcemap
 from ..steam import cdp
 from . import ToolRegistry, error_result, ok_result
-from .system import plugins_dir
+from ..loader.plugins import plugins_dir
 
 if TYPE_CHECKING:
     from ..server.events import EventHub

@@ -10,7 +10,7 @@ import shutil
 import signal
 import socket
 
-from ..tools.system import clean_env
+from ..system import clean_env
 
 SERVICE_TYPE = "_decky-toolkit._tcp"
 BACKOFF_SECONDS = (5, 30, 60)

@@ -19,7 +19,7 @@ from decky_toolkit.server.http import Api  # noqa: E402
 from decky_toolkit.server.protocol import McpServer  # noqa: E402
 from decky_toolkit.settings import Settings  # noqa: E402
 from decky_toolkit.tools import ToolRegistry, build_registry  # noqa: E402
-from decky_toolkit.tools import plugins as plugin_ops  # noqa: E402
+from decky_toolkit.loader import plugins as plugin_ops  # noqa: E402
 from decky_toolkit.tools.plugin_tools import PluginTools  # noqa: E402
 
 LOG = logging.getLogger("t")
