@@ -59,7 +59,8 @@ async function check(name, fn) {
   }
 }
 
-const proxy = new DeviceProxy(() => ({ host, port, identity }), new Map(), () => 0);
+const state = new Map();
+const proxy = new DeviceProxy(() => ({ host, port, identity }), { get: k => state.get(k), update: async (k, v) => { state.set(k, v); } }, () => 0);
 const base = await proxy.start();
 console.log(`proxy listening on ${new URL(base).origin}/<secret>, device ${host}:${port}`);
 
