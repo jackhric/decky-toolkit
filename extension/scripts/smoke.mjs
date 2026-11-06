@@ -120,7 +120,8 @@ const resetUi = () => Object.assign(ui, {
 resetUi();
 const say = kind => async (m, ...rest) => {
   const buttons = rest.filter(r => typeof r === 'string');
-  calls.messages.push({ kind, m, buttons });
+  const options = rest.find(r => r && typeof r === 'object');
+  calls.messages.push({ kind, m, buttons, ...(options ? { options } : {}) });
   return ui[kind](m, buttons);
 };
 
@@ -825,7 +826,7 @@ await check('package.json: container, activation, commands, menus, version', asy
   };
   for (const [view, want] of Object.entries(titles)) assert.deepEqual(titleMenu(view), want, `${view} title`);
   for (const view of Object.keys(titles)) {
-    for (const viewItem of ['plugin', 'deck.unpaired', 'deck.paired', 'deck.session', 'deck.busy', 'deck.found', 'discovery.group', 'discovery.add', 'action', 'group.screen', 'controller.virtual', 'controller.physical', 'controller.unsupported',
+    for (const viewItem of ['plugin', 'deck.unpaired', 'deck.paired', 'deck.session', 'deck.busy', 'deck.found', 'deck.found.saved', 'discovery.group', 'discovery.add', 'action', 'group.screen', 'controller.virtual', 'controller.physical', 'controller.unsupported',
       'game', 'game.running', 'game.unsupported', 'deckyDir', 'deckyFile', 'gameGroup', 'gameLog']) {
       for (const inline of [true, false]) assert.deepEqual(dupes(itemMenu(view, viewItem, inline)), [], `${view} ${viewItem}`);
     }
@@ -927,6 +928,9 @@ await check('welcome view: flat logo, Add a device, plugin requirement, pairing 
   messages.fire({ type: 'pairing' });
   await settle();
   assert.ok(calls.executed.some(([id]) => id === 'decky-toolkit.addDevice'));
+  assert.equal(lastMessage('warning').m, 'Replace 10.1.2.3?', 'a device is saved, so Add a device asks to replace it');
+  assert.equal(globalState.get('decky-toolkit.devices').length, 1, 'cancelled: nothing changed');
+  calls.messages.length = 0;
   assert.equal(calls.opened.at(-1), 'https://github.com/jackhric/decky-toolkit');
   assert.deepEqual(calls.executed.find(([id]) => id === 'workbench.action.openWalkthrough'), ['workbench.action.openWalkthrough', 'jackhric.decky-toolkit#pairing', false]);
 
@@ -1973,7 +1977,7 @@ await check('a command while disconnected offers to connect instead of running',
   const copied = calls.clipboard.length;
   await run('decky-toolkit.copyMcpUrl');
   assert.equal(offered.m, 'Decky Toolkit: not connected to a device.');
-  assert.deepEqual(offered.buttons, ['Connect to 10.1.2.3', 'Choose device']);
+  assert.deepEqual(offered.buttons, ['Connect to 10.1.2.3']);
   assert.equal(calls.clipboard.length, copied, 'nothing copied');
   return `"${offered.m}" [${offered.buttons.join(', ')}]`;
 });
@@ -2056,17 +2060,37 @@ await check('a device with an older plugin (plain HTTP): "Update Decky Toolkit",
   return `"${offered.m}" [${offered.buttons.join(', ')}]`;
 });
 
-await check('Add device: host + optional name, port only via "Change port", then offers Connect', async () => {
-  const inputs = ['10.9.9.9', '', '9000'];
+await check('Add device with one saved: "Replace?" modal; Cancel keeps it, Replace forgets it and its pairing', async () => {
   const prompts = [];
+  ui.inputBox = opts => { prompts.push(opts.prompt); return undefined; };
+  await run('decky-toolkit.addDevice');
+  const modal = lastMessage('warning');
+  assert.deepEqual({ m: modal.m, buttons: modal.buttons, options: modal.options }, {
+    m: 'Replace 10.1.2.3?', buttons: ['Replace'],
+    options: { modal: true, detail: 'Its pairing is deleted. This editor connects to one device at a time.' },
+  });
+  assert.equal(prompts.length, 0, 'Cancel: no address prompt');
+  assert.equal(globalState.get('decky-toolkit.devices').length, 1);
+
+  await storePaired();
+  await run('decky-toolkit.connect', seedId());
+  await settle();
+  assert.equal(calls.context.get('decky-toolkit.connected'), true);
+  const oldId = seedId();
+  const inputs = ['10.9.9.9', '', '9000'];
+  ui.warning = (m, buttons) => (m === 'Replace 10.1.2.3?' ? 'Replace' : undefined);
   ui.inputBox = opts => { prompts.push(opts.prompt); if (opts.validateInput) assert.equal(opts.validateInput(inputs[0]), undefined); return inputs.shift(); };
   const picks = ['port', 'later'];
   const offered = [];
   ui.quickPick = items => { offered.push(items.map(i => i.label)); const want = picks.shift(); return items.find(i => i.id === want); };
   await run('decky-toolkit.addDevice');
   await settle();
-  const d = globalState.get('decky-toolkit.devices')[1];
-  assert.deepEqual({ name: d.name, host: d.host, port: d.port }, { name: '10.9.9.9', host: '10.9.9.9', port: 9000 });
+  const list = globalState.get('decky-toolkit.devices');
+  assert.equal(list.length, 1, 'exactly one saved device');
+  assert.notEqual(list[0].id, oldId);
+  assert.deepEqual({ name: list[0].name, host: list[0].host, port: list[0].port }, { name: '10.9.9.9', host: '10.9.9.9', port: 9000 });
+  assert.equal(storedIdentity(), undefined, 'the old pairing is deleted');
+  assert.equal(calls.context.get('decky-toolkit.connected'), false, 'the old session ended');
   assert.equal(prompts.length, 3);
   assert.match(offered[0][0], /Connect to 10\.9\.9\.9/);
   assert.match(offered[0][1], /Change port \(8765\)/);
@@ -2074,23 +2098,38 @@ await check('Add device: host + optional name, port only via "Change port", then
   await run('decky-toolkit.refresh');
   await settle();
   const rows = devicesProvider().getChildren();
-  assert.equal(rows[1].label, '10.9.9.9:9000');
-  assert.equal(rows[1].description, 'unreachable', 'refresh probes saved devices');
-  return `prompts: ${prompts.join(' / ')}; then picks ${offered[0].join(' | ')}`;
+  assert.deepEqual(rows.map(r => [r.label, r.description]), [['10.9.9.9:9000', 'unreachable']], 'refresh probes the saved device');
+
+  // Back to the seed address for the checks that follow.
+  ui.warning = (_m, buttons) => buttons[0];
+  ui.inputBox = opts => (opts.prompt.startsWith('IP address') ? '10.1.2.3' : '');
+  ui.quickPick = items => items.find(i => i.id === 'later');
+  await run('decky-toolkit.addDevice');
+  await settle();
+  assert.deepEqual(globalState.get('decky-toolkit.devices').map(d => `${d.host}:${d.port}`), ['10.1.2.3:8765']);
+  await storePaired();
+  await settle();
+  return `modal "${modal.m}" [${modal.buttons.join(', ')}]; prompts: ${prompts.join(' / ')}; then picks ${offered[0].join(' | ')}`;
 });
 
-await check('status bar QuickPick: connect/switch, disconnect, open screen, add', async () => {
-  await storePaired();
+await check('status bar: device actions QuickPick (disconnect, open screen, rename, forget); no Switch device', async () => {
   await run('decky-toolkit.connect', seedId());
   await settle();
   let offered;
   ui.quickPick = (items, opts) => { offered = { labels: items.map(i => i.label), placeHolder: opts.placeHolder }; return undefined; };
-  await run('decky-toolkit.switchDevice');
-  assert.equal(calls.statusItems[0].command ?? 'decky-toolkit.switchDevice', 'decky-toolkit.switchDevice');
-  assert.equal(offered.placeHolder, 'Connected to 10.1.2.3');
+  assert.equal(calls.statusItems[0].command, 'decky-toolkit.deviceActions');
+  await run('decky-toolkit.deviceActions');
+  assert.equal(offered.placeHolder, '10.1.2.3 · connected');
   assert.deepEqual(offered.labels, [
-    '$(vm-connect) 10.1.2.3', '$(warning) 10.9.9.9', '', '$(debug-disconnect) Disconnect from 10.1.2.3', '$(device-desktop) Open screen', '$(add) Add device…']);
-  assert.equal(calls.statusItems[0].tooltip, 'Decky: connected to 10.1.2.3 (10.1.2.3:8765). Click for devices');
+    '$(debug-disconnect) Disconnect from 10.1.2.3', '$(device-desktop) Open screen', '', '$(pencil) Rename…', '$(trash) Forget device']);
+  assert.equal(calls.statusItems[0].tooltip, 'Decky: connected to 10.1.2.3 (10.1.2.3:8765). Click for device actions');
+  await run('decky-toolkit.disconnectDevice');
+  await run('decky-toolkit.deviceActions');
+  assert.deepEqual(offered.labels.slice(0, 2), ['$(plug) Connect to 10.1.2.3', '']);
+  assert.ok(!calls.commands.has('decky-toolkit.switchDevice'), 'no switchDevice command');
+  assert.deepEqual(pkg.contributes.commands.filter(c => /switch/i.test(c.command) || /switch device/i.test(c.title)), [], 'package.json contributes no Switch device');
+  await run('decky-toolkit.connect', seedId());
+  await settle();
   return offered.labels.filter(Boolean).join(' | ');
 });
 
@@ -2442,21 +2481,26 @@ await check('discovery: Search network finds devices via mDNS and the subnet swe
   const g = groupNode();
   assert.equal(g.label, 'On this network');
   assert.equal(g.iconPath.id, 'radio-tower');
-  assert.equal(g.description, '2 found');
+  assert.equal(g.description, '3 found');
   assert.equal(g.collapsibleState, 2);
   assert.deepEqual(itemMenu('decky-toolkit.devices', g.contextValue, true), ['decky-toolkit.searchNetwork']);
   const kids = devicesProvider().getChildren(g);
   assert.deepEqual(kids.map(k => [k.label, k.description, k.iconPath.id, k.contextValue]), [
     ['bazzite', '10.0.70.18 · v0.3.0', 'vm', 'deck.found'],
     ['10.0.70.40', '10.0.70.40 · v0.2.0', 'vm', 'deck.found'],
+    ['steamdeck', '10.1.2.3 · v0.3.0 · saved', 'pass', 'deck.found.saved'],
     ['Add a device by address…', undefined, 'add', 'discovery.add'],
-  ], 'saved 10.1.2.3, the other service, the HTML page and the slow host are left out');
+  ], 'the saved 10.1.2.3 is marked; the other service, the HTML page and the slow host are left out');
+  assert.deepEqual(kids[2].command, { command: 'decky-toolkit.connect', title: 'Connect', arguments: [seedId()] }, 'the saved one connects, no replace');
+  assert.match(kids[2].tooltip.value, /Saved as \*\*10\.1\.2\.3\*\*/);
+  assert.deepEqual(itemMenu('decky-toolkit.devices', 'deck.found.saved', true), [], 'no Add on the saved one');
+  assert.deepEqual(itemMenu('decky-toolkit.devices', 'deck.found.saved', false), []);
   assert.match(kids[0].tooltip.value, /Decky Toolkit 0\.3\.0, API v1 · Bazzite/);
   assert.match(kids[1].tooltip.value, /decky-mcp 0\.2\.0/);
   assert.deepEqual(kids[0].command, { command: 'decky-toolkit.connectFound', title: 'Connect', arguments: ['10.0.70.18:8765'] });
   assert.deepEqual(itemMenu('decky-toolkit.devices', 'deck.found', true), ['decky-toolkit.connectFound']);
   assert.deepEqual(itemMenu('decky-toolkit.devices', 'deck.found', false), ['decky-toolkit.connectFound']);
-  assert.equal(kids[2].command.command, 'decky-toolkit.addDevice');
+  assert.equal(kids[3].command.command, 'decky-toolkit.addDevice');
   return `${kids.length - 1} found from ${net.probed.length} probes and ${net.queries.length} mDNS queries`;
 });
 
@@ -2498,22 +2542,36 @@ await check('discovery engine: found/lost events, throttled start, stop, probe c
   return JSON.stringify(events);
 });
 
-await check('discovery: Connect on a found device saves it and starts pairing', async () => {
-  device.pairQueue = ['approved'];
-  const before = globalState.get('decky-toolkit.devices').length;
+await check('discovery: Add on a found device asks to replace the saved one; Replace saves it alone, deletes the old pairing and pairs', async () => {
+  await storePaired();
+  await settle();
+  const oldId = seedId();
   const reqs = device.pairRequests.length;
-  const kids = devicesProvider().getChildren(groupNode());
+  let kids = devicesProvider().getChildren(groupNode());
+  await run('decky-toolkit.connectFound', kids[0]);
+  await settle();
+  assert.equal(lastMessage('warning').m, 'Replace 10.1.2.3?');
+  assert.deepEqual(globalState.get('decky-toolkit.devices').map(d => d.id), [oldId], 'Cancel: unchanged');
+  assert.ok(storedIdentity(), 'Cancel keeps the pairing');
+  assert.equal(device.pairRequests.length, reqs, 'no pairing request');
+
+  device.pairQueue = ['approved'];
+  ui.warning = (_m, buttons) => buttons[0];
+  kids = devicesProvider().getChildren(groupNode());
   await run('decky-toolkit.connectFound', kids[0]);
   await settle();
   const list = globalState.get('decky-toolkit.devices');
-  assert.equal(list.length, before + 1);
-  assert.deepEqual({ ...list.at(-1), id: undefined }, { id: undefined, name: 'bazzite', host: '10.0.70.18', port: 8765 });
+  assert.equal(list.length, 1, 'exactly one saved device');
+  assert.deepEqual({ ...list[0], id: undefined }, { id: undefined, name: 'bazzite', host: '10.0.70.18', port: 8765 });
+  assert.equal(storedIdentity(), undefined, 'the replaced device\'s pairing is deleted');
   assert.equal(device.pairRequests.length, reqs + 1, 'a pairing request was filed');
   assertPaired('decky-toolkit.identity:10.0.70.18:8765');
-  assert.ok(!devicesProvider().getChildren(groupNode()).some(k => k.label === 'bazzite'), 'saved devices leave the group');
-  const row = devicesProvider().getChildren().find(r => r.device?.host === '10.0.70.18');
-  assert.equal(row.contextValue, 'deck.session');
-  return `saved ${list.at(-1).name} and paired`;
+  const marked = devicesProvider().getChildren(groupNode()).find(k => k.label === 'bazzite');
+  assert.equal(marked.contextValue, 'deck.found.saved', 'the saved device is marked in the group');
+  assert.ok(devicesProvider().getChildren(groupNode()).some(k => k.label === 'steamdeck' && k.contextValue === 'deck.found'), 'the replaced one is just found now');
+  const rows = devicesProvider().getChildren().filter(r => r.device);
+  assert.deepEqual(rows.map(r => [r.device.host, r.contextValue]), [['10.0.70.18', 'deck.session']]);
+  return `replaced 10.1.2.3 with ${list[0].name} and paired`;
 });
 
 await check('discovery: hasDevices stays true while only found devices are listed; turning discovery off', async () => {

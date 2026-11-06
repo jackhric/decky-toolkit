@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { Connection, SavedDevice, newDeviceId } from './connection';
+import { confirmReplace, replaceWith } from './devices';
 import { DEFAULT_PORT, DeviceDiscovery, DiscoveredDevice } from './discovery';
 
 export class DiscoveryNode extends vscode.TreeItem {
@@ -12,7 +13,7 @@ export function discoveryGroup(discovery: DeviceDiscovery): DiscoveryNode {
   n.id = 'discovery';
   n.group = true;
   n.contextValue = 'discovery.group';
-  const count = discovery.devices.length;
+  const count = discovery.all.length;
   n.iconPath = new vscode.ThemeIcon(discovery.scanning ? 'loading~spin' : 'radio-tower');
   n.description = discovery.scanning ? 'searching…' : discovery.lastScan ? (count ? `${count} found` : 'none found') : undefined;
   const last = discovery.lastScan;
@@ -22,20 +23,23 @@ export function discoveryGroup(discovery: DeviceDiscovery): DiscoveryNode {
   return n;
 }
 
-export function foundRow(d: DiscoveredDevice): DiscoveryNode {
+/** `saved`: the device saved in the Devices view above, which this found one is. */
+export function foundRow(d: DiscoveredDevice, saved?: SavedDevice): DiscoveryNode {
   const n = new DiscoveryNode(d.name);
   n.id = `found:${d.key}`;
   n.found = d;
-  n.contextValue = 'deck.found';
-  n.iconPath = new vscode.ThemeIcon('vm');
+  n.contextValue = saved ? 'deck.found.saved' : 'deck.found';
+  n.iconPath = new vscode.ThemeIcon(saved ? 'pass' : 'vm');
   const address = d.port === DEFAULT_PORT ? d.host : d.key;
-  n.description = `${address} · v${d.version}`;
+  n.description = `${address} · v${d.version}${saved ? ' · saved' : ''}`;
   const md = new vscode.MarkdownString();
   md.appendMarkdown(`**${d.hostname ?? d.name}** · ${d.key}\n\n`);
   md.appendMarkdown(`${d.legacy ? 'decky-mcp' : 'Decky Toolkit'} ${d.version}, API v${d.apiVersion}${d.os ? ` · ${d.os}` : ''}\n\n`);
-  md.appendMarkdown('Not paired · click to add it and pair\n\n');
+  md.appendMarkdown(saved ? `Saved as **${saved.name}** · click to connect\n\n` : 'Not saved · click to add it and pair\n\n');
   n.tooltip = md;
-  n.command = { command: 'decky-toolkit.connectFound', title: 'Connect', arguments: [d.key] };
+  n.command = saved
+    ? { command: 'decky-toolkit.connect', title: 'Connect', arguments: [saved.id] }
+    : { command: 'decky-toolkit.connectFound', title: 'Connect', arguments: [d.key] };
   return n;
 }
 
@@ -45,18 +49,22 @@ export function discoveryChildren(discovery: DeviceDiscovery): DiscoveryNode[] {
   add.contextValue = 'discovery.add';
   add.iconPath = new vscode.ThemeIcon('add');
   add.command = { command: 'decky-toolkit.addDevice', title: 'Add device…' };
-  return [...discovery.devices.map(foundRow), add];
+  return [...discovery.all.map(d => foundRow(d, discovery.savedMatch(d))), add];
 }
 
-/** Saves a found device (or reuses the saved one with its address) and connects, which starts pairing. */
+/**
+ * Connects to a found device, which starts pairing; one that is not saved replaces the saved device after
+ * a confirmation.
+ */
 export async function connectFound(conn: Connection, discovery: DeviceDiscovery, arg: unknown): Promise<void> {
   const key = typeof arg === 'string' ? arg : (arg as DiscoveryNode | undefined)?.found?.key;
   const d = key ? discovery.find(key) : undefined;
   if (!d) throw new Error('that device is no longer in the network list; search again.');
-  let saved: SavedDevice | undefined = conn.devices.find(x => x.host === d.host && x.port === d.port);
+  let saved: SavedDevice | undefined = discovery.savedMatch(d);
   if (!saved) {
+    if (!(await confirmReplace(conn))) return;
     saved = { id: newDeviceId(), name: d.name, host: d.host, port: d.port };
-    await conn.saveDevices([...conn.devices, saved]);
+    await replaceWith(conn, saved);
   }
   await vscode.commands.executeCommand('decky-toolkit.connect', saved.id);
 }

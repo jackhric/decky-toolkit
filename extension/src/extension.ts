@@ -7,7 +7,7 @@ import { Connection, LinkState, linkSuffix } from './connection';
 import { ControllerWatcher, ControllersTreeProvider, addVirtualController, removeVirtualController } from './controllers';
 import { DeployController, PluginWorkspace } from './deploy';
 import {
-  addDevice, deviceActions, deviceFrom, removeDevice, renameDevice, switchDevice,
+  addDevice, deviceActions, deviceFrom, removeDevice, renameDevice,
 } from './devices';
 import { DevicesTreeProvider } from './devicesTree';
 import { DeviceDiscovery } from './discovery';
@@ -183,7 +183,6 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   command('decky-toolkit.connectFound', arg => connectFound(c, discovery, arg));
   command('decky-toolkit.renameDevice', arg => renameDevice(c, arg));
   command('decky-toolkit.removeDevice', arg => removeDevice(c, arg));
-  command('decky-toolkit.switchDevice', () => switchDevice(c));
   command('decky-toolkit.deviceActions', arg => deviceActions(c, arg));
   command('decky-toolkit.openScreen', async () => {
     if (await c.client()) await ScreenPanel.show(ctx, c, controllers);

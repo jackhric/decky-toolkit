@@ -30,7 +30,7 @@ export type InputState = InputSettings | 'unsupported';
 
 /**
  * What every device-backed surface shows. Undefined until the first connect of this window, so the views
- * appear once and then stay put; `disconnected` is a session the user ended (or a device switch in progress).
+ * appear once and then stay put; `disconnected` is a session the user ended (or the device was replaced).
  */
 export type LinkState = 'connecting' | 'connected' | 'unreachable' | 'rejected' | 'disconnected';
 
@@ -121,9 +121,18 @@ export class Connection implements ConnectionState, vscode.Disposable {
     return { host: cfg.get<string>('host', '').trim(), port: cfg.get<number>('port', 8765) };
   }
 
-  /** Seeds the device list from the host/port settings the first time the extension runs. */
+  /**
+   * Seeds the device list from the host/port settings the first time the extension runs. A list saved by a
+   * version that kept several devices is cut down to the last connected (or active) one; the pairings of the
+   * others stay in secret storage, so adding one of them again reuses its pairing.
+   */
   async initDevices(): Promise<void> {
     await Promise.all(this.devices.map(d => this.ctx.secrets.delete(LEGACY_TOKEN_PREFIX + addressKey(d))));
+    if (this.devices.length > 1) {
+      const keep = (this.lastSessionDevice ?? this.activeDevice)!;
+      await this.ctx.globalState.update(DEVICES_KEY, [keep]);
+      await this.ctx.globalState.update(ACTIVE_KEY, keep.id);
+    }
     if (this.ctx.globalState.get<SavedDevice[]>(DEVICES_KEY) !== undefined) return;
     const { host, port } = this.settingsAddress;
     if (!host) return;
@@ -499,11 +508,10 @@ export class Connection implements ConnectionState, vscode.Disposable {
   async client(): Promise<DeckyClient | undefined> {
     if (!this.connectedDevice) {
       const d = this.activeDevice;
-      const connectTo = d ? `Connect to ${d.name}` : undefined;
-      const choice = await vscode.window.showWarningMessage(
-        'Decky Toolkit: not connected to a device.', ...(connectTo ? [connectTo] : []), 'Choose device');
-      if (choice && choice === connectTo) await vscode.commands.executeCommand('decky-toolkit.connect', d!.id);
-      else if (choice === 'Choose device') await vscode.commands.executeCommand('decky-toolkit.switchDevice');
+      const action = d ? `Connect to ${d.name}` : 'Add device';
+      const choice = await vscode.window.showWarningMessage('Decky Toolkit: not connected to a device.', action);
+      if (choice && d) await vscode.commands.executeCommand('decky-toolkit.connect', d.id);
+      else if (choice) await vscode.commands.executeCommand('decky-toolkit.addDevice');
     }
     return this.connectedDevice ? this.authedClient() : undefined;
   }
