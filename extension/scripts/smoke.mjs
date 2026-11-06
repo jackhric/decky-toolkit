@@ -7,7 +7,7 @@ import { execFileSync } from 'child_process';
 import { X509Certificate, createHash, createPublicKey, generateKeyPairSync } from 'crypto';
 import * as http from 'http';
 import * as https from 'https';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'fs';
 import { hostname, tmpdir } from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
@@ -15,15 +15,21 @@ import { fileURLToPath } from 'url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
 const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
+const clientSrc = path.resolve(root, '..', 'packages', 'client', 'src');
+// The identity file lives here for the whole run, never in the real ~/.config.
+const configDir = mkdtempSync(path.join(tmpdir(), 'decky-smoke-config-'));
+process.env.DECKY_TOOLKIT_CONFIG_DIR = configDir;
+const identityPath = path.join(configDir, 'identity.json');
 
 const outfile = path.join(root, 'out', 'smoke.cjs');
 await esbuild.build({
   stdin: {
     contents: "export * from './src/extension'; export * from './src/actionsTree'; export * from './src/pluginsTree'; " +
-      "export * from './src/pluginDeploy'; export * from './src/stage'; export { AUTO_DEPLOY_DEBOUNCE_MS } from './src/deploy'; " +
-      "export * from './src/controllers'; export * from './src/navigation'; export { DeckyClient, HttpError } from './src/client'; " +
-      "export * from './src/games'; export * from './src/remoteFs'; export * from './src/discovery'; export * from './src/transport'; " +
-      "export { pairingCode } from './src/pairing'; export { DeviceProxy } from './src/proxy';",
+      "export * from './src/pluginDeploy'; export * from '../packages/client/src/stage'; export { AUTO_DEPLOY_DEBOUNCE_MS } from './src/deploy'; " +
+      "export * from './src/controllers'; export * from './src/navigation'; export { DeckyClient, HttpError } from '../packages/client/src/client'; " +
+      "export * from './src/games'; export * from './src/remoteFs'; export * from './src/discovery'; export * from '../packages/client/src/transport'; " +
+      "export { pairingCode } from './src/pairing'; export { DeviceProxy } from './src/proxy'; export { Connection } from './src/connection'; " +
+      "export * as identityFile from '../packages/client/src/identity';",
     resolveDir: root,
     loader: 'ts',
   },
@@ -634,9 +640,22 @@ async function check(name, fn) {
 const settle = (ms = 50) => new Promise(r => setTimeout(r, ms));
 const labels = items => items.map(i => i.label);
 const run = (id, ...args) => calls.commands.get(id)(...args);
+// Pairings live in the identity file; `secrets` only matters for the migration from older versions.
 const identityKey = 'decky-toolkit.identity:10.1.2.3:8765';
-const storedIdentity = (k = identityKey) => (secrets.has(k) ? JSON.parse(secrets.get(k)) : undefined);
-const storePaired = () => ctx.secrets.store(identityKey, JSON.stringify(pairedIdentity));
+const readIdentityFile = () => (existsSync(identityPath) ? JSON.parse(readFileSync(identityPath, 'utf8')) : undefined);
+function storedIdentity(k = identityKey) {
+  const f = readIdentityFile();
+  if (!f || `${identityKey.split(':')[0]}:${f.device.host}:${f.device.port}` !== k) return undefined;
+  return { key: f.key, cert: f.cert, serverCert: f.serverCert };
+}
+/** What another process (the CLI) does: an atomic write of the file the extension watches. */
+function writeIdentity(identity, device = { host: '10.1.2.3', port: 8765, name: '10.1.2.3' }) {
+  const tmp = `${identityPath}.ext.tmp`;
+  writeFileSync(tmp, JSON.stringify({ version: 1, device, ...identity }), { mode: 0o600 });
+  renameSync(tmp, identityPath);
+}
+const removeIdentity = () => rmSync(identityPath, { force: true });
+const storePaired = async () => { writeIdentity(pairedIdentity); };
 /** The identity a pairing stored: the device's certificates and the private key generated for it. */
 function assertPaired(k = identityKey) {
   const id = storedIdentity(k);
@@ -651,6 +670,7 @@ const lastMessage = kind => calls.messages.filter(m => m.kind === kind).at(-1);
 ext.connectionTimings.healthPollMs = 40;
 ext.connectionTimings.retryMs = 20;
 ext.pairingTimings.retryMs = 20;
+ext.identityFile.identityTimings.debounceMs = 5;
 ext.controllerTimings.pollMs = 40;
 
 // Fake LAN for discovery: interfaces, a /health per host and an mDNS responder behind a fake socket.
@@ -686,6 +706,116 @@ ext.discoveryHooks.createSocket = () => {
 ext.discoveryTimings.mdnsMs = 150;
 ext.discoveryTimings.probeTimeoutMs = 60;
 ext.discoveryTimings.minRescanMs = 60_000;
+
+/** Runs `fn` with the identity file in a throwaway directory, so the main run's file stays untouched. */
+async function inOtherConfigDir(fn) {
+  const dir = mkdtempSync(path.join(tmpdir(), 'decky-smoke-config2-'));
+  process.env.DECKY_TOOLKIT_CONFIG_DIR = dir;
+  try {
+    return await fn(dir, path.join(dir, 'identity.json'));
+  } finally {
+    process.env.DECKY_TOOLKIT_CONFIG_DIR = configDir;
+  }
+}
+
+await check('packages/client is plain Node: nothing under it imports vscode', async () => {
+  const offenders = [];
+  for (const f of (await import('fs')).readdirSync(clientSrc)) {
+    if (/\bfrom ['"]vscode['"]|require\(['"]vscode['"]\)/.test(readFileSync(path.join(clientSrc, f), 'utf8'))) offenders.push(f);
+  }
+  assert.deepEqual(offenders, []);
+});
+
+await check('identity file: write/read/remove, 0700 dir and 0600 file, invalid or newer files read as null and stay', async () => {
+  const id = ext.identityFile;
+  await inOtherConfigDir(async (dir, file) => {
+    assert.equal(id.identityPath(), file, 'DECKY_TOOLKIT_CONFIG_DIR replaces the directory');
+    assert.equal(await id.read(), null, 'missing');
+    const value = { version: 1, device: { host: '10.1.2.3', port: 8765, name: 'deck', deviceId: 'abc' }, ...pairedIdentity };
+    await id.write(value);
+    assert.deepEqual(await id.read(), value);
+    if (process.platform !== 'win32') {
+      assert.equal(statSync(dir).mode & 0o777, 0o700);
+      assert.equal(statSync(file).mode & 0o777, 0o600);
+    }
+    assert.deepEqual((await import('fs')).readdirSync(dir), ['identity.json'], 'no temp file left behind');
+    await id.write({ ...value, device: { host: '10.1.2.4', port: 1, name: 'x' } });
+    assert.equal((await id.read()).device.host, '10.1.2.4', 'replaced in place');
+    await id.remove();
+    assert.equal(await id.read(), null);
+    await id.remove();
+    writeFileSync(file, '{not json');
+    assert.equal(await id.read(), null, 'invalid');
+    const newer = JSON.stringify({ ...value, version: 2 });
+    writeFileSync(file, newer);
+    assert.equal(await id.read(), null, 'newer version');
+    assert.equal(await id.exists(), true);
+    assert.equal(readFileSync(file, 'utf8'), newer, 'left alone');
+  });
+  const xdg = process.env.XDG_CONFIG_HOME;
+  delete process.env.DECKY_TOOLKIT_CONFIG_DIR;
+  try {
+    process.env.XDG_CONFIG_HOME = '/tmp/xdg-smoke';
+    if (process.platform !== 'win32') assert.equal(id.identityPath(), '/tmp/xdg-smoke/decky-toolkit/identity.json');
+  } finally {
+    if (xdg === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = xdg;
+    process.env.DECKY_TOOLKIT_CONFIG_DIR = configDir;
+  }
+});
+
+await check('identity file watcher: fires on an external atomic write and on removal', async () => {
+  await inOtherConfigDir(async (_dir, file) => {
+    const seen = [];
+    const w = ext.identityFile.watch(v => seen.push(v));
+    try {
+      await settle(20);
+      writeFileSync(`${file}.tmp`, JSON.stringify({ version: 1, device: { host: 'h', port: 1, name: 'n' }, ...pairedIdentity }));
+      renameSync(`${file}.tmp`, file);
+      for (let i = 0; i < 50 && !seen.length; i++) await settle(10);
+      assert.equal(seen.at(-1)?.device.host, 'h');
+      seen.length = 0;
+      rmSync(file);
+      for (let i = 0; i < 50 && !seen.length; i++) await settle(10);
+      assert.deepEqual(seen, [null]);
+    } finally {
+      w.close();
+    }
+  });
+});
+
+await check('migration: a pairing in secret storage is copied to the identity file once and the secret is kept', async () => {
+  await inOtherConfigDir(async (_dir, file) => {
+    const sec = new Map([[identityKey, JSON.stringify(pairedIdentity)]]);
+    const state = new Map([['decky-toolkit.devices', [{ id: 'd1', name: 'deck', host: '10.1.2.3', port: 8765 }]], ['decky-toolkit.activeDevice', 'd1']]);
+    const mkCtx = () => ({
+      subscriptions: [], extensionUri: ctx.extensionUri,
+      secrets: { get: async k => sec.get(k), store: async (k, v) => { sec.set(k, v); }, delete: async k => { sec.delete(k); }, onDidChange: noopEvent },
+      globalState: { get: (k, d) => (state.has(k) ? state.get(k) : d), update: async (k, v) => { state.set(k, v); } },
+      workspaceState: ctx.workspaceState,
+    });
+    const c = new ext.Connection(mkCtx());
+    try {
+      await c.initDevices();
+      const f = JSON.parse(readFileSync(file, 'utf8'));
+      assert.deepEqual(f, { version: 1, device: { host: '10.1.2.3', port: 8765, name: 'deck' }, ...pairedIdentity });
+      assert.ok(sec.has(identityKey), 'the secret stays');
+      assert.deepEqual(await c.identityFor({ host: '10.1.2.3', port: 8765 }), pairedIdentity);
+      assert.equal(await c.identityFor({ host: '10.1.2.4', port: 8765 }), undefined, 'one device per machine');
+    } finally {
+      c.dispose();
+    }
+    rmSync(file);
+    const again = new ext.Connection(mkCtx());
+    try {
+      await again.initDevices();
+      assert.equal(existsSync(file), false, 'migrates only once: a file removed later (forgotten elsewhere) is not brought back');
+      assert.equal(await again.identityFor({ host: '10.1.2.3', port: 8765 }), undefined);
+    } finally {
+      again.dispose();
+    }
+  });
+});
 
 await ext.activate(ctx);
 await settle();
@@ -966,6 +1096,9 @@ await check('Connect on an unpaired device files a pairing request, waits for ap
   assert.equal(rowDuringPairing.description, `v0.2.0 · waiting for approval · code ${code}`);
   assert.equal(rowDuringPairing.contextValue, 'deck.busy');
   const stored = assertPaired();
+  assert.ok(![...secrets.keys()].some(k => k.startsWith('decky-toolkit.identity:')), 'pairing writes the identity file, not secret storage');
+  if (process.platform !== 'win32') assert.equal(statSync(identityPath).mode & 0o777, 0o600);
+  assert.deepEqual(readIdentityFile().device, { host: '10.1.2.3', port: 8765, name: '10.1.2.3' }, 'the file mirrors the saved device');
   assert.equal(createPublicKey(stored.key).export({ type: 'spki', format: 'pem' }), publicKey, 'stores the key it sent');
   assert.equal(calls.context.get('decky-toolkit.connected'), true);
   const info = lastMessage('info');
@@ -1922,7 +2055,7 @@ await check('Connect with a stored pairing checks /health and connects without p
 });
 
 await check('a forgotten pairing (401) goes straight into pairing', async () => {
-  await ctx.secrets.store(identityKey, JSON.stringify({ ...pairedIdentity, cert: otherPki.cert }));
+  writeIdentity({ ...pairedIdentity, cert: otherPki.cert });
   await settle();
   fetched.length = 0;
   device.pairQueue = ['approved'];
@@ -1936,7 +2069,7 @@ await check('a forgotten pairing (401) goes straight into pairing', async () => 
 });
 
 await check('a reset device (pinned certificate no longer matches) goes straight into pairing, no extra message', async () => {
-  await ctx.secrets.store(identityKey, JSON.stringify({ ...pairedIdentity, serverCert: otherPki.cert }));
+  writeIdentity({ ...pairedIdentity, serverCert: otherPki.cert });
   await settle();
   fetched.length = 0;
   const before = calls.messages.length;
@@ -1952,7 +2085,7 @@ await check('a reset device (pinned certificate no longer matches) goes straight
 });
 
 await check('a pairing code that differs from our own derivation aborts with "could not pair"', async () => {
-  await ctx.secrets.delete(identityKey);
+  removeIdentity();
   await settle();
   device.pairRequests = [];
   device.pairCancelled = [];
@@ -1969,6 +2102,17 @@ await check('a pairing code that differs from our own derivation aborts with "co
   await storePaired();
   await settle();
   return `"${offered.m}"`;
+});
+
+await check('a pairing written or removed by another process (the CLI) shows up without a reload', async () => {
+  const row = () => devicesProvider().getChildren()[0].description;
+  assert.equal(row(), 'v0.2.0 · paired');
+  removeIdentity();
+  for (let i = 0; i < 50 && row() !== 'v0.2.0 · not paired'; i++) await settle(10);
+  assert.equal(row(), 'v0.2.0 · not paired');
+  writeIdentity(pairedIdentity);
+  for (let i = 0; i < 50 && row() !== 'v0.2.0 · paired'; i++) await settle(10);
+  assert.equal(row(), 'v0.2.0 · paired');
 });
 
 await check('a command while disconnected offers to connect instead of running', async () => {
@@ -2006,7 +2150,7 @@ await check('reachability error: one message with Retry / Edit device, no pairin
 });
 
 await check('pairing denied on the device: "Pairing denied" with Try again, which files a new request', async () => {
-  await ctx.secrets.delete(identityKey);
+  removeIdentity();
   await settle();
   device.pairRequests = [];
   device.pairQueue = ['pending', 'denied', 'approved'];
@@ -2023,7 +2167,7 @@ await check('pairing denied on the device: "Pairing denied" with Try again, whic
 });
 
 await check('pairing has no time limit: survives a lost connection and a forgotten request (new code); Cancel sends DELETE', async () => {
-  await ctx.secrets.delete(identityKey);
+  removeIdentity();
   await settle();
   device.pairRequests = [];
   device.pairCancelled = [];
@@ -2574,6 +2718,7 @@ await check('discovery: hasDevices stays true while only found devices are liste
   ui.warning = () => 'Remove';
   for (const d of globalState.get('decky-toolkit.devices')) await run('decky-toolkit.removeDevice', d.id);
   await settle();
+  assert.equal(existsSync(identityPath), false, 'Forget removes the identity file');
   assert.deepEqual(globalState.get('decky-toolkit.devices'), []);
   assert.equal(calls.context.get('decky-toolkit.hasDevices'), true, 'the found 10.0.70.40 and 10.1.2.3 keep the tree');
   assert.deepEqual(devicesProvider().getChildren().map(n => n.contextValue), ['discovery.group']);

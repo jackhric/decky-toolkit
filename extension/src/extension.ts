@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { homedir } from 'os';
 import * as path from 'path';
 import { ActionsTreeProvider, WORKSPACE_PLUGIN } from './actionsTree';
-import { DeckyClient, describeError, isMissingRoute } from './client';
+import { DeckyClient, describeError, isMissingRoute } from '@decky-toolkit/client/client';
 import { Connection, LinkState, linkSuffix } from './connection';
 import { ControllerWatcher, ControllersTreeProvider, addVirtualController, removeVirtualController } from './controllers';
 import { DeployController, PluginWorkspace } from './deploy';

@@ -17,13 +17,15 @@ if (!identityFile || !host) {
   console.error('Usage: DECKY_IDENTITY_FILE=<file> node scripts/dev-check.mjs <host> [port]  (or set DECKY_HOST)');
   process.exit(2);
 }
-// The JSON the extension keeps in secret storage under decky-toolkit.identity:<host:port>: {key, cert, serverCert}.
-const identity = JSON.parse(readFileSync(identityFile, 'utf8'));
+// The identity file (~/.config/decky-toolkit/identity.json: {version, device, key, cert, serverCert}) or the
+// older secret-storage JSON {key, cert, serverCert}.
+const { key, cert, serverCert } = JSON.parse(readFileSync(identityFile, 'utf8'));
+const identity = { key, cert, serverCert };
 
 const outfile = path.join(root, 'out', 'devlib.cjs');
 await esbuild.build({
   stdin: {
-    contents: "export * from './src/proxy'; export * from './src/client'; export * from './src/stage';",
+    contents: "export * from './src/proxy'; export * from '../packages/client/src/client'; export * from '../packages/client/src/stage';",
     resolveDir: root,
     loader: 'ts',
   },

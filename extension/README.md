@@ -218,7 +218,7 @@ greyed-out row, *update Decky Toolkit on the device*.
 
 The extension registers a file system for the scheme `decky`: `decky://<host>/<absolute path>`
 (`<host>:<port>` when the port is not 8765). It serves any saved, paired device, also when it is
-not the connected one; the pairing comes from secret storage.
+not the connected one; the pairing comes from the identity file.
 
 - **Read**: `stat` and directory listings use `GET /fs` (a stat lists the parent with an exact
   glob), files `GET /fs/read` (up to 64 MiB). Symlinks are resolved to file or folder.
@@ -519,11 +519,12 @@ All of these are also in the command palette under the `Decky:` category.
 
 The saved device lives in VS Code's global state (`decky-toolkit.devices`), so all windows share it. A
 list with several devices saved by an older version is cut down to the last connected one at startup.
-Pairings are stored per `host:port` in secret storage.
+The pairing is kept in `~/.config/decky-toolkit/identity.json` (`%APPDATA%\decky-toolkit\identity.json` on
+Windows), one device per machine, and shared with the upcoming CLI.
 
 ## How it works
 
-- **Credentials.** The pairing lives in `context.secrets`. Webviews never see it: the extension runs
+- **Credentials.** The pairing lives in the identity file. Webviews never see it: the extension runs
   a loopback proxy (`127.0.0.1`, stable port, secret path prefix kept in global state) that
   strips browser `Origin`/`Cookie` headers before forwarding to the device. WebSocket upgrades
   (`/input`, `/audio`) are forwarded the same way. The screen panel and the

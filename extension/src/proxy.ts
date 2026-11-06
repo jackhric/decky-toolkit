@@ -2,7 +2,7 @@ import * as http from 'http';
 import { randomBytes } from 'crypto';
 import type { AddressInfo, Socket } from 'net';
 import type { Duplex } from 'stream';
-import { Identity, deviceRequest } from './transport';
+import { Identity, deviceRequest } from '@decky-toolkit/client/transport';
 
 export interface ProxyTarget {
   host: string;
