@@ -11,6 +11,10 @@ from .system import plugins_dir
 
 SOURCE_SUFFIXES = (".ts", ".tsx")
 MAX_SOURCE_BYTES = 8 * 1024 * 1024
+# Pairing decisions are the device owner's alone; a paired client must not pair or unpair others through
+# its own plugin.
+OWN_PLUGIN = "Decky Toolkit"
+DEVICE_ONLY_METHODS = frozenset({"approve_pair_request", "deny_pair_request", "forget_paired_client"})
 # @decky/api callable("name") / call("name", ...); a bundler may rename callable to callable$1.
 _CALL_RE = re.compile(r"(?<![\w$])(callable(?:\$\d+)?|call)\s*(?:<[^<>()]*>)?\s*\(\s*([\"'`])([A-Za-z_]\w*)\2")
 
@@ -122,6 +126,8 @@ async def call_plugin_method(plugin: str, method: str, args: list[Any] | None = 
         raise ValueError("method must be a Python identifier")
     if method.startswith("_"):
         raise ValueError("refusing to call a method starting with '_': those are the loader's lifecycle hooks and private helpers")
+    if plugin == OWN_PLUGIN and method in DEVICE_ONLY_METHODS:
+        raise ValueError(f"{method} can only be used on the device")
     if args is None:
         args = []
     if not isinstance(args, list):
@@ -171,7 +177,7 @@ def register(reg: ToolRegistry) -> None:
         "call_plugin_method",
         "Call a plugin's backend method as its frontend would (loader/call_plugin_method through "
         "window.DeckyBackend in SharedJSContext). plugin is the plugin.json name (list_plugins 'name', e.g. "
-        "'Decky Toolkit'), args positional. Methods starting with '_' are refused. Returns {ok: true, result} or "
+        "'Decky Toolkit'), args positional. Methods starting with '_' and Decky Toolkit's own pairing decisions are refused. Returns {ok: true, result} or "
         "{ok: false, error, traceback} with the exception line and the Python traceback Decky returns.",
         {"properties": {
             "plugin": {"type": "string"},

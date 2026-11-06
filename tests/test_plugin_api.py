@@ -96,6 +96,9 @@ def test_call_plugin_method(monkeypatch):
     for method in ("_main", "_unload", "__init__"):
         out = call("call_plugin_method", plugin="Decky Toolkit", method=method)
         assert out["isError"] and "starting with '_'" in out["content"][0]["text"]
+    for method in sorted(plugin_api.DEVICE_ONLY_METHODS):
+        out = call("call_plugin_method", plugin="Decky Toolkit", method=method, args=["id"])
+        assert out["isError"] and "only be used on the device" in out["content"][0]["text"]
     for kwargs in ({"method": "x; alert(1)"}, {"method": "ok", "args": {"a": 1}}, {"method": "ok", "plugin": ""}):
         out = call("call_plugin_method", **{"plugin": "Decky Toolkit", **kwargs})
         assert out["isError"] and out["content"][0]["text"].startswith("ValueError")
