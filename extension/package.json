@@ -426,12 +426,6 @@
         "icon": "$(trash)"
       },
       {
-        "command": "decky-toolkit.switchDevice",
-        "title": "Switch device",
-        "category": "Decky",
-        "icon": "$(vm)"
-      },
-      {
         "command": "decky-toolkit.connect",
         "title": "Connect",
         "category": "Decky",

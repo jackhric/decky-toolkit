@@ -11,7 +11,7 @@ export class StatusBar implements vscode.Disposable {
   private readonly sub: vscode.Disposable;
 
   constructor(private readonly conn: ConnectionState) {
-    this.item.command = 'decky-toolkit.switchDevice';
+    this.item.command = 'decky-toolkit.deviceActions';
     this.sub = conn.onDidChange(() => this.render());
     this.render();
     this.item.show();
@@ -19,11 +19,11 @@ export class StatusBar implements vscode.Disposable {
 
   render(): void {
     const d = this.conn.connectedDevice;
-    this.item.command = 'decky-toolkit.switchDevice';
+    this.item.command = 'decky-toolkit.deviceActions';
     this.item.backgroundColor = undefined;
     if (!d) {
       this.item.text = '$(vm) Decky: not connected';
-      this.item.tooltip = 'Click to connect to a device or add one';
+      this.item.tooltip = this.conn.activeDevice ? `Click to connect to ${this.conn.activeDevice.name}` : 'Click to add a device';
       return;
     }
     const h = this.conn.health;
@@ -39,7 +39,7 @@ export class StatusBar implements vscode.Disposable {
     }
     const input = inputOn(this.conn.input);
     this.item.text = `$(vm-connect) ${d.name}${input ? ' $(keyboard)' : ''}`;
-    this.item.tooltip = `Decky: connected to ${d.name} (${d.host}:${d.port})${input ? ', remote input on' : ''}. Click for devices`;
+    this.item.tooltip = `Decky: connected to ${d.name} (${d.host}:${d.port})${input ? ', remote input on' : ''}. Click for device actions`;
   }
 
   dispose(): void {

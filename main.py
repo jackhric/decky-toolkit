@@ -170,7 +170,9 @@ class Plugin:
         req = self.pairing.pending_request(request_id)
         cert = await self.identity.sign_client(req.public_key, req.client_name)
         self.pairing.approve(request_id, cert)
-        self.clients.add(fingerprint(cert), req.client_name, req.client_kind)
+        # One paired client at a time for now; the replaced one gets 401 and has to pair again.
+        for old in self.clients.replace_all(fingerprint(cert), req.client_name, req.client_kind):
+            decky.logger.info("pairing: %s replaces paired client %s (%s)", req.client_name, old["name"], old["fingerprint"][:16])
         decky.logger.info("pairing: approved %s (%s) from %s", req.client_name, req.client_kind, req.remote)
         await decky.emit("decky_toolkit_paired", req.remote, req.client_name)
         return self.pairing.list()
@@ -217,6 +219,7 @@ class Plugin:
             "stream": self.capturer.stats() if self.capturer else None,
             "input": self.input.status() if self.input else None,
             "error": self.last_error,
+            "connected": self.clients.any_connected(),
         }
 
     async def set_stream_settings(self, fps: int | None = None, quality: int | None = None, width: int | None = None,

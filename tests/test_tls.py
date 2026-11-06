@@ -99,13 +99,37 @@ def test_paired_clients_store(tmp_path):
     now[0] += 31
     assert clients.touch("aa")["last_seen"] == 1061 and len(changes) == 4
     again = PairedClients(str(path))
-    assert again.list() == clients.list()
+    assert [c["connected"] for c in clients.list()] == [True, False]
+    assert [{**c, "connected": None} for c in again.list()] == [{**c, "connected": None} for c in clients.list()]
+    assert not again.any_connected(), "connected is in memory only"
     assert again.list()[0] == {"fingerprint": "aa", "name": "VS Code on box", "kind": "vscode", "added_at": 1000,
-                               "last_seen": 1061}
+                               "last_seen": 1061, "connected": False}
     assert clients.remove("bb") and not clients.remove("bb") and not clients.contains("bb")
     assert [c["fingerprint"] for c in json.loads(path.read_text())] == ["aa"]
+    clients.add("bb", "agent", "mcp")
+    n = len(changes)
+    replaced = clients.replace_all("cc", "VS Code on other", "vscode")
+    assert sorted(c["fingerprint"] for c in replaced) == ["aa", "bb"]
+    assert [c["fingerprint"] for c in json.loads(path.read_text())] == ["cc"]
+    assert len(changes) == n + 1 and changes[-1] == clients.list(), "one save, one change event"
+    assert clients.replace_all("cc", "VS Code on other", "vscode") == [] and len(clients.list()) == 1
     path.write_text("not json")
     assert PairedClients(str(path)).list() == []
+
+
+def test_paired_clients_connected(tmp_path):
+    now = [1000.0]
+    clients = PairedClients(str(tmp_path / "clients.json"), clock=lambda: now[0])
+    clients.add("aa", "VS Code on box", "vscode")
+    assert not clients.any_connected() and clients.list()[0]["connected"] is False
+    clients.touch("aa")
+    now[0] += 14
+    assert clients.any_connected() and clients.list()[0]["connected"] is True
+    now[0] += 2
+    assert not clients.any_connected(), "connected means an authenticated request in the last 15 s"
+    clients.touch("aa")
+    clients.remove("aa")
+    assert not clients.any_connected()
 
 
 def client_context(server_cert: str | None = None, cert: tuple[Path, Path] | None = None) -> ssl.SSLContext:
