@@ -564,7 +564,7 @@ export async function gameProtonLog(conn: Connection, tree: GamesTreeProvider, a
   if (!client) return;
   const app = await gameFor(tree, arg, 'Show the Proton log of which game?');
   if (!app) return;
-  const log = JSON.parse(await client.callToolText('proton_log', { appid: app.appid, lines: 1000 }, 30000)) as ProtonLog;
+  const log = JSON.parse(await client.callToolText('logs_read', { source: 'proton', appid: app.appid, lines: 1000 }, 30000)) as ProtonLog;
   const doc = await vscode.workspace.openTextDocument({ content: protonLogText(app, conn.label, log), language: 'log' });
   await vscode.window.showTextDocument(doc, { preview: true });
 }

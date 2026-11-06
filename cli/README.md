@@ -27,7 +27,7 @@ Needs Node.js 20 or newer.
 | --- | --- |
 | `pair [host[:port]] [--name <name>]` | Pair this computer with a device. Without a host it searches the local network. |
 | `status [--json]` | Show the paired device, whether it answers and whether it still accepts this computer. |
-| `mcp` | Run an MCP server over stdio: the device's tools plus `deploy_plugin` and `device_status`. |
+| `mcp` | Run an MCP server over stdio: the device's tools plus `plugin_deploy` and `device_status`. |
 | `deploy [dir] [--restart none\|plugin\|loader]` | Install the Decky plugin in `dir` (default: the current folder) on the device and wait until it is loaded. Run the plugin's build first. |
 | `dev [dir] [--no-build]` | Develop with live reload until Ctrl-C: runs the plugin's `watch` script, deploys once, then pushes each changed file and reloads the plugin in place. A bundle change reloads only the frontend (the backend keeps running), a Python change restarts the backend, a `plugin.json` or `package.json` change deploys again. You stay on the plugin's panel or page, and load errors are shown with `src/` positions. |
 | `call <tool> [json-args] [--out <file>]` | Call one device tool, for example `call screen_capture --out screen.jpg`. Text is printed, images are saved. |

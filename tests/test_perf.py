@@ -113,5 +113,5 @@ def test_tool_rejects_bad_level_without_calling_steam():
     res = asyncio.run(reg.call("perf_overlay", {"level": 2, "show_over_steam": "yes"}))
     assert res["isError"]
     assert steam.updates == []
-    res = asyncio.run(reg.call("perf_overlay_status", {}))
+    res = asyncio.run(reg.call("perf_overlay", {}))
     assert json.loads(res["content"][0]["text"])["level"] == 0

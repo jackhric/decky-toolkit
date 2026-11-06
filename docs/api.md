@@ -171,8 +171,8 @@ Errors: `400` bad argument, `403` sensitive path, `404` unknown app/path, `502` 
 | --- | --- | --- | --- |
 | `GET /apps` | client cert | live | Query: `installed_only=1` (default; installed on this device), `query=<name substring or appid>`, `include_tools=1` (Proton, runtimes). `{count, apps: [{appid, name, type: game\|tool\|shortcut\|application\|..., installed, running, install_dir, compat_tool (e.g. "proton_11", "steamlinuxruntime_sniper" for native titles), compat_tool_display, size_on_disk, library, last_played (ISO), installed_elsewhere?, shortcut_exe?}]}` |
 | `GET /apps/{appid}` | client cert | live | `app_info`: the list fields plus `gameid, developer, platforms, playtime_minutes, launch_options, build_id, cloud, processes` (when running) and `dirs` (as below). |
-| `GET /apps/{appid}/dirs` | client cert | live | `game_dirs`: `{appid, name, developer, platform: proton\|native, compat_tool, steam_root, library, libraries, install_dir, manifest, compatdata, prefix, prefix_user_dirs: {appdata_roaming, appdata_local, appdata_locallow, documents, saved_games}, account_id, userdata, cloud_remote, remotecache, shader_cache, xdg, match_keys}`. Each dir is `{path, exists, mtime?}`; prefix user dirs add `matches` (subdirs named after the game or developer, two levels deep for Company/Product); `xdg` (native titles only) lists matching entries of `~/.local/share`, `~/.config`, `~/.config/unity3d` and `~`. |
-| `GET /apps/{appid}/saves` | client cert | live | `game_saves`: `{appid, name, steam_cloud: [{name, root, size, time, local_path, candidates}], candidates: [{path, size, mtime, found_by, rank, score}], notes}`. Rank 0: files in Steam Cloud's `remotecache.vdf` mapped to local paths by their root (0 userdata remote, 2 Documents, 3 AppData/Local, ...; native titles also try the XDG dirs) and the cloud `remote/` dir; 1: files next to a `steam_autocloud.vdf` marker; 2: save-like files under dirs named after the game; 3: save-like names in the install dir. |
+| `GET /apps/{appid}/dirs` | client cert | live | `app_dirs`: `{appid, name, developer, platform: proton\|native, compat_tool, steam_root, library, libraries, install_dir, manifest, compatdata, prefix, prefix_user_dirs: {appdata_roaming, appdata_local, appdata_locallow, documents, saved_games}, account_id, userdata, cloud_remote, remotecache, shader_cache, xdg, match_keys}`. Each dir is `{path, exists, mtime?}`; prefix user dirs add `matches` (subdirs named after the game or developer, two levels deep for Company/Product); `xdg` (native titles only) lists matching entries of `~/.local/share`, `~/.config`, `~/.config/unity3d` and `~`. |
+| `GET /apps/{appid}/saves` | client cert | live | `app_saves`: `{appid, name, steam_cloud: [{name, root, size, time, local_path, candidates}], candidates: [{path, size, mtime, found_by, rank, score}], notes}`. Rank 0: files in Steam Cloud's `remotecache.vdf` mapped to local paths by their root (0 userdata remote, 2 Documents, 3 AppData/Local, ...; native titles also try the XDG dirs) and the cloud `remote/` dir; 1: files next to a `steam_autocloud.vdf` marker; 2: save-like files under dirs named after the game; 3: save-like names in the install dir. |
 | `GET /fs` | client cert | live | `fs_list`. Query: `path` (absolute or `~/...`), `depth` 1-5 (default 1), `glob` (on the name, or on the relative path if it has a `/`). `{path, depth, glob, entries: [{path, type: file\|dir\|symlink\|other, size, mtime, target?, sensitive?}], count, truncated}`, at most 2000 entries. Sensitive files (Steam `config/loginusers.vdf`, `config/config.vdf`, `ssfn*`) are flagged in listings and refused (`403`) as the path itself, also through symlinks. |
 | `GET /fs/read` | client cert | live | Query `path`. The file's bytes, `Content-Type: application/octet-stream`. Up to 64 MiB (`413`, code `EFBIG`, above). `403` for sensitive files, `404` missing, `409` `EISDIR` for a directory, `400` for a non-regular file. |
 | `PUT /fs/write` | client cert | live | Query `path`, `create=1` (default; `0`: `404` if missing), `overwrite=1` (default; `0`: `409` `EEXIST` if present); body: the raw bytes (at most 64 MiB). Writes a temp file next to the target and renames it over; an existing file keeps its mode and owner, a new file is `0644` and, like any parent dirs it creates, owned by its parent dir's owner (the server runs as root, the game must still write its saves). `{path, bytes, created}`. Only inside the [write roots](#file-writes); `403` elsewhere and for `tools/guard` write-protected files. |
@@ -189,7 +189,7 @@ The server runs as root, so writes are limited to (`games.write_roots` / `games.
 inside `steamapps/common/<game>/` of any library, inside a Proton prefix `steamapps/compatdata/<appid>/`, inside
 `userdata/<account>/<appid>/`, the plugin runtime dir (`~/homebrew/data/decky-toolkit`), and `~/.local/share/<dir>/...`,
 `~/.config/<dir>/...` (`~/.config/unity3d/<company>/<product>/...`) where `<dir>` matches an installed title's name or
-install dir as `game_dirs` matches them (not Steam's own dir or desktop config such as `systemd`, `autostart`, `fish`).
+install dir as `app_dirs` matches them (not Steam's own dir or desktop config such as `systemd`, `autostart`, `fish`).
 The entries themselves (a game dir, a prefix, a `~/.local/share/<Game>` dir) cannot be replaced. Everything in
 `tools/guard.py` (`is_write_protected`) is refused everywhere.
 
@@ -230,7 +230,7 @@ The Decky panel uses the frontend methods `list_pair_requests`, `approve_pair_re
 `forget_paired_client(fingerprint)` (both return the allow-list; each entry has `connected`, true when that client made an authenticated request in the last 15 s, kept in memory only, and `get_status()` has a top-level `connected`).
 Entries also carry `connected_since` (epoch seconds when the current run of requests began, after a gap of 15 s or more; `null` while not connected) and `remote` (address of the last request, `null` if none since the plugin started); `get_status()` has `clients`, one `{name, kind, remote, connected_since, fingerprint, streaming}` per connected client (`[]` when none; `streaming` is true while that client holds a `/stream.mjpeg`).
 `forget_paired_client` also closes that client's open connections at once, so its streams (MJPEG, SSE, WebSocket) end instead of running until it hangs up. There is no HTTP or MCP route to
-approve a request or forget a client, and `call_plugin_method` refuses `approve_pair_request`,
+approve a request or forget a client, and `plugin_call` refuses `approve_pair_request`,
 `deny_pair_request` and `forget_paired_client` on this plugin: both need someone at the device.
 `get_status()` no longer returns `url`.
 
@@ -239,10 +239,10 @@ approve a request or forget a client, and `call_plugin_method` refuses `approve_
 | Route | Auth | Status | Notes |
 | --- | --- | --- | --- |
 | `POST /plugins/install` | client cert | live | Body: `multipart/form-data` with field `file` (a plugin zip as produced by the Decky CLI or the extension's deploy staging: either `<name>/...` as the single top-level dir, or files at the zip root). Query: `restart=loader` (default) \| `plugin` \| `none`. Validates `plugin.json` (string `name`, string `author`, list `flags`, int `api_version`) and refuses absolute paths, `..` and symlinks (`400 {"error"}`). The dir name is the zip's top-level dir, else `name` with spaces turned into `-`. Installs to `~/homebrew/plugins/<dirname>` atomically (unzip to a temp dir next to `plugins/`, D0755/F0644 root:root, swap). `version` comes from `package.json` (may be `null`). Response `{installed: {dir, name, version}, restarted: "loader"|"plugin"|"none"}`. `restart=loader`: the zip is unpacked to `~/homebrew/.decky-toolkit-pending/<dirname>` and, 1 s after the reply, a transient systemd unit stops the loader, swaps the dir in and starts the loader again (a swap the loader's file watcher sees while it is stopping leaves an orphaned, memory-leaking backend). `restart=plugin`: as `POST /plugins/{dir}/reload` after the swap; the plugin must already be loaded (a first install needs `loader`). `restart=none`: for a plugin with the `debug` flag the loader's file watcher re-imports it on its own 1-3 s later, usually twice (once per changed file); asking for `plugin` as well adds another reload. |
-| `GET /plugins` | client cert | live | Same as the `list_plugins` tool. |
+| `GET /plugins` | client cert | live | Same as the `plugin_list` tool. |
 | `POST /plugins/{dir}/reload` | client cert | live | Re-import one plugin via Decky (`loader/reload_plugin`, called through `window.DeckyBackend` in SharedJSContext) without restarting the loader: the loader stops and restarts its backend, logs `Loaded <name> (v<version>)` and tells the frontend to import `dist/index.js` again (cache-busted), so both halves update (verified 2026-11-04, with and without the `debug` flag). `{dir, name, scheduled}`; reloading Decky Toolkit itself is deferred 1 s (`scheduled: true`). `404` if the dir has no `plugin.json`, `502` if the Steam UI is unreachable. With `?mode=frontend` (API 3) only the frontend is re-imported (Decky's `importPlugin`, ~10 ms; the backend keeps running); with `?mode=backend` the backend restarts too and the call returns once the new bundle is loaded. Both modes then restore the UI if the user was in the plugin: its Quick Access panel, its own route (only routes the plugin re-registered, and never over a running game), the selected settings tab and the gamepad focus. Response `{dir, name, mode, load_ms, reloaded, errors, restored, routes}`; `errors` are what the plugin logged through `console.error` while loading (bundle positions), `restored` lists what was put back. `mode=backend` for Decky Toolkit itself only schedules the restart (`scheduled: true`). |
 | `PUT /plugins/{dir}/files` | client cert | live | API 3. Query `path` (relative to the installed plugin dir); body: the raw bytes. Replaces or creates that one file atomically (temp file + rename, `0644`), creating parent dirs. In-place writes do not trigger the loader's file watcher; follow with `POST /plugins/{dir}/reload?mode=…`. `400` for absolute paths, `..`, backslashes or a symlink leading out of the plugin dir, `403` for `tools/guard` write-protected names, `404` if `{dir}` has no `plugin.json`. `{dir, path, bytes}`. |
-| `POST /loader/restart` | client cert | live | Same as the `restart_loader` tool. `{restarting: true, delay_s: 1}`. |
+| `POST /loader/restart` | client cert | live | Same as the `loader_restart` tool. `{restarting: true, delay_s: 1}`. |
 | `POST /exec` | client cert | live | JSON `{command, cwd?, timeout? (s, default 60, max 600), root? (default false), stdin?, max_output? (bytes per stream, default 65536, max 1 MiB)}`. Runs `bash -c command` in a new session as the desktop user (Decky's `DECKY_USER`: its `HOME`, `XDG_RUNTIME_DIR=/run/user/<uid>`, session D-Bus, `DISPLAY=:0`), or as root with `root: true`; no PyInstaller `LD_LIBRARY_PATH`. On timeout the process group gets SIGTERM, then SIGKILL after 2 s. Children left running in the background keep running; the reply comes 1 s after the shell exits (`background` says so). `{exit_code, stdout, stderr, timed_out, duration_ms, user, cwd, truncated?, background?}`; a non-zero exit is a `200`. Every command is written to the plugin log with user, cwd and client (the one place argument values are logged). A paired client could already run code as root by installing a plugin, so this adds no access. `400` for bad JSON, unknown fields or an empty command, `404` for a missing `cwd`. |
 
 ## Logs
@@ -278,9 +278,8 @@ Text is capped at 8000 characters.
 | `GET /cef/console` | client cert | live | Query: `target` (`SharedJSContext` default, `Steam Big Picture Mode`, or `all`), `lines` (default 200), `level` (minimum, default `info`, i.e. everything but debug), `since` (entry id: newer entries; or ISO time, naive = device local time), `grep` (case-insensitive substring of text or url). `{target, status: [{target, connected, buffered, buffered_debug, dropped, connected_since, error}], last_id, count, entries}`. `400` for an unknown target/level or a bad `since`. |
 | `GET /cef/console/stream` | client cert | live | `text/event-stream`. Query: `target` (as above, or `all`), `tail` (entries replayed first, default 100, max 5000), `level` (default `info`). Events: `data: <entry JSON>`; `: keepalive` every 15 s; a client disconnect stops the subscription within ~1 s (same handling as `/logs/stream`). |
 
-Tools: `cef_console(target?, lines=200, level?="info", since?, grep?)` returns the same object as
-`GET /cef/console`; `cef_console_clear(target?)` empties one tab's buffer, or all of them: `{cleared:
-{target: n}}`.
+Tools: `logs_read(source="steam_console", target?, lines=200, level?="info", since?, grep?, match?)` returns the same
+object as `GET /cef/console` plus `source`; `logs_wait(source="steam_console", pattern, ...)` waits for a matching entry.
 
 ## UI query
 
@@ -302,7 +301,7 @@ gamepad focus class `gpfocus` (its ancestors carry `gpfocuswithin`) or `document
 | --- | --- |
 | `ui_query(selector?, text?, target?, limit=20)` | CSS selector and/or text (case-insensitive substring of `textContent` or `aria-label`; with text alone the innermost matching elements). Visible elements first, then exact text matches. `{target, total, elements}`. An invalid selector is an error naming it. |
 | `ui_focus(target?)` | `{route, side_menu, target, window_focused, element, gpfocus?, active_element?}`. Without `target` it looks in the Quick Access or main menu view when one is open, else in Big Picture. `element` is the visible `.gpfocus` element (else `document.activeElement`); `gpfocus` lists all when there are several; `active_element` appears when `document.activeElement` is a different element. |
-| `ui_wait_for(selector?, text?, route?, gone=false, timeout=10, interval=0.25, target?)` | Polls until a visible match exists (or, with `gone`, none does), or until the current route (`LocationPathName`) equals `route` (or, with `gone`, differs). `{ok, elapsed_s, element \| route}`. On timeout an error: `timed out after 10s waiting for route /x; current route /y, focus <div> 'System' at {...}`. CEF errors while polling (a tab briefly missing during a reload) count as "not yet". |
+| `ui_wait(selector?, text?, route?, gone=false, timeout=10, interval=0.25, target?)` | Polls until a visible match exists (or, with `gone`, none does), or until the current route (`LocationPathName`) equals `route` (or, with `gone`, differs). `{ok, elapsed_s, element \| route}`. On timeout an error: `timed out after 10s waiting for route /x; current route /y, focus <div> 'System' at {...}`. CEF errors while polling (a tab briefly missing during a reload) count as "not yet". |
 
 ## Plugin calls
 
@@ -317,22 +316,22 @@ MCP tools only.
 ## Security
 
 - Every route except the public ones needs a paired client certificate (see [Authentication](#authentication)).
-- **Sensitive files.** `read_file` refuses, and `write_file` refuses to write, Steam login/session
+- **Sensitive files.** `fs_read` refuses, and `fs_write` refuses to write, Steam login/session
   material and keys: `*/config/loginusers.vdf`, `*/config/config.vdf`, `ssfn*`, `*/local.vdf`, Steam's
   CEF cookie store (`*/htmlcache/*Cookies*`), `~/.ssh/id_*` (not `.pub`), `/etc/shadow`, `/etc/gshadow`.
-  `write_file` also refuses `*/config/libraryfolders.vdf` and `*/steamapps/libraryfolders.vdf` (readable).
+  `fs_write` also refuses `*/config/libraryfolders.vdf` and `*/steamapps/libraryfolders.vdf` (readable).
   Matching is case-insensitive on both the given and the symlink-resolved path. The list lives in
   `py_modules/decky_toolkit/tools/guard.py` (`is_sensitive`, `is_write_protected`, `check_read`,
   `check_write`); every tool that takes a device path calls it. The error is `PermissionError: refusing
   to read ...`.
-- **Confirm.** `restart_loader` and `install_plugin` with `restart: "loader"` (the default) need
+- **Confirm.** `loader_restart` and `plugin_install` with `restart: "loader"` (the default) need
   `confirm: true`; without it they fail with a message saying so and do nothing. Future delete-type
   tools follow the same rule. The REST routes (`POST /loader/restart`, `POST /plugins/install`) need a
   paired client certificate instead.
-- **Audit log.** Calls of `cef_evaluate`, `write_file`, `install_plugin`, `reload_plugin`,
-  `restart_loader`, `call_plugin_method`, `input_*`, `set_input_enabled`, `remove_virtual_controller` and
+- **Audit log.** Calls of `cef_evaluate`, `fs_write`, `plugin_install`, `plugin_reload`,
+  `loader_restart`, `plugin_call`, `input_*`, `input_settings`, `controller_remove` and
   `ui_navigate` write one line to the plugin log (and the loader journal), before the tool runs:
-  `audit tool=write_file origin=10.0.0.30 via=mcp args=content,path`. Only argument names the tool's
+  `audit tool=fs_write origin=10.0.0.30 via=mcp args=content,path`. Only argument names the tool's
   schema declares are listed (others are counted, `+1 unknown`); values never are. Every authenticated
   `POST`/`PUT`/`DELETE` REST request except `/mcp` logs `audit route=POST /plugins/install origin=<ip>
   via=http`. The origin comes from the `audit.request_origin` context variable, set per request by an
@@ -347,33 +346,43 @@ MCP tools only.
 
 ## MCP tools (live)
 
-`decky_status`, `list_plugins`, `read_plugin_log`, `loader_log`, `restart_loader`, `cef_targets`,
-`cef_evaluate`, `cef_screenshot`, `toast`, `screen_capture`, `stream_status` (includes `settings`,
-`limits` and `audio`), `set_stream_settings` (`fps`, `quality`, `width`, `audio`, as `PUT /stream/settings`), `read_file`,
-`write_file`, `install_plugin` (`path` on the device or `zip_base64`, plus `restart` as for
-`POST /plugins/install`), `reload_plugin` (`dir`), `set_input_enabled` (`enabled`), `input_key`
-(`keys` combo string such as `"ctrl+shift+a"` or a list of combos, `hold_ms`), `input_text` (`text`,
-`delay_ms`), `input_mouse` (`action` move/click/double/down/up/scroll, `x`/`y` 0..1 or pixels with
-`pixels: true`, `dx`/`dy`, `button`, `amount`), `input_gamepad` (`buttons`, `axes`, `hat`, `hold_ms`,
-`sequence`, `pad`: a virtual pad id, default the implicit `auto` pad). Every input tool takes `capture: true` to append a fresh screen frame, and refuses with
-an error while input is disabled. `list_controllers`, `add_virtual_controller` (`name`),
-`remove_virtual_controller` (`id`): as `/controllers`. `ui_routes`, `ui_navigate` (`path` or `action` plus
-`tab`/`plugin`/`appid`, and `capture: true` for a frame 0.7 s later): as `/ui/...`. `ui_query`, `ui_focus`,
-`ui_wait_for`: see [UI query](#ui-query). `cef_console`, `cef_console_clear`: see [Console](#console).
-`plugin_methods`, `call_plugin_method`, `plugin_frontend_check`: see [Plugin calls](#plugin-calls).
-`restart_loader` and `install_plugin` with `restart: "loader"` need `confirm: true` (see [Security](#security)).
-`apps_list` (`installed_only`, `query`, `include_tools`), `app_info` (`appid`), `game_dirs` (`appid`),
-`game_saves` (`appid`, `limit`): as `/apps...`. `apps_running`: `{running: [{appid, name, pid, processes}],
-main_appid}`. `app_launch` (`appid`, `wait` s, default 15): `{launched, running}`, plus `game_actions` and a note
-when Steam did not start it (a dialog). `app_terminate` (`appid`, `confirm: true` required, `wait`).
-`fs_list` (`path`, `depth`, `glob`): as `/fs`. `fs_stat` (`path`). `fs_delete` (`path`, `confirm: true` required;
-only inside `steamapps/common/<game>/...`, a `compatdata/<appid>` or `shadercache/<appid>` entry,
-`userdata/<account>/<appid>/...` or the plugin runtime dir). `proton_log` (`appid`, `lines`): `~/steam-<appid>.log`
-plus the matching lines of Steam's `logs/`. `screen_record` (`seconds` up to 120, `fps`, `with_audio`, `name`,
-`wait`), `screen_record_stop`, `recordings_list`, `recording_delete` (`name`, `confirm: true` required): see
-Recordings. `perf_overlay` (`level` 0-4, `show_over_steam`), `perf_overlay_status`: Steam's MangoHud overlay level as
-on the Quick Access performance tab (`SteamClient.System.Perf.UpdateSettings`); gamescope does not paint this
-external overlay into its PipeWire stream, so captures and recordings never show it.
+Tools are named `<area>_<action>`; [reference.md](reference.md#mcp-tools) lists them by area. Arguments are checked
+against each tool's schema before the call: an unknown or missing argument is refused with the full argument list.
+Conventions: a plugin is `plugin` (its directory or its `plugin.json` name), an app `appid`; `timeout` and `wait` are
+seconds and other durations end in `_ms`; `grep` is a case-insensitive substring and `match` a case-insensitive regex;
+`lines` counts log lines and `limit` results. A settings tool reads when called without arguments and changes what it
+is given (`stream_settings`, `input_settings`, `perf_overlay`).
+
+`logs_read` (`source` `loader`: `since`/`until` as for journalctl; `plugin`: `plugin`, `run` (0 newest, 1 previous
+backend run), `file`; `steam_console`: `target`, `level`, `since` as `GET /cef/console`; `proton`: `appid`, Proton's
+`~/steam-<appid>.log` plus the matching lines of Steam's `logs/`; every source: `lines`, `grep`, `match`; an argument
+of another source is refused). `logs_wait` (`pattern`, `source` `loader`/`plugin`/`steam_console`, `timeout`, `count`,
+`since_s` to accept lines from the last few seconds): `{source, matched, lines | entries, waited_ms}`.
+
+`plugin_reload` (`plugin`, `mode` `backend` default or `frontend`): as `POST /plugins/{dir}/reload?mode=…`.
+`plugin_install` (`path` on the device or `zip_base64`, plus `restart` as for `POST /plugins/install`).
+`stream_status` (includes `settings`, `limits` and `audio`), `stream_settings` (`fps`, `quality`, `width`, `audio`, as
+`PUT /stream/settings`). `input_settings` (`enabled`), `input_key` (`keys` combo string such as `"ctrl+shift+a"` or a
+list of combos, `hold_ms`), `input_text` (`text`, `delay_ms`), `input_mouse` (`action` move/click/double/down/up/scroll,
+`x`/`y` 0..1 or pixels with `pixels: true`, `dx`/`dy`, `button`, `amount`), `input_gamepad` (`buttons`, `axes`, `hat`,
+`hold_ms`, `sequence`, `pad`: a virtual pad id, default the implicit `auto` pad). Every input tool takes
+`capture: true` to append a fresh screen frame, and refuses with an error while input is disabled. `controller_list`,
+`controller_add` (`name`), `controller_remove` (`id`): as `/controllers`. `ui_state`, `ui_routes`, `ui_navigate`
+(`path` or `action` plus `tab`/`plugin`/`appid`, and `capture: true` for a frame 0.7 s later): as `/ui/...`.
+`ui_query`, `ui_focus`, `ui_wait`: see [UI query](#ui-query). `plugin_methods`, `plugin_call`, `plugin_frontend_check`:
+see [Plugin calls](#plugin-calls). `loader_restart` and `plugin_install` with `restart: "loader"` need
+`confirm: true` (see [Security](#security)). `app_list` (`installed_only`, `query`, `include_tools`; `running: true`:
+`{running: [{appid, name, pid, processes}], main_appid}`), `app_info` (`appid`), `app_dirs` (`appid`), `app_saves`
+(`appid`, `limit`): as `/apps...`. `app_launch` (`appid`, `wait` s, default 15): `{launched, running}`, plus
+`game_actions` and a note when Steam did not start it (a dialog). `app_terminate` (`appid`, `confirm: true` required,
+`wait`). `fs_list` (`path`, `depth`, `glob`): as `/fs`. `fs_stat` (`path`). `fs_read`, `fs_write`. `fs_delete` (`path`,
+`confirm: true` required; only inside `steamapps/common/<game>/...`, a `compatdata/<appid>` or `shadercache/<appid>`
+entry, `userdata/<account>/<appid>/...` or the plugin runtime dir). `screen_record` (`seconds` up to 120, `fps`,
+`with_audio`, `name`, `wait`), `screen_record_stop`, `recording_list`, `recording_delete` (`name`, `confirm: true`
+required): see Recordings. `perf_overlay` (`level` 0-4, `show_over_steam`): Steam's MangoHud overlay level as on the
+Quick Access performance tab (`SteamClient.System.Perf.UpdateSettings`); gamescope does not paint this external overlay
+into its PipeWire stream, so captures and recordings never show it. `device_run`: as `POST /exec`. `device_info`,
+`device_activity`, `toolkit_stacks`, `ui_toast`, `cef_targets`, `cef_evaluate`, `cef_screenshot`, `screen_capture`.
 
 ## Events (backend → Decky frontend)
 

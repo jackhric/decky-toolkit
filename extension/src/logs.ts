@@ -3,7 +3,7 @@ import type { LogQuery } from '@decky-toolkit/client/api';
 import { DeckyClient, describeError, isConnectionError, isMissingRoute, sleep } from '@decky-toolkit/client/client';
 import { Connection, LinkState, linkMessage } from './connection';
 
-const POLL_MS = 3000;
+const RETRY_MS = 3000;
 const RECENT_MAX = 400;
 
 /** Lines of `next` that come after the longest suffix of `prev` it starts with. */
@@ -43,7 +43,6 @@ class LogSession {
 
   private async loop(): Promise<void> {
     const signal = this.abort.signal;
-    let mode: 'stream' | 'poll' = 'stream';
     let paused: LinkState | undefined;
     while (!signal.aborted) {
       const link = this.conn.link;
@@ -71,21 +70,20 @@ class LogSession {
       if (this.conn.link !== 'connected') attempt.abort();
       try {
         try {
-          if (mode === 'stream') await this.stream(client, attempt.signal);
-          else await this.pollOnce(client);
+          await this.stream(client, attempt.signal);
         } catch (e) {
           if (signal.aborted) return;
           if (attempt.signal.aborted) continue;
-          if (mode === 'stream' && isMissingRoute(e)) {
-            this.channel.appendLine('[decky-toolkit] /logs/stream not available on this device; polling via MCP every 3 s');
-            mode = 'poll';
+          if (isMissingRoute(e)) {
+            this.note('the Decky Toolkit plugin on this device cannot stream logs; update it on the device.');
+            await this.untilTargetOrLinkChanged(signal);
             continue;
           }
           // A dropped connection is reported once through the link state, not on every retry.
           if (isConnectionError(e)) void this.conn.checkHealth();
           else this.channel.appendLine(`[decky-toolkit] ${describeError(e)}; retrying…`);
         }
-        await sleep(POLL_MS, attempt.signal).catch(() => undefined);
+        await sleep(RETRY_MS, attempt.signal).catch(() => undefined);
       } finally {
         signal.removeEventListener('abort', stop);
         this.attempt = undefined;
@@ -102,6 +100,15 @@ class LogSession {
     return new Promise(resolve => {
       const sub = this.conn.onDidChange(() => { if (this.conn.link !== from) { sub.dispose(); resolve(); } });
       signal.addEventListener('abort', () => { sub.dispose(); resolve(); }, { once: true });
+    });
+  }
+
+  private untilTargetOrLinkChanged(signal: AbortSignal): Promise<void> {
+    const from = this.conn.link;
+    return new Promise(resolve => {
+      const done = () => { subs.forEach(s => s.dispose()); resolve(); };
+      const subs = [this.conn.onDidChangeTarget(done), this.conn.onDidChange(() => { if (this.conn.link !== from) done(); })];
+      signal.addEventListener('abort', done, { once: true });
     });
   }
 
@@ -129,18 +136,6 @@ class LogSession {
       clearTimeout(flush);
       if (pending) this.append(newLines(this.recent, pending));
     }
-  }
-
-  private async pollOnce(client: DeckyClient): Promise<void> {
-    let text: string;
-    if (this.query.source === 'plugin' && this.query.plugin) {
-      const raw = await client.callToolText('read_plugin_log', { plugin_dir: this.query.plugin, lines: 200 });
-      text = (JSON.parse(raw) as { text?: string }).text ?? '';
-    } else {
-      text = await client.callToolText('loader_log', { lines: 200 });
-    }
-    const lines = text.split('\n').filter(l => l.length > 0);
-    this.append(newLines(this.recent, lines));
   }
 
   dispose(): void {

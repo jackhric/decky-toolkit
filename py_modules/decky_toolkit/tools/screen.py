@@ -24,8 +24,8 @@ def register(reg: ToolRegistry, capturer: ScreenCapturer | None) -> None:
 
     @reg.add(
         "stream_status",
-        "Report the live screen stream state: running, fps, bitrate, resolution, viewer count, errors, "
-        "plus the configured settings and their limits, and the audio stream (enabled, running, kbps, rms_db level).",
+        "The live screen stream: running, fps, bitrate, resolution, viewer count, errors, the audio stream "
+        "(enabled, running, kbps, rms_db level) and the settings (change them with stream_settings).",
     )
     async def stream_status() -> dict[str, Any]:
         if capturer is None:
@@ -33,11 +33,11 @@ def register(reg: ToolRegistry, capturer: ScreenCapturer | None) -> None:
         return capturer.stats()
 
     @reg.add(
-        "set_stream_settings",
-        "Change the screen stream's frame rate, JPEG quality and/or output width, or turn its audio on/off "
-        "(device-wide: affects every viewer). Values are clamped to fps 1-60, quality 10-100; width 0 means native "
-        "(1920). A running video stream restarts with a sub-second pause; audio=false closes every audio socket. "
-        "Returns the new settings.",
+        "stream_settings",
+        "The screen stream's settings; give any of fps, quality, width or audio to change them (device-wide: affects "
+        "every viewer). Values are clamped to fps 1-60, quality 10-100; width 0 means native (1920). A running video "
+        "stream restarts with a sub-second pause; audio=false closes every audio socket. Returns the settings and "
+        "their limits.",
         {
             "properties": {
                 "fps": {"type": "integer", "minimum": 1, "maximum": 60},
@@ -47,8 +47,8 @@ def register(reg: ToolRegistry, capturer: ScreenCapturer | None) -> None:
             },
         },
     )
-    async def set_stream_settings(fps: int | None = None, quality: int | None = None, width: int | None = None,
-                                  audio: bool | None = None) -> dict[str, Any]:
+    async def stream_settings(fps: int | None = None, quality: int | None = None, width: int | None = None,
+                              audio: bool | None = None) -> dict[str, Any]:
         if capturer is None:
             raise CaptureUnavailable("screen capture not configured")
         return await capturer.update_settings(fps, quality, width, audio)

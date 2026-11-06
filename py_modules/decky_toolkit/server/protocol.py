@@ -119,9 +119,11 @@ class McpServer:
             "capabilities": {"tools": {"listChanged": False}},
             "serverInfo": SERVER_INFO,
             "instructions": (
-                "Decky Toolkit runs inside Decky Loader on a Steam Deck / Bazzite device. "
-                "Use cef_evaluate to run JS in the Steam UI (SharedJSContext), screen_capture to see the "
-                "whole display, the log tools to debug plugin backends, and restart_loader after deploying."
+                "Decky Toolkit runs inside Decky Loader on a Steam Deck / Bazzite device. Tools are named "
+                "<area>_<action>. Check device_activity before moving the UI under a person. ui_state says where the "
+                "Steam UI is; logs_read and logs_wait cover the loader journal, plugin logs, the Steam UI console and "
+                "Proton logs; plugin_reload reloads a plugin in place; device_run runs shell commands; cef_evaluate "
+                "runs JS in the Steam UI; screen_capture shows the whole display."
             ),
         }
 

@@ -219,7 +219,7 @@ class Recorder:
         # With wait=false nobody awaits the task; its failure is kept in self.last instead.
         self._task.add_done_callback(lambda t: t.cancelled() or t.exception())
         if not wait:
-            return {"recording": True, **self.active, "note": "call recordings_list to see when it is finished"}
+            return {"recording": True, **self.active, "note": "call recording_list to see when it is finished"}
         return await asyncio.shield(self._task)
 
     async def stop(self) -> dict[str, Any]:

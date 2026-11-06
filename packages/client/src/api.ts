@@ -278,23 +278,6 @@ export interface ErrorBody {
   code?: string;
 }
 
-export type ToolName =
-  | 'decky_status'
-  | 'list_plugins'
-  | 'read_plugin_log'
-  | 'loader_log'
-  | 'restart_loader'
-  | 'cef_targets'
-  | 'cef_evaluate'
-  | 'cef_screenshot'
-  | 'toast'
-  | 'screen_capture'
-  | 'stream_status'
-  | 'read_file'
-  | 'write_file'
-  | 'install_plugin'
-  | 'reload_plugin';
-
 export interface JsonRpcRequest {
   jsonrpc: '2.0';
   id?: number | string;

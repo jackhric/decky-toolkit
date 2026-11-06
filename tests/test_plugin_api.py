@@ -1,4 +1,4 @@
-"""plugin_methods, plugin_frontend_check and call_plugin_method. Run with: ./scripts/test.sh"""
+"""plugin_methods, plugin_frontend_check and plugin_call. Run with: ./scripts/test.sh"""
 import asyncio
 import json
 import shutil
@@ -54,7 +54,7 @@ def test_plugin_methods_parses_public_async_methods(plugins):
 
 
 def test_frontend_check_on_dist_bundle(plugins):
-    res = json.loads(call("plugin_frontend_check", dir="sample")["content"][0]["text"])
+    res = json.loads(call("plugin_frontend_check", plugin="sample")["content"][0]["text"])
     assert res["source"] == "dist" and res["files_scanned"] == 1
     assert res["frontend_calls"] == {"get_status": ["dist/index.js:2"], "ghost": ["dist/index.js:6"],
                                      "missing_method": ["dist/index.js:4"], "set_volume": ["dist/index.js:3"]}
@@ -73,7 +73,9 @@ def test_frontend_check_prefers_sources(plugins):
     assert res["missing_backend"] == [] and res["unused_backend"] == ["log_many"]
 
 
-def test_call_plugin_method(monkeypatch):
+def test_call_plugin_method(monkeypatch, plugins):
+    (plugins / "decky-mcp").mkdir()
+    (plugins / "decky-mcp" / "plugin.json").write_text('{"name": "Decky Toolkit"}')
     seen = []
 
     async def fake_eval(title, js, timeout=15):
@@ -94,13 +96,13 @@ def test_call_plugin_method(monkeypatch):
     assert res["ok"] is False and res["error"] == "Exception: port must be 1024-65535" and "Traceback" in res["traceback"]
 
     for method in ("_main", "_unload", "__init__"):
-        out = call("call_plugin_method", plugin="Decky Toolkit", method=method)
+        out = call("plugin_call", plugin="Decky Toolkit", method=method)
         assert out["isError"] and "starting with '_'" in out["content"][0]["text"]
     for method in sorted(plugin_api.DEVICE_ONLY_METHODS):
-        out = call("call_plugin_method", plugin="Decky Toolkit", method=method, args=["id"])
+        out = call("plugin_call", plugin="Decky Toolkit", method=method, args=["id"])
         assert out["isError"] and "only be used on the device" in out["content"][0]["text"]
     for kwargs in ({"method": "x; alert(1)"}, {"method": "ok", "args": {"a": 1}}, {"method": "ok", "plugin": ""}):
-        out = call("call_plugin_method", **{"plugin": "Decky Toolkit", **kwargs})
+        out = call("plugin_call", **{"plugin": "Decky Toolkit", **kwargs})
         assert out["isError"] and out["content"][0]["text"].startswith("ValueError")
     assert len(seen) == 2
 

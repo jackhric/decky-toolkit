@@ -82,15 +82,15 @@ def test_file_tools_apply_the_guard(tmp_path):
     secret = tmp_path / "Steam" / "config" / "loginusers.vdf"
     secret.parent.mkdir(parents=True)
     secret.write_text("users")
-    res = call("read_file", path=str(secret))
+    res = call("fs_read", path=str(secret))
     assert res["isError"] and res["content"][0]["text"].startswith("PermissionError: refusing to read")
     assert "Traceback" not in res["content"][0]["text"]
-    res = call("write_file", path=str(tmp_path / "Steam" / "config" / "libraryfolders.vdf"), content="x")
+    res = call("fs_write", path=str(tmp_path / "Steam" / "config" / "libraryfolders.vdf"), content="x")
     assert res["isError"] and "refusing to write" in res["content"][0]["text"]
     assert not (tmp_path / "Steam" / "config" / "libraryfolders.vdf").exists()
     ok = tmp_path / "notes.txt"
-    assert not call("write_file", path=str(ok), content="hi")["isError"]
-    assert "hi" in call("read_file", path=str(ok))["content"][0]["text"]
+    assert not call("fs_write", path=str(ok), content="hi")["isError"]
+    assert "hi" in call("fs_read", path=str(ok))["content"][0]["text"]
 
 
 def test_confirm_required(monkeypatch):
@@ -101,34 +101,34 @@ def test_confirm_required(monkeypatch):
 
     monkeypatch.setattr(system, "schedule_loader_restart", fake_restart)
     for args in ({}, {"confirm": False}, {"confirm": "true"}):
-        res = call("restart_loader", **args)
+        res = call("loader_restart", **args)
         assert res["isError"] and "confirm: true" in res["content"][0]["text"]
     assert restarts == []
-    assert not call("restart_loader", confirm=True)["isError"] and restarts == [1]
+    assert not call("loader_restart", confirm=True)["isError"] and restarts == [1]
 
-    res = call("install_plugin", path="/nonexistent.zip")
+    res = call("plugin_install", path="/nonexistent.zip")
     assert res["isError"] and "confirm: true" in res["content"][0]["text"]
-    res = call("install_plugin", path="/nonexistent.zip", restart="loader", confirm=True)
+    res = call("plugin_install", path="/nonexistent.zip", restart="loader", confirm=True)
     assert res["isError"] and res["content"][0]["text"].startswith("FileNotFoundError")
-    res = call("install_plugin", path="/nonexistent.zip", restart="none")
+    res = call("plugin_install", path="/nonexistent.zip", restart="none")
     assert res["isError"] and res["content"][0]["text"].startswith("FileNotFoundError")
 
     described = {t["name"]: t for t in build_registry().describe()}
-    assert "confirm: true" in described["restart_loader"]["description"]
-    assert "confirm: true" in described["install_plugin"]["description"]
-    assert described["restart_loader"]["inputSchema"]["required"] == ["confirm"]
+    assert "confirm: true" in described["loader_restart"]["description"]
+    assert "confirm: true" in described["plugin_install"]["description"]
+    assert described["loader_restart"]["inputSchema"]["required"] == ["confirm"]
 
 
 def test_audit_line_lists_known_keys_only():
     token = audit.request_origin.set(("10.0.0.5", "mcp", "VS Code on box"))
     try:
-        line = audit.tool_line("write_file", {"path": "/x", "content": "s3cret", "evil key=1": "v"}, ["path", "content", "mode"])
+        line = audit.tool_line("fs_write", {"path": "/x", "content": "s3cret", "evil key=1": "v"}, ["path", "content", "mode"])
     finally:
         audit.request_origin.reset(token)
-    assert line == 'audit tool=write_file origin=10.0.0.5 client="VS Code on box" via=mcp args=content,path+1 unknown'
+    assert line == 'audit tool=fs_write origin=10.0.0.5 client="VS Code on box" via=mcp args=content,path+1 unknown'
     assert "s3cret" not in line and "/x" not in line
-    assert audit.tool_line("restart_loader", {}, []) == 'audit tool=restart_loader origin=- client="-" via=local args=-'
-    assert audit.is_audited("input_mouse") and audit.is_audited("cef_evaluate") and not audit.is_audited("cef_console")
+    assert audit.tool_line("loader_restart", {}, []) == 'audit tool=loader_restart origin=- client="-" via=local args=-'
+    assert audit.is_audited("input_mouse") and audit.is_audited("cef_evaluate") and not audit.is_audited("logs_read")
 
 
 

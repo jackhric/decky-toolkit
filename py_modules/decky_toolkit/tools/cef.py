@@ -3,11 +3,10 @@ import json
 from typing import Any
 
 from ..steam import cdp
-from ..steam.console import DEFAULT_LEVEL, DEFAULT_TARGETS, LEVELS, ConsoleCollector
 from . import ToolRegistry
 
 
-def register(reg: ToolRegistry, console: ConsoleCollector | None = None) -> None:
+def register(reg: ToolRegistry) -> None:
     @reg.add("cef_targets", "List Steam CEF DevTools targets (tabs) exposed on localhost:8080.")
     async def cef_targets() -> list[dict[str, Any]]:
         return [{k: t.get(k) for k in ("id", "type", "title", "url")} for t in await cdp.list_targets()]
@@ -55,46 +54,12 @@ def register(reg: ToolRegistry, console: ConsoleCollector | None = None) -> None
         ]
 
     @reg.add(
-        "toast",
+        "ui_toast",
         "Show a Decky toast notification in the Steam UI.",
         {"properties": {"title": {"type": "string"}, "body": {"type": "string"}, "duration_ms": {"type": "integer", "default": 5000}},
          "required": ["title", "body"]},
     )
-    async def toast(title: str, body: str, duration_ms: int = 5000) -> str:
+    async def ui_toast(title: str, body: str, duration_ms: int = 5000) -> str:
         js = ("(async () => { const t = window.DeckyPluginLoader?.toaster; if (!t) throw new Error('DeckyPluginLoader.toaster missing');"
               f" t.toast({{ title: {json.dumps(title)}, body: {json.dumps(body)}, duration: {int(duration_ms)} }}); return 'ok'; }})()")
         return await cdp.evaluate_in(None, js)
-
-    def collector() -> ConsoleCollector:
-        if console is None:
-            raise ValueError("console capture is not running in this server")
-        return console
-
-    @reg.add(
-        "cef_console",
-        "Steam UI console output captured in the background (no need to start anything): console.* calls, uncaught "
-        "exceptions and unhandled rejections, and browser log entries (network, violations), up to 2000 per tab. "
-        f"target: {', '.join(DEFAULT_TARGETS)} (default {DEFAULT_TARGETS[0]}, where Decky and plugin frontends run) or "
-        "'all'. level is a minimum (debug < log = info < warn < error; default info). since: an entry id (returns "
-        "newer ones; pass the previous call's last_id) or an ISO time. grep: case-insensitive substring of text or url. "
-        "Returns {target, status, last_id, count, entries: [{id, target, time, source: console|exception|log, type, "
-        "level, text, url?, line?, column?, function?}]}.",
-        {"properties": {
-            "target": {"type": "string", "default": DEFAULT_TARGETS[0]},
-            "lines": {"type": "integer", "default": 200, "minimum": 1, "maximum": 4000},
-            "level": {"type": "string", "enum": list(LEVELS), "default": DEFAULT_LEVEL},
-            "since": {"type": ["string", "integer"], "description": "entry id or ISO time"},
-            "grep": {"type": "string"},
-        }},
-    )
-    async def cef_console(target: str | None = None, lines: int = 200, level: str | None = DEFAULT_LEVEL,
-                          since: Any = None, grep: str | None = None) -> dict[str, Any]:
-        return collector().query(target, lines, level, since, grep)
-
-    @reg.add(
-        "cef_console_clear",
-        "Clear the captured console buffer of one target, or of every target when target is omitted.",
-        {"properties": {"target": {"type": "string"}}},
-    )
-    async def cef_console_clear(target: str | None = None) -> dict[str, Any]:
-        return {"cleared": collector().clear(target)}

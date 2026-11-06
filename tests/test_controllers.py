@@ -289,9 +289,9 @@ def test_controller_tools():
     reg = build_registry(None, svc, make_controllers(svc))
 
     async def run():
-        res = await reg.call("add_virtual_controller", {"name": "T"})
+        res = await reg.call("controller_add", {"name": "T"})
         assert not res["isError"] and json.loads(res["content"][0]["text"])["id"] == "pad1"
-        listed = json.loads((await reg.call("list_controllers", {}))["content"][0]["text"])
+        listed = json.loads((await reg.call("controller_list", {}))["content"][0]["text"])
         assert listed["virtual"][0]["name"] == "T"
         res = await reg.call("input_gamepad", {"buttons": {"a": True}, "pad": "pad1"})
         assert res["isError"] and "disabled" in res["content"][0]["text"]
@@ -301,9 +301,9 @@ def test_controller_tools():
         res = await reg.call("input_gamepad", {"buttons": {"a": True}, "pad": "pad1", "hold_ms": 0})
         assert not res["isError"] and "pad1" in res["content"][0]["text"] and svc.get_pad("auto") is None
         assert svc.get_pad("pad1").last_event_at is not None
-        res = await reg.call("remove_virtual_controller", {"id": "pad1"})
+        res = await reg.call("controller_remove", {"id": "pad1"})
         assert not res["isError"] and svc.pads() == []
-        res = await reg.call("remove_virtual_controller", {"id": "pad1"})
+        res = await reg.call("controller_remove", {"id": "pad1"})
         assert res["isError"]
     asyncio.run(run())
 

@@ -23,7 +23,7 @@ def register(reg: ToolRegistry, service: InputService | None, capturer: ScreenCa
     async def run(fn, summary_fn, capture: bool) -> Any:
         s = svc()
         if not s.enabled:
-            raise InputDisabled("remote input is disabled; call set_input_enabled(true) or use the Decky Toolkit panel")
+            raise InputDisabled("remote input is disabled; call input_settings(enabled=true) or use the Decky Toolkit panel")
         session = s.open_session("MCP client", kind="mcp")
         try:
             result = await fn(s, session)
@@ -40,12 +40,14 @@ def register(reg: ToolRegistry, service: InputService | None, capturer: ScreenCa
                 {"type": "image", "data": base64.b64encode(frame).decode(), "mimeType": "image/jpeg"}]
 
     @reg.add(
-        "set_input_enabled",
-        "Enable or disable remote keyboard/mouse/gamepad input on the device (persisted, off by default). "
-        "The Deck shows a toast when an input session starts. Returns {enabled, backend, available, reason}.",
-        {"properties": {"enabled": {"type": "boolean"}}, "required": ["enabled"]},
+        "input_settings",
+        "Remote keyboard/mouse/gamepad input: {enabled, backend, available, reason}. Give enabled to turn it on or "
+        "off (persisted, off by default). The Deck shows a toast when an input session starts.",
+        {"properties": {"enabled": {"type": "boolean"}}},
     )
-    async def set_input_enabled(enabled: bool) -> dict[str, Any]:
+    async def input_settings(enabled: bool | None = None) -> dict[str, Any]:
+        if enabled is None:
+            return svc().state()
         return await svc().set_enabled(enabled)
 
     @reg.add(
@@ -158,7 +160,7 @@ def register(reg: ToolRegistry, service: InputService | None, capturer: ScreenCa
 
     @reg.add(
         "input_gamepad",
-        "Drive a virtual Xbox 360 pad through Steam Input. pad: a virtual pad id from add_virtual_controller; "
+        "Drive a virtual Xbox 360 pad through Steam Input. pad: a virtual pad id from controller_add; "
         "without it an implicit 'auto' pad is created on first use and removed after 60 s idle. buttons: {a,b,x,y,lb,rb,back,start,guide,ls,rs,dpad_up/down/left/right: bool}; "
         "axes: {lx,ly,rx,ry: -1..1 (y down = +1), lt,rt: 0..1}; hat: [x,y] in -1..1. The state is held for "
         "hold_ms, then everything returns to neutral. sequence runs steps in order instead: "

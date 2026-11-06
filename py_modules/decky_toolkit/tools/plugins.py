@@ -31,6 +31,25 @@ def plugin_name(dirname: str) -> str:
     return name
 
 
+def resolve_plugin(plugin: str) -> tuple[str, str]:
+    """(dir, name) of an installed plugin given either its directory or its plugin.json name."""
+    if not plugin or not isinstance(plugin, str):
+        raise ValueError("plugin must be a plugin directory or name (see plugin_list)")
+    if "/" not in plugin and not plugin.startswith(".") and os.path.isfile(os.path.join(plugins_dir(), plugin, "plugin.json")):
+        return plugin, plugin_name(plugin)
+    try:
+        dirs = sorted(os.listdir(plugins_dir()))
+    except FileNotFoundError:
+        dirs = []
+    for d in dirs:
+        try:
+            if plugin_name(d) == plugin:
+                return d, plugin
+        except (FileNotFoundError, ValueError, OSError):
+            continue
+    raise FileNotFoundError(f"no installed plugin with directory or name {plugin!r} (see plugin_list)")
+
+
 async def _reload_by_name(name: str) -> Any:
     # The loader's own websocket on :1337 is single-client (the Steam UI holds it), so ask the
     # frontend in SharedJSContext to forward the call over its existing connection.
@@ -82,7 +101,7 @@ async def install(src: str | bytes, restart: str = "loader", logger: logging.Log
 
 def register(reg: ToolRegistry) -> None:
     @reg.add(
-        "install_plugin",
+        "plugin_install",
         "Install a Decky plugin zip (either '<dir>/...' as the single top-level directory or files at the zip root) "
         "into ~/homebrew/plugins, replacing any existing copy atomically. Give either 'path' (a zip on the device) "
         "or 'zip_base64'. restart: 'loader' (default; 1s after the reply the loader is stopped, the new files are "
@@ -98,7 +117,7 @@ def register(reg: ToolRegistry) -> None:
             },
         },
     )
-    async def install_plugin(path: str | None = None, zip_base64: str | None = None, restart: str = "loader",
+    async def plugin_install(path: str | None = None, zip_base64: str | None = None, restart: str = "loader",
                              confirm: bool = False) -> dict[str, Any]:
         if (path is None) == (zip_base64 is None):
             raise ValueError("give exactly one of 'path' or 'zip_base64'")
@@ -118,18 +137,16 @@ def register(reg: ToolRegistry) -> None:
         return await install(data, restart)
 
     @reg.add(
-        "reload_plugin",
-        "Reload one plugin through Decky without restarting the loader. Without 'mode', ask Decky to reload it "
-        "(loader/reload_plugin) and return at once. mode 'frontend' re-imports only dist/index.js (~10 ms, the "
-        "backend keeps running); mode 'backend' restarts the backend too and waits until the new bundle is loaded. "
-        "Both modes reopen the plugin's panel, route, settings tab and focus if the user was there, and return "
-        "errors the plugin logged while loading.",
-        {"properties": {"dir": {"type": "string", "description": "Plugin directory name, as returned by list_plugins"},
-                        "mode": {"type": "string", "enum": ["frontend", "backend"]}},
-         "required": ["dir"]},
+        "plugin_reload",
+        "Reload one plugin in place, without restarting the loader. mode 'backend' (default) restarts its backend "
+        "and waits until the new frontend bundle is loaded; 'frontend' re-imports only dist/index.js (~10 ms, the "
+        "backend keeps running). Reopens the plugin's panel, its route, settings tab and focus if the user was there "
+        "(never over a running game) and returns errors the plugin logged while loading. Reloading Decky Toolkit's "
+        "own backend only schedules it ('scheduled': the connection drops for a few seconds).",
+        {"properties": {"plugin": {"type": "string", "description": "Directory or plugin.json name (plugin_list)"},
+                        "mode": {"type": "string", "enum": ["backend", "frontend"], "default": "backend"}},
+         "required": ["plugin"]},
     )
-    async def reload_plugin_tool(dir: str, mode: str | None = None) -> dict[str, Any]:  # noqa: A002 - documented name
-        if mode is None:
-            return await reload_plugin(dir)
+    async def plugin_reload(plugin: str, mode: str = "backend") -> dict[str, Any]:
         from ..loader import live  # live builds on this module
-        return await live.reload(dir, mode)
+        return await live.reload(resolve_plugin(plugin)[0], mode)

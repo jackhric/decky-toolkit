@@ -7,6 +7,7 @@ from typing import Any
 
 from ..steam import cdp
 from . import ToolRegistry
+from .plugins import resolve_plugin
 from .system import plugins_dir
 
 SOURCE_SUFFIXES = (".ts", ".tsx")
@@ -133,7 +134,7 @@ async def call_plugin_method(plugin: str, method: str, args: list[Any] | None = 
     if not isinstance(args, list):
         raise ValueError("args must be a list of positional arguments")
     payload = json.dumps([plugin, method, *args])
-    # Through the frontend's existing loader connection, as reload_plugin does: :1337's websocket is single-client.
+    # Through the frontend's existing loader connection, as plugin_reload does: :1337's websocket is single-client.
     js = ("(async () => { const B = window.DeckyBackend; if (!B?.call) throw new Error('window.DeckyBackend missing'); "
           f"const a = {payload}; "
           "try { return {ok: true, result: (await B.call('loader/call_plugin_method', ...a)) ?? null}; } "
@@ -161,44 +162,46 @@ def redact_secrets(value: Any) -> Any:
     return value
 
 
+PLUGIN = {"type": "string", "description": "Directory or plugin.json name (plugin_list)"}
+
+
 def register(reg: ToolRegistry) -> None:
     @reg.add(
         "plugin_methods",
-        "List the backend methods a plugin's frontend can call: public async methods of class Plugin in "
-        "<dir>/main.py, parsed (not imported). Returns {dir, file, methods: [{name, args: [{name, annotation?, "
+        "List the backend methods a plugin's frontend can call: public async methods of class Plugin in its "
+        "main.py, parsed (not imported). Returns {dir, file, methods: [{name, args: [{name, annotation?, "
         "default?}], doc (first docstring line), line}]}.",
-        {"properties": {"dir": {"type": "string", "description": "Plugin directory name, as returned by list_plugins"}},
-         "required": ["dir"]},
+        {"properties": {"plugin": PLUGIN}, "required": ["plugin"]},
     )
-    async def plugin_methods_tool(dir: str) -> dict[str, Any]:  # noqa: A002 - matches the documented argument name
-        return plugin_methods(dir)
+    async def plugin_methods_tool(plugin: str) -> dict[str, Any]:
+        return plugin_methods(resolve_plugin(plugin)[0])
 
     @reg.add(
-        "call_plugin_method",
+        "plugin_call",
         "Call a plugin's backend method as its frontend would (loader/call_plugin_method through "
-        "window.DeckyBackend in SharedJSContext). plugin is the plugin.json name (list_plugins 'name', e.g. "
-        "'Decky Toolkit'), args positional. Methods starting with '_' and Decky Toolkit's own pairing decisions are refused. Returns {ok: true, result} or "
+        "window.DeckyBackend in SharedJSContext). args are positional. Methods starting with '_' and Decky Toolkit's own pairing decisions are refused. Returns {ok: true, result} or "
         "{ok: false, error, traceback} with the exception line and the Python traceback Decky returns.",
         {"properties": {
-            "plugin": {"type": "string"},
+            "plugin": PLUGIN,
             "method": {"type": "string"},
             "args": {"type": "array", "default": []},
             "timeout": {"type": "number", "default": 30},
         }, "required": ["plugin", "method"]},
     )
-    async def call_plugin_method_tool(plugin: str, method: str, args: list[Any] | None = None,
-                                      timeout: float = 30) -> dict[str, Any]:
-        return await call_plugin_method(plugin, method, args, timeout)
+    async def plugin_call(plugin: str, method: str, args: list[Any] | None = None,
+                          timeout: float = 30) -> dict[str, Any]:
+        return await call_plugin_method(resolve_plugin(plugin)[1], method, args, timeout)
 
     @reg.add(
         "plugin_frontend_check",
         "Cross-check a plugin's frontend calls against its backend: callable(\"x\") / call(\"x\", ...) names in "
-        "<dir>/src/**/*.ts(x) when sources are installed, else in dist/index.js, against plugin_methods. Returns "
+        "src/**/*.ts(x) when sources are installed, else in dist/index.js, against plugin_methods. Returns "
         "{source, files_scanned, frontend_calls: {name: [file:line]}, backend_methods, missing_backend (called but "
         "not defined: these fail at runtime), unused_backend}.",
-        {"properties": {"dir": {"type": "string"}}, "required": ["dir"]},
+        {"properties": {"plugin": PLUGIN}, "required": ["plugin"]},
     )
-    async def plugin_frontend_check(dir: str) -> dict[str, Any]:  # noqa: A002
-        root = _plugin_path(dir)
-        methods = plugin_methods(dir)["methods"] if os.path.isfile(os.path.join(root, "main.py")) else []
-        return {"dir": dir, **frontend_check(root, methods)}
+    async def plugin_frontend_check(plugin: str) -> dict[str, Any]:
+        dirname = resolve_plugin(plugin)[0]
+        root = _plugin_path(dirname)
+        methods = plugin_methods(dirname)["methods"] if os.path.isfile(os.path.join(root, "main.py")) else []
+        return {"dir": dirname, **frontend_check(root, methods)}

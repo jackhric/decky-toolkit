@@ -104,9 +104,9 @@ def register(reg: ToolRegistry, navigator: UiNavigator | None, capturer: ScreenC
         return await inspector.focus(target)
 
     @reg.add(
-        "ui_wait_for",
+        "ui_wait",
         "Poll until an element matching selector and/or text is visible (gone=true: until none is), or until the "
-        "current route equals route (gone=true: differs). Use after ui_navigate, reload_plugin or input instead of "
+        "current route equals route (gone=true: differs). Use after ui_navigate, plugin_reload or input instead of "
         "sleeping. Returns {ok, elapsed_s, element | route}; on timeout an error with the current route and focus.",
         {"properties": {
             "selector": {"type": "string"},
@@ -118,7 +118,7 @@ def register(reg: ToolRegistry, navigator: UiNavigator | None, capturer: ScreenC
             "target": {"type": "string", "default": QUERY_TARGET},
         }},
     )
-    async def ui_wait_for(selector: str | None = None, text: str | None = None, route: str | None = None,
+    async def ui_wait(selector: str | None = None, text: str | None = None, route: str | None = None,
                           gone: bool = False, timeout: float = 10, interval: float = 0.25,
                           target: str | None = None) -> dict[str, Any]:
         return await inspector.wait_for(selector, text, route, gone, timeout, interval, target)

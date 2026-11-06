@@ -4,40 +4,38 @@ from typing import Any
 from ..steam.apps import Apps
 from . import ToolRegistry
 
-APPID = {"type": "integer", "description": "Steam appid (or a non-Steam shortcut's appid from apps_list)"}
+APPID = {"type": "integer", "description": "Steam appid (or a non-Steam shortcut's appid from app_list)"}
 
 
 def register(reg: ToolRegistry, apps: Apps | None = None) -> None:
     lib = apps or Apps()
 
     @reg.add(
-        "apps_list",
+        "app_list",
         "List Steam library apps from the Steam client: appid, name, type, installed, running, install_dir, "
         "compat_tool (Proton version or Steam Linux Runtime for native titles), size_on_disk, last_played, library. "
         "installed_only (default true) hides apps that are not installed; query filters by name substring or appid; "
-        "include_tools adds Proton/runtimes.",
+        "include_tools adds Proton/runtimes. running: true lists only what Steam reports as running "
+        "(SteamUIStore.RunningApps), each with the pid of its `reaper SteamLaunch` process and the processes below "
+        "it, plus main_appid.",
         {"properties": {
             "installed_only": {"type": "boolean", "default": True},
             "query": {"type": "string"},
             "include_tools": {"type": "boolean", "default": False},
+            "running": {"type": "boolean", "default": False},
         }},
     )
-    async def apps_list(installed_only: bool = True, query: str | None = None, include_tools: bool = False) -> dict[str, Any]:
+    async def app_list(installed_only: bool = True, query: str | None = None, include_tools: bool = False,
+                       running: bool = False) -> dict[str, Any]:
+        if running:
+            return await lib.running()
         return await lib.list(installed_only, query, include_tools)
-
-    @reg.add(
-        "apps_running",
-        "Apps Steam reports as running (SteamUIStore.RunningApps), each with the pid of its `reaper SteamLaunch` "
-        "process and the processes below it.",
-    )
-    async def apps_running() -> dict[str, Any]:
-        return await lib.running()
 
     @reg.add(
         "app_info",
         "One app in detail: Steam client details (developer, platforms, compat tool, launch options, build, cloud) "
         "plus its resolved dirs (install dir, Proton prefix and its user dirs, Steam Cloud userdata, shader cache, "
-        "XDG dirs for native titles; same as game_dirs) and its processes when running.",
+        "XDG dirs for native titles; same as app_dirs) and its processes when running.",
         {"properties": {"appid": APPID}, "required": ["appid"]},
     )
     async def app_info(appid: int) -> dict[str, Any]:

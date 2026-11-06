@@ -1,4 +1,4 @@
-"""The run_command tool."""
+"""The device_run tool."""
 from typing import Any
 
 from .. import shell
@@ -7,7 +7,7 @@ from . import ToolRegistry
 
 def register(reg: ToolRegistry) -> None:
     @reg.add(
-        "run_command",
+        "device_run",
         "Run a shell command on the device (bash -c) and return {exit_code, stdout, stderr, timed_out, duration_ms, "
         "user, cwd}. Runs as the desktop user (the one Steam runs as) with its HOME, XDG_RUNTIME_DIR, D-Bus and "
         "DISPLAY=:0, so pw-dump, gamescopectl, xdotool and systemctl --user work; root: true runs as root (same "
@@ -23,7 +23,7 @@ def register(reg: ToolRegistry) -> None:
             "max_output": {"type": "integer", "default": shell.DEFAULT_OUTPUT, "minimum": 1024, "maximum": shell.MAX_OUTPUT},
         }, "required": ["command"]},
     )
-    async def run_command(command: str, cwd: str | None = None, timeout: float = shell.DEFAULT_TIMEOUT,
-                          root: bool = False, stdin: str | None = None,
-                          max_output: int = shell.DEFAULT_OUTPUT) -> dict[str, Any]:
+    async def device_run(command: str, cwd: str | None = None, timeout: float = shell.DEFAULT_TIMEOUT,
+                         root: bool = False, stdin: str | None = None,
+                         max_output: int = shell.DEFAULT_OUTPUT) -> dict[str, Any]:
         return await shell.run_command(command, cwd, timeout, root, stdin, max_output, logger=reg.log)

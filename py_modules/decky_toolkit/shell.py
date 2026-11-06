@@ -1,4 +1,4 @@
-"""Shell commands on the device for paired clients, as the desktop user or (on request) root.
+"""Shell commands on the device (device_run, POST /exec) for paired clients, as the desktop user or (on request) root.
 
 A paired client can already run anything as root by installing a plugin, so this adds no access; it replaces ssh
 for development. Every command is logged in full (the one place arguments are), with the user and caller.
@@ -112,7 +112,7 @@ async def run_command(command: str, cwd: str | None = None, timeout: float = DEF
         raise FileNotFoundError(f"cwd {workdir} is not a directory")
     who = "root" if as_root else user.pw_name
     remote, kind, client = request_origin.get()
-    logger.info("audit run_command as=%s cwd=%s origin=%s client=%s via=%s: %s", who, workdir, remote, client, kind,
+    logger.info("audit device_run as=%s cwd=%s origin=%s client=%s via=%s: %s", who, workdir, remote, client, kind,
                 command if len(command) <= LOGGED_CHARS else command[:LOGGED_CHARS] + "…")
 
     kwargs: dict[str, Any] = {}

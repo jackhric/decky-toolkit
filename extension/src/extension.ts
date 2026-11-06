@@ -270,7 +270,7 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     if (!client) return;
     const body = await vscode.window.showInputBox({ prompt: 'Toast text to show on the device', value: 'Hello from VS Code' });
     if (!body) return;
-    await client.callToolText('toast', { title: 'VS Code', body });
+    await client.callToolText('ui_toast', { title: 'VS Code', body });
   });
   command('decky-toolkit.writeMcpConfig', () => writeMcpConfig(c));
   command('decky-toolkit.copyMcpUrl', async () => {

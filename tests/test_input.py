@@ -366,7 +366,7 @@ def test_input_tools_refuse_when_disabled_and_work_when_enabled(tmp_path):
                            ("input_gamepad", {"buttons": {"a": True}})):
             res = await reg.call(name, args)
             assert res["isError"] and "disabled" in res["content"][0]["text"], name
-        res = await reg.call("set_input_enabled", {"enabled": True})
+        res = await reg.call("input_settings", {"enabled": True})
         assert not res["isError"] and json.loads(res["content"][0]["text"])["enabled"] is True
         res = await reg.call("input_key", {"keys": "ctrl+a", "hold_ms": 0})
         assert not res["isError"], res
