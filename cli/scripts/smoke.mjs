@@ -305,7 +305,7 @@ await check('mcp over stdio', async () => {
   const init = r.replies.get(1).result;
   assert.equal(init.protocolVersion, '2025-06-18');
   assert.deepEqual(init.serverInfo, { name: 'decky-toolkit', version: pkg.version });
-  assert.deepEqual(init.capabilities, { tools: { listChanged: false } });
+  assert.deepEqual(init.capabilities, { tools: { listChanged: true } });
   assert.equal(typeof init.instructions, 'string');
   assert.deepEqual(r.replies.get(2).result.tools.map(t => t.name), ['decky_status', 'screen_capture', 'deploy_plugin', 'device_status']);
   assert.equal(r.replies.get(3).result.isError, false);
@@ -323,6 +323,40 @@ await check('mcp over stdio', async () => {
   // tools/list went to the device once; later calls reuse it.
   assert.equal(state().rpc.filter(m => m === 'tools/list').length, 1);
   return `${r.lines.length} replies in ${Date.now() - t0} ms, stderr ${r.stderr.length} B`;
+});
+
+await check('mcp: unknown arguments are refused; a changed device tool list sends tools/list_changed', async () => {
+  setState({ health: { ...health, tools_hash: 'aaaa' } });
+  const send = (child, m) => child.stdin.write(JSON.stringify(m) + '\n');
+  let step = 0;
+  const r = await cli(['mcp'], {
+    timeoutMs: 30000,
+    onSpawn: child => send(child, { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'smoke', version: '1' } } }),
+    onStdout: (stdout, child) => {
+      const lines = stdout.split('\n').slice(0, -1).map(l => JSON.parse(l));
+      if (step === 0 && lines.some(m => m.id === 1)) { step = 1; send(child, { jsonrpc: '2.0', id: 2, method: 'tools/list' }); }
+      if (step === 1 && lines.some(m => m.id === 2)) {
+        step = 2;
+        setState({ health: { ...health, tools_hash: 'bbbb' } });
+        send(child, { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'decky_status', arguments: {} } });
+      }
+      if (step === 2 && lines.some(m => m.method === 'notifications/tools/list_changed')) {
+        step = 3;
+        send(child, { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'deploy_plugin', arguments: { path: plugin } } });
+      }
+      if (step === 3 && lines.some(m => m.id === 4)) { step = 4; child.stdin.end(); }
+    },
+  });
+  setState({ health });
+  assert.equal(r.code, 0, r.stderr);
+  const msgs = r.stdout.trim().split('\n').map(l => JSON.parse(l));
+  const note = msgs.findIndex(m => m.method === 'notifications/tools/list_changed');
+  assert.ok(note > msgs.findIndex(m => m.id === 2), 'the notification follows the list it invalidates');
+  assert.equal(msgs.filter(m => m.method === 'notifications/tools/list_changed').length, 1);
+  const refused = msgs.find(m => m.id === 4).result;
+  assert.equal(refused.isError, true);
+  assert.equal(refused.content[0].text, "Invalid arguments for deploy_plugin: unknown argument 'path'. Arguments: dir (string); restart (none|plugin|loader).");
+  return 'list_changed after the fingerprint moved; deploy_plugin {path} refused with the argument list';
 });
 
 await check('initialize answers without the device', async () => {

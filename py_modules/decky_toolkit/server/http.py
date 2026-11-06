@@ -115,7 +115,8 @@ class Api:
         return web.Response(text="Decky Toolkit is running. Connect with the Decky Toolkit extension for VS Code / VSCodium.\n")
 
     async def handle_health(self, _request: web.Request) -> web.Response:
-        return web.json_response({"ok": True, **SERVER_INFO, "api_version": API_VERSION, "tools": len(self.mcp.tools), **identity()})
+        return web.json_response({"ok": True, **SERVER_INFO, "api_version": API_VERSION, "tools": len(self.mcp.tools),
+                                  "tools_hash": self.mcp.tools.fingerprint(), **identity()})
 
     # ---- pairing ----
 

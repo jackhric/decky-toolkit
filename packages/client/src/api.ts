@@ -6,6 +6,8 @@ export interface Health {
   version: string;
   api_version: number;
   tools: number;
+  /** Changes with any tool, description or schema; absent on older builds. */
+  tools_hash?: string;
   /** Identification for network discovery; absent on older builds. */
   hostname?: string;
   device_id?: string | null;
