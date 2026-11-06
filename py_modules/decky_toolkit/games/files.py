@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from typing import Any, Iterable
 
 from . import vdf
-from ..tools.guard import check_write, is_sensitive
+from ..tools.guard import check_read, check_write, is_sensitive
 
 STEAMID64_BASE = 76561197960265728
 MAX_LIST_ENTRIES = 2000
@@ -37,15 +37,8 @@ _NOT_SAVE_EXT = {".dll", ".exe", ".so", ".pak", ".ucas", ".utoc", ".log", ".png"
                  ".bk2", ".bnk", ".wem", ".assets", ".resource", ".ress", ".unity3d", ".mui", ".nls", ".tlb"}
 
 
-class SensitivePath(ValueError):
+class OutsideRoots(PermissionError):
     pass
-
-
-# Shared deny list (Steam credentials, cookies, SSH keys) lives in tools/guard.
-
-def check_sensitive(path: str) -> None:
-    if is_sensitive(path):
-        raise SensitivePath(f"refused: {path} holds Steam login credentials")
 
 
 def user_home() -> str:
@@ -460,7 +453,7 @@ def _kind(mode: int) -> str:
 
 def fs_stat(path: str, home: str | None = None) -> dict[str, Any]:
     path = expand(path, home)
-    check_sensitive(path)
+    check_read(path)
     st = os.lstat(path)
     out: dict[str, Any] = {
         "path": path, "type": _kind(st.st_mode), "size": st.st_size, "mtime": iso(st.st_mtime),
@@ -484,7 +477,7 @@ def fs_stat(path: str, home: str | None = None) -> dict[str, Any]:
 def fs_list(path: str, depth: int = 1, glob: str | None = None, home: str | None = None,
             max_entries: int = MAX_LIST_ENTRIES) -> dict[str, Any]:
     path = expand(path, home)
-    check_sensitive(path)
+    check_read(path)
     if not isinstance(depth, int) or isinstance(depth, bool) or not 1 <= depth <= MAX_LIST_DEPTH:
         raise ValueError(f"depth must be an integer 1-{MAX_LIST_DEPTH}")
     if not os.path.isdir(path):
@@ -556,17 +549,16 @@ def fs_delete(path: str, confirm: bool, roots: list[tuple[str, int]], home: str 
     if confirm is not True:
         raise ValueError("fs_delete is destructive: pass confirm=true to delete")
     path = expand(path, home)
-    check_sensitive(path)
+    check_read(path)
     if not os.path.lexists(path):
         raise FileNotFoundError(path)
     if not deletable(path, roots):
-        raise ValueError(f"refused: {path} is not inside a game dir (steamapps/common/<game>/...), a compatdata or "
-                         "shadercache entry, userdata/<account>/<appid> or the plugin runtime dir")
+        raise OutsideRoots(f"refused: {path} is not inside a game dir (steamapps/common/<game>/...), a compatdata or "
+                           "shadercache entry, userdata/<account>/<appid> or the plugin runtime dir")
     files, size = 0, 0
     if os.path.isdir(path) and not os.path.islink(path):
         for e in _walk_files(path, max_depth=64, budget=[10 ** 9]):
-            if is_sensitive(e.path):
-                raise SensitivePath(f"refused: {e.path} holds Steam login credentials")
+            check_read(e.path)
             files += 1
             try:
                 size += e.stat(follow_symlinks=False).st_size
@@ -591,10 +583,6 @@ _NOT_GAME_XDG = {"systemd", "autostart", "fish", "git", "pulse", "pipewire", "wi
                  "steam", "decky", "homebrew", "sddm", "xdg-desktop-portal", "user-dirs.dirs", "mimeapps.list"}
 
 
-class OutsideRoots(PermissionError):
-    pass
-
-
 class TooLarge(ValueError):
     pass
 
@@ -610,6 +598,24 @@ def write_roots(root: str, libraries: Iterable[str], runtime_dir: str | None) ->
     if runtime_dir:
         out.append((os.path.realpath(runtime_dir), 1))
     return out
+
+
+# (write roots, installed-title name keys); None writes anywhere (still behind the guard).
+WriteScope = tuple[list[tuple[str, int]], list[str]]
+
+
+def _device_dirs() -> tuple[str, list[str], str | None]:
+    root = steam_root()
+    return root, library_folders(root), os.environ.get("DECKY_PLUGIN_RUNTIME_DIR")
+
+
+def device_delete_roots() -> list[tuple[str, int]]:
+    return delete_roots(*_device_dirs())
+
+
+def device_write_scope() -> WriteScope:
+    root, libs, runtime = _device_dirs()
+    return write_roots(root, libs, runtime), installed_name_keys(libs)
 
 
 def installed_name_keys(libraries: Iterable[str]) -> list[str]:
@@ -670,10 +676,9 @@ def writable(path: str, roots: list[tuple[str, int]], home: str, keys: Iterable[
     return False
 
 
-def _check_writable(path: str, roots: list[tuple[str, int]], home: str, keys: Iterable[str], follow: bool = True) -> None:
-    check_sensitive(path)
+def _check_writable(path: str, scope: WriteScope | None, home: str, follow: bool = True) -> None:
     check_write(path)
-    if not writable(path, roots, home, keys, follow):
+    if scope is not None and not writable(path, scope[0], home, scope[1], follow):
         raise OutsideRoots(f"refused: {path} is not inside a game install dir (steamapps/common/<game>/...), a Proton "
                            "prefix (compatdata/<appid>/...), userdata/<account>/<appid>/..., the plugin runtime dir or a "
                            "~/.local/share or ~/.config dir named after an installed game")
@@ -703,25 +708,26 @@ def _makedirs_owned(d: str) -> None:
         _chown_like(m, os.path.dirname(m))
 
 
-def fs_read(path: str, home: str | None = None, max_bytes: int = MAX_READ_BYTES) -> bytes:
+def fs_read(path: str, home: str | None = None, max_bytes: int = MAX_READ_BYTES, truncate: bool = False) -> bytes:
+    """The file's bytes; above max_bytes TooLarge, or with truncate the first max_bytes."""
     path = expand(path, home)
-    check_sensitive(path)
+    check_read(path)
     st = os.stat(path)
     if stat.S_ISDIR(st.st_mode):
         raise IsADirectoryError(f"is a directory: {path}")
     if not stat.S_ISREG(st.st_mode):
         raise ValueError(f"not a regular file: {path}")
-    if st.st_size > max_bytes:
+    if st.st_size > max_bytes and not truncate:
         raise TooLarge(f"{path} is {st.st_size} bytes; the limit is {max_bytes}")
     with open(path, "rb") as f:
         return f.read(max_bytes + 1)[:max_bytes]
 
 
-def fs_write(path: str, data: bytes, roots: list[tuple[str, int]], keys: Iterable[str], home: str | None = None,
+def fs_write(path: str, data: bytes, scope: WriteScope | None, home: str | None = None,
              create: bool = True, overwrite: bool = True) -> dict[str, Any]:
     home = home or user_home()
     path = expand(path, home)
-    _check_writable(path, roots, home, keys)
+    _check_writable(path, scope, home)
     exists = os.path.exists(path)
     if os.path.isdir(path):
         raise IsADirectoryError(f"is a directory: {path}")
@@ -753,11 +759,11 @@ def fs_write(path: str, data: bytes, roots: list[tuple[str, int]], keys: Iterabl
     return {"path": path, "bytes": len(data), "created": not exists}
 
 
-def fs_mkdir(path: str, roots: list[tuple[str, int]], keys: Iterable[str], home: str | None = None,
+def fs_mkdir(path: str, scope: WriteScope | None, home: str | None = None,
              parents: bool = False) -> dict[str, Any]:
     home = home or user_home()
     path = expand(path, home)
-    _check_writable(path, roots, home, keys)
+    _check_writable(path, scope, home)
     if os.path.lexists(path):
         raise FileExistsError(f"exists: {path}")
     parent = os.path.dirname(path)
@@ -767,13 +773,13 @@ def fs_mkdir(path: str, roots: list[tuple[str, int]], keys: Iterable[str], home:
     return {"path": path, "created": True}
 
 
-def fs_rename(src: str, dst: str, roots: list[tuple[str, int]], keys: Iterable[str], home: str | None = None,
+def fs_rename(src: str, dst: str, scope: WriteScope | None, home: str | None = None,
               overwrite: bool = False) -> dict[str, Any]:
     home = home or user_home()
     src, dst = expand(src, home), expand(dst, home)
     # Renaming a symlink moves the link, never its target.
-    _check_writable(src, roots, home, keys, follow=False)
-    _check_writable(dst, roots, home, keys, follow=False)
+    _check_writable(src, scope, home, follow=False)
+    _check_writable(dst, scope, home, follow=False)
     if not os.path.lexists(src):
         raise FileNotFoundError(src)
     if os.path.lexists(dst) and not overwrite:
@@ -782,8 +788,7 @@ def fs_rename(src: str, dst: str, roots: list[tuple[str, int]], keys: Iterable[s
         raise FileNotFoundError(f"parent directory does not exist: {os.path.dirname(dst)}")
     if os.path.isdir(src) and not os.path.islink(src):
         for e in _walk_files(src, max_depth=64, budget=[10 ** 6]):
-            if is_sensitive(e.path):
-                raise SensitivePath(f"refused: {e.path} holds Steam login credentials")
+            check_read(e.path)
     os.replace(src, dst)
     return {"from": src, "to": dst}
 

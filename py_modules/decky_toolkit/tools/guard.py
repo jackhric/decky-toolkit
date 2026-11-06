@@ -36,6 +36,10 @@ def _matches(path: str, patterns: tuple[str, ...]) -> bool:
     return False
 
 
+class SensitivePath(PermissionError):
+    pass
+
+
 def is_sensitive(path: str) -> bool:
     """Credential or session files that may be neither read nor written."""
     return _matches(path, SENSITIVE_PATTERNS)
@@ -47,9 +51,9 @@ def is_write_protected(path: str) -> bool:
 
 def check_read(path: str) -> None:
     if is_sensitive(path):
-        raise PermissionError(f"refusing to read {path}: Steam credential/session or key file (tools/guard.py)")
+        raise SensitivePath(f"refusing to read {path}: Steam credential/session or key file (tools/guard.py)")
 
 
 def check_write(path: str) -> None:
     if is_write_protected(path):
-        raise PermissionError(f"refusing to write {path}: protected Steam config, credential or key file (tools/guard.py)")
+        raise SensitivePath(f"refusing to write {path}: protected Steam config, credential or key file (tools/guard.py)")

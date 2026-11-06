@@ -120,10 +120,6 @@ class Identity:
         finally:
             shutil.rmtree(work, ignore_errors=True)
 
-    @property
-    def cert_der(self) -> bytes:
-        return pem_to_der(self.cert_pem, "CERTIFICATE")
-
     async def sign_client(self, public_key_pem: str, name: str) -> str:
         """A client-auth certificate for the given key, signed by the device; no CSR, the key stays with the client."""
         spki = parse_public_key(public_key_pem)

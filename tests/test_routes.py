@@ -161,7 +161,8 @@ def test_old_and_dropped_paths_are_gone_and_mcp_is_post_only():
     async def run(s, base):
         for method, path in OLD_TOP_LEVEL:
             async with s.request(method, base + path) as r:
-                assert r.status == 401, ("unauthenticated", method, path, r.status)
+                assert r.status == 404, ("unauthenticated", method, path, r.status)
+                assert "older than the Decky Toolkit plugin" in (await r.json())["error"]
         for method, path in OLD_TOP_LEVEL + DROPPED:
             async with s.request(method, base + path, headers=H) as r:
                 assert r.status in (404, 405), (method, path, r.status)
@@ -417,3 +418,14 @@ def test_restart_keeps_subscribers_attached():
         if cap._idle_task:
             cap._idle_task.cancel()
     asyncio.run(run())
+
+
+def test_unknown_api_paths_answer_json():
+    async def run(s, base):
+        async with s.get(f"{base}/api/v1/nope", headers=H) as r:
+            assert r.status == 404 and await r.json() == {"error": "Not found"}
+        async with s.post(f"{base}/api/v1/fs/read", headers=H) as r:
+            assert r.status == 405
+        async with s.get(f"{base}/health") as r:
+            assert r.status == 200
+    asyncio.run(with_server(run))

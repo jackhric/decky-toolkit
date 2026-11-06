@@ -690,7 +690,7 @@ async function check(name, fn) {
 const settle = (ms = 50) => new Promise(r => setTimeout(r, ms));
 const labels = items => items.map(i => i.label);
 const run = (id, ...args) => calls.commands.get(id)(...args);
-// Pairings live in the identity file; `secrets` only matters for the migration from older versions.
+// Pairings live in the identity file; `secrets` only when it cannot be written.
 const identityKey = 'decky-toolkit.identity:10.1.2.3:8765';
 const readIdentityFile = () => (existsSync(identityPath) ? JSON.parse(readFileSync(identityPath, 'utf8')) : undefined);
 function storedIdentity(k = identityKey) {
@@ -830,39 +830,6 @@ await check('identity file watcher: fires on an external atomic write and on rem
       assert.deepEqual(seen, [null]);
     } finally {
       w.close();
-    }
-  });
-});
-
-await check('migration: a pairing in secret storage is copied to the identity file once and the secret is kept', async () => {
-  await inOtherConfigDir(async (_dir, file) => {
-    const sec = new Map([[identityKey, JSON.stringify(pairedIdentity)]]);
-    const state = new Map([['decky-toolkit.devices', [{ id: 'd1', name: 'deck', host: '10.1.2.3', port: 8765 }]], ['decky-toolkit.activeDevice', 'd1']]);
-    const mkCtx = () => ({
-      subscriptions: [], extensionUri: ctx.extensionUri,
-      secrets: { get: async k => sec.get(k), store: async (k, v) => { sec.set(k, v); }, delete: async k => { sec.delete(k); }, onDidChange: noopEvent },
-      globalState: { get: (k, d) => (state.has(k) ? state.get(k) : d), update: async (k, v) => { state.set(k, v); } },
-      workspaceState: ctx.workspaceState,
-    });
-    const c = new ext.Connection(mkCtx());
-    try {
-      await c.initDevices();
-      const f = JSON.parse(readFileSync(file, 'utf8'));
-      assert.deepEqual(f, { version: 1, device: { host: '10.1.2.3', port: 8765, name: 'deck' }, ...pairedIdentity });
-      assert.ok(sec.has(identityKey), 'the secret stays');
-      assert.deepEqual(await c.identityFor({ host: '10.1.2.3', port: 8765 }), pairedIdentity);
-      assert.equal(await c.identityFor({ host: '10.1.2.4', port: 8765 }), undefined, 'one device per machine');
-    } finally {
-      c.dispose();
-    }
-    rmSync(file);
-    const again = new ext.Connection(mkCtx());
-    try {
-      await again.initDevices();
-      assert.equal(existsSync(file), false, 'migrates only once: a file removed later (forgotten elsewhere) is not brought back');
-      assert.equal(await again.identityFor({ host: '10.1.2.3', port: 8765 }), undefined);
-    } finally {
-      again.dispose();
     }
   });
 });
@@ -2681,7 +2648,7 @@ await check('remote FS provider against a fake /fs* server: stat, readDirectory,
 // Captured from avahi-publish on the Bazzite device answering a legacy unicast PTR query (2026-11-04).
 const AVAHI_ANSWER = Buffer.from('1234840000010005000000000e5f6465636b792d746f6f6c6b6974045f746370056c6f63616c00000c0001c00c000c00010000000a000a0762617a7a697465c00cc037001000010000000a001c0769643d61626364056170693d310d76657273696f6e3d302e322e30c037002100010000000a001000000000223d0762617a7a697465c020c07b001c00010000000a0010fe800000000000001d7a890bd48de1ebc07b000100010000000a00040a004612', 'hex');
 const toolkitHealth = (hostname, version = '0.3.0', extra = {}) => ({ ok: true, name: 'decky-toolkit', version, api: ['v1'], tools: 60, hostname, device_id: `id-${hostname}`, os: 'SteamOS', ...extra });
-const legacyHealth = { ok: true, name: 'decky-mcp', version: '0.2.0', api_version: 1, tools: 51 };
+const oldHealth = { ok: true, name: 'decky-toolkit', version: '0.2.0', tools: 51 };
 const useFakeLan = () => {
   net.interfaces = {
     lo: [{ family: 'IPv4', internal: true, address: '127.0.0.1', netmask: '255.0.0.0' }],
@@ -2693,7 +2660,8 @@ const useFakeLan = () => {
   };
   net.hosts = new Map([
     ['10.0.70.18:8765', toolkitHealth('bazzite.internal', '0.3.0', { os: 'Bazzite' })],
-    ['10.0.70.40:8765', legacyHealth],
+    ['10.0.70.40:8765', oldHealth],
+    ['10.0.70.43:8765', { ok: true, name: 'decky-mcp', version: '0.2.0', tools: 51 }],
     ['10.0.70.41:8765', { ok: true, name: 'some-other-service', version: '1.0' }],
     ['10.0.70.42:8765', '<html>router login</html>'],
     ['10.1.2.3:8765', toolkitHealth('steamdeck')],
@@ -2763,9 +2731,9 @@ await check('discovery: Search network finds devices via mDNS and the subnet swe
     ['bazzite', '10.0.70.18 · v0.3.0', 'vm', 'deck.found'],
     ['10.0.70.40', '10.0.70.40 · v0.2.0', 'vm', 'deck.found'],
     ['Add a device by address…', undefined, 'add', 'discovery.add'],
-  ], 'saved 10.1.2.3, the other service, the HTML page and the slow host are left out');
+  ], 'saved 10.1.2.3, the other services, the HTML page and the slow host are left out');
   assert.match(kids[0].tooltip.value, /Decky Toolkit 0\.3\.0, API v1 · Bazzite/);
-  assert.match(kids[1].tooltip.value, /decky-mcp 0\.2\.0/);
+  assert.match(kids[1].tooltip.value, /Decky Toolkit 0\.2\.0, API none/);
   assert.deepEqual(kids[0].command, { command: 'decky-toolkit.connectFound', title: 'Connect', arguments: ['10.0.70.18:8765'] });
   assert.deepEqual(itemMenu('decky-toolkit.devices', 'deck.found', true), ['decky-toolkit.connectFound']);
   assert.deepEqual(itemMenu('decky-toolkit.devices', 'deck.found', false), ['decky-toolkit.connectFound']);
@@ -2807,7 +2775,7 @@ await check('discovery engine: found/lost events, throttled start, stop, probe c
   d.dispose();
   net.hosts.delete('10.1.2.77:8765');
   net.hosts.delete('10.1.2.78:8765');
-  net.hosts.set('10.0.70.40:8765', legacyHealth);
+  net.hosts.set('10.0.70.40:8765', oldHealth);
   return JSON.stringify(events);
 });
 
