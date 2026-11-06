@@ -273,19 +273,19 @@ const ctx = {
 };
 
 // Fake device behind global fetch so the real DeckyClient is exercised. 10.9.9.9 never answers.
-const health = { ok: true, name: 'decky-toolkit', version: '0.2.0', api_version: 1, tools: 15 };
+const health = { ok: true, name: 'decky-toolkit', version: '0.2.0', api: ['v1'], tools: 15 };
 const stats = { available: true, running: true, subscribers: 1, fps: 30, kbps: 19542, frames_total: 10, uptime_s: 1, width: 1920, height: 1080, settings: { fps: 30, quality: 70, width: 0, audio: true }, error: null };
 const streamLimits = { fps: [1, 60], quality: [10, 100], widths: [0, 1600, 1280, 960, 640], audio: [false, true] };
 let plugins = [
   { dir: 'decky-toolkit', name: 'Decky Toolkit', author: 'jackh', flags: ['root', 'debug'], api_version: 1, version: '0.1.0', has_backend: true },
   { dir: 'romm-tender', name: 'Tender', author: 'x', flags: [], api_version: 1, version: '0.33.0', has_backend: true },
 ];
-const device = { up: true, pairQueue: [], pairRequests: [], pairCancelled: [], pairUnsupported: false, installs: [], journal: ['boot'], pluginLog: {}, installMeta: { name: 'My Plugin', version: '1.2.3' }, downFor: 0, inputSupported: true, input: { enabled: false, backend: 'ei', available: true, reason: null } };
+const device = { up: true, pairQueue: [], pairRequests: [], pairCancelled: [], pairUnsupported: false, installs: [], journal: ['boot'], pluginLog: {}, installMeta: { name: 'My Plugin', version: '1.2.3' }, downFor: 0, input: { enabled: false, backend: 'ei', available: true, reason: null } };
 const frameJpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 0xff, 0xd9]);
 // Controllers and Steam UI routes as in the API contract; `streams` are open /controllers/events bodies.
 const steamDeck = { id: 'evdev:deck', name: 'Steam Deck', kind: 'physical', virtual_id: null, vendor: '28de', product: '1205', device: '/dev/input/event5', steam: { type: 'steamdeck', slot: 0, name: 'Steam Deck' } };
 const ctl = {
-  missing: false, eventsStatus: 200, refuse: null, nextId: 1, posts: [], streams: new Set(),
+  eventsStatus: 200, refuse: null, nextId: 1, posts: [], streams: new Set(),
   controllers: [steamDeck, { id: 'evdev:auto', name: 'Decky Toolkit pad', kind: 'virtual', virtual_id: 'auto0', vendor: '045e', product: '028e', device: '/dev/input/event9', steam: { type: 'xbox360', slot: 1, name: 'Xbox 360 Controller' } }],
   virtual: [{ id: 'auto0', name: 'Decky Toolkit pad', type: 'x360', created_at: 1, last_event_at: 2, auto: true }],
 };
@@ -300,7 +300,7 @@ const uiRoutes = {
   plugins: [{ plugin: 'Tender', path: '/tender', title: 'Tender' }],
   quick_access_tabs: ['Notifications', 'Decky'],
 };
-const uiDevice = { missing: false, posts: [] };
+const uiDevice = { posts: [], toasts: [] };
 // Library and game folders as the device reports them (Bazzite: Steam paths under /var/home, ~ is /home).
 const ago = s => new Date(Date.now() - s * 1000).toISOString().replace(/\.\d+Z$/, '+00:00');
 const STEAM = '/var/home/jackh/.local/share/Steam';
@@ -355,25 +355,15 @@ const savesVVVVVV = {
   ],
 };
 const games = {
-  missing: false, toolCalls: [],
+  calls: [],
   apps: [appRom, appChained, appVVVVVV, appRemote],
   dirs: { 70300: dirsVVVVVV, 2567870: dirsChained },
   saves: { 70300: savesVVVVVV, 2567870: savesChained },
-  tools: {
-    app_launch: a => ({ appid: a.appid, name: 'Chained Together', launched: true, running: true }),
-    app_terminate: a => ({ appid: a.appid, name: 'VVVVVV', terminated: true, running: false }),
-    logs_read: a => ({
-      source: a.source,
-      appid: a.appid,
-      proton_log: { path: `/home/jackh/steam-${a.appid}.log`, exists: false, hint: 'set the launch option PROTON_LOG=1 %command% and run the game to create it' },
-      steam_logs: [{ file: `${STEAM}/logs/compat_log.txt`, mtime: ago(60), lines: [`StartSession: appID ${a.appid}`] }],
-    }),
-  },
 };
 
 // In-memory device file system behind the /fs routes, with the server's guards: login files are refused,
 // writes only under ~/.local/share/VVVVVV, DELETE needs confirm=1.
-const fakeFs = { missing: false, nodes: new Map(), log: [] };
+const fakeFs = { nodes: new Map(), log: [] };
 const fsDir = p => (p.lastIndexOf('/') <= 0 ? '/' : p.slice(0, p.lastIndexOf('/')));
 const fsBase = p => p.slice(p.lastIndexOf('/') + 1);
 const fsPut = (p, type, data, extra = {}) => fakeFs.nodes.set(p, { type, data: data === undefined ? undefined : new TextEncoder().encode(data), mtime: '2026-11-04T09:35:42+00:00', ...extra });
@@ -388,7 +378,6 @@ const fsWritable = p => p.startsWith('/home/jackh/.local/share/VVVVVV/');
 async function fsRoute(u, init, json) {
   const method = init.method ?? 'GET';
   fakeFs.log.push(`${method} ${u.pathname}${u.search}`);
-  if (fakeFs.missing) return new Response('404: Not Found', { status: 404 });
   const fail = (status, code, error) => json({ error, code }, status);
   const nodes = fakeFs.nodes;
   const p = u.searchParams.get('path')?.replace(/^~(?=\/|$)/, '/home/jackh');
@@ -451,6 +440,78 @@ async function fsRoute(u, init, json) {
 }
 
 const fetched = [];
+// Requests to /mcp: the extension itself never makes one (only external MCP clients through its proxy do).
+const mcpCalls = [];
+const fail = (status, error) => { throw { status, error }; };
+// The client API routes the extension uses beyond pairing, streams and files: [method, path pattern, handler].
+// A handler gets the match, the JSON body and the query; `fail` answers with a status and {"error"}.
+const deviceRoutes = [
+  ['GET', /^\/stream\/stats$/, () => stats],
+  ['GET', /^\/stream\/settings$/, () => (device.streamSettingsMissing ? fail(404, 'capture not available') : { ...stats.settings, limits: streamLimits })],
+  ['PUT', /^\/stream\/settings$/, (_m, body) => {
+    if (device.streamSettingsMissing) fail(404, 'capture not available');
+    device.streamPuts = [...(device.streamPuts ?? []), body];
+    stats.settings = { ...stats.settings, ...body };
+    return { ...stats.settings, limits: streamLimits };
+  }],
+  ['GET', /^\/stream\/frame$/, () => new Response(frameJpeg, { headers: { 'content-type': 'image/jpeg' } })],
+  ['GET', /^\/input\/settings$/, () => device.input],
+  ['PUT', /^\/input\/settings$/, (_m, body) => (device.input = { ...device.input, enabled: body.enabled })],
+  ['GET', /^\/plugins$/, () => plugins],
+  ['POST', /^\/plugins\/([^/]+)\/reload$/, (m, _b, q) => {
+    const dir = decodeURIComponent(m[1]), mode = q.get('mode') ?? 'backend';
+    device.liveReloads = [...(device.liveReloads ?? []), { dir, mode }];
+    return { dir, name: device.installMeta.name, mode, load_ms: 9, reloaded: true, errors: [], restored: ['panel'], routes: [] };
+  }],
+  ['POST', /^\/loader\/restart$/, () => ({ restarting: true, delay_s: 1 })],
+  ['GET', /^\/logs\/tail$/, (_m, _b, q) => {
+    const dir = q.get('plugin'), tail = Number(q.get('tail') ?? 100);
+    if (!dir) return { lines: device.journal.slice(-tail) };
+    return device.pluginLog[dir] ? { lines: device.pluginLog[dir].slice(-tail) } : fail(404, 'no log dir');
+  }],
+  ['GET', /^\/controllers$/, () => ({ controllers: ctl.controllers, virtual: ctl.virtual, input_enabled: device.input.enabled })],
+  ['POST', /^\/controllers\/virtual$/, (_m, req) => {
+    ctl.posts.push(req);
+    if (ctl.refuse) fail(503, ctl.refuse);
+    if (ctl.virtual.filter(v => !v.auto).length >= 4) fail(400, 'all 4 virtual controller slots are in use');
+    const id = `v${ctl.nextId++}`;
+    const name = req.name ?? `Virtual pad ${ctl.nextId - 1}`;
+    ctl.virtual.push({ id, name, type: 'x360', created_at: 3, last_event_at: null, auto: false });
+    ctl.controllers.push({ id: `evdev:${id}`, name, kind: 'virtual', virtual_id: id, vendor: '045e', product: '028e', device: `/dev/input/event1${ctl.nextId}`, steam: { type: 'xbox360', slot: ctl.controllers.length, name: 'Xbox 360 Controller' } });
+    ctlPush();
+    return { id, name, type: 'x360' };
+  }],
+  ['DELETE', /^\/controllers\/virtual\/([^/]+)$/, m => {
+    const id = decodeURIComponent(m[1]);
+    if (!ctl.virtual.some(v => v.id === id)) fail(404, `no virtual gamepad '${id}'`);
+    ctl.virtual = ctl.virtual.filter(v => v.id !== id);
+    ctl.controllers = ctl.controllers.filter(c => c.virtual_id !== id);
+    ctlPush();
+    return { removed: id };
+  }],
+  ['GET', /^\/ui\/routes$/, () => uiRoutes],
+  ['POST', /^\/ui\/navigate$/, (_m, body) => {
+    uiDevice.posts.push(body);
+    if (body.path && !/^\/(library|settings|tender)/.test(body.path)) fail(400, `unknown path ${body.path}`);
+    if (body.path) uiRoutes.current = body.path;
+    return { ok: true, current: body.path ?? (body.action === 'plugin' ? `/quickaccess/${body.plugin}` : uiRoutes.current) };
+  }],
+  ['POST', /^\/ui\/toast$/, (_m, body) => { uiDevice.toasts.push(body); return { result: 'ok' }; }],
+  ['POST', /^\/cef\/evaluate$/, (_m, body) => ({ value: body.expression === 'window.DeckyPluginLoader?.version' ? 'v3.3.1' : null })],
+  ['GET', /^\/apps$/, () => ({ count: games.apps.length, apps: games.apps })],
+  ['GET', /^\/apps\/(\d+)\/(dirs|saves)$/, m => games[m[2]][m[1]] ?? fail(404, 'app is not in this Steam library')],
+  ['GET', /^\/apps\/(\d+)\/proton-log$/, m => ({
+    appid: Number(m[1]),
+    proton_log: { path: `/home/jackh/steam-${m[1]}.log`, exists: false, hint: 'set the launch option PROTON_LOG=1 %command% and run the game to create it' },
+    steam_logs: [{ file: `${STEAM}/logs/compat_log.txt`, mtime: ago(60), lines: [`StartSession: appID ${m[1]}`] }],
+  })],
+  ['POST', /^\/apps\/(\d+)\/(launch|terminate)$/, (m, body) => {
+    const appid = Number(m[1]);
+    games.calls.push({ action: m[2], appid, body });
+    return m[2] === 'launch' ? { appid, name: 'Chained Together', launched: true, running: true } : { appid, name: 'VVVVVV', terminated: true, running: false };
+  }],
+];
+
 const deviceFetch = async (url, init = {}) => {
   let u = new URL(url);
   let authed = init.identity?.cert === clientCertPem && init.identity?.serverCert === serverPki.cert;
@@ -465,8 +526,12 @@ const deviceFetch = async (url, init = {}) => {
     throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED', message: 'connect ECONNREFUSED' } });
   }
   if (!device.up || u.hostname === '10.9.9.9') throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED', message: 'connect ECONNREFUSED' } });
-  fetched.push(u.pathname);
   const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+  // The client API lives under /api/v1 (recorded without the prefix); only /health and /mcp stay at the top level.
+  if (u.pathname.startsWith('/api/v1/')) u = new URL(u.origin + u.pathname.slice('/api/v1'.length) + u.search);
+  else if (u.pathname === '/mcp') { mcpCalls.push(init.body); return json({ jsonrpc: '2.0', id: null, error: { code: -32601, message: 'not in this fake' } }); }
+  else if (u.pathname !== '/health') return new Response('404: Not Found', { status: 404 });
+  fetched.push(u.pathname);
   if (u.pathname === '/health') return json(health);
   // Pairing requests: each poll answers with the next entry of pairQueue ('pending' once it is empty).
   if (u.pathname === '/pair/request' && init.method === 'POST') {
@@ -489,21 +554,11 @@ const deviceFetch = async (url, init = {}) => {
     if (next === 'down') throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET', message: 'socket hang up' } });
     if (next === 'gone') return json({ error: 'unknown or expired pairing request' }, 404);
     if (next === 'approved') device.rejectToken = false;
-    if (next === 'approved') return json({ status: 'approved', client_cert: clientCertPem, server_cert: serverPki.cert, api_version: 2 });
+    if (next === 'approved') return json({ status: 'approved', client_cert: clientCertPem, server_cert: serverPki.cert });
     if (next === 'pending') await new Promise(r => setTimeout(r, 5));
     return json({ status: next });
   }
   if (!authed || device.rejectToken) return new Response('unauthorized', { status: 401 });
-  if (u.pathname === '/stream/stats') return json(stats);
-  if (u.pathname === '/stream/settings') {
-    if (device.streamSettingsMissing) return json({ error: 'capture not available' }, 404);
-    if (init.method === 'PUT') {
-      device.streamPuts = [...(device.streamPuts ?? []), JSON.parse(init.body)];
-      stats.settings = { ...stats.settings, ...JSON.parse(init.body) };
-    }
-    return json({ ...stats.settings, limits: streamLimits });
-  }
-  if (u.pathname === '/plugins') return json(plugins);
   if (u.pathname === '/plugins/install' && init.method === 'POST') {
     const file = init.body.get('file');
     const dir = file.name.replace(/\.zip$/, '');
@@ -519,18 +574,6 @@ const deviceFetch = async (url, init = {}) => {
     device.pluginLog[dir] = [...(device.pluginLog[dir] ?? []), `[INFO]: ${meta.name} started #${device.installs.length}`];
     return json({ installed: { dir, name: meta.name, version: meta.version }, restarted: restart });
   }
-  if (u.pathname === '/logs/tail') {
-    const dir = u.searchParams.get('plugin');
-    if (!dir) return json({ lines: device.journal.slice(-Number(u.searchParams.get('tail') ?? 100)) });
-    return device.pluginLog[dir] ? json({ lines: device.pluginLog[dir].slice(-5) }) : json({ error: 'no log dir' }, 404);
-  }
-  if (u.pathname === '/input/settings') {
-    if (!device.inputSupported) return new Response('404: Not Found', { status: 404 });
-    if (init.method === 'PUT') device.input = { ...device.input, enabled: JSON.parse(init.body).enabled };
-    return json(device.input);
-  }
-  if (u.pathname.startsWith('/controllers') && ctl.missing) return new Response('404: Not Found', { status: 404 });
-  if (u.pathname === '/controllers') return json({ controllers: ctl.controllers, virtual: ctl.virtual, input_enabled: device.input.enabled });
   if (u.pathname === '/controllers/events') {
     if (ctl.eventsStatus !== 200) return json({ error: 'events unavailable' }, ctl.eventsStatus);
     let c;
@@ -538,66 +581,22 @@ const deviceFetch = async (url, init = {}) => {
     init.signal?.addEventListener('abort', () => { ctl.streams.delete(c); try { c.error(new DOMException('aborted', 'AbortError')); } catch { /* closed */ } });
     return new Response(body, { headers: { 'content-type': 'text/event-stream' } });
   }
-  if (u.pathname === '/controllers/virtual' && init.method === 'POST') {
-    const req = JSON.parse(init.body);
-    ctl.posts.push(req);
-    if (ctl.refuse) return json({ error: ctl.refuse }, 422);
-    if (ctl.virtual.filter(v => !v.auto).length >= 4) return json({ error: 'all 4 virtual controller slots are in use' }, 409);
-    const id = `v${ctl.nextId++}`;
-    const name = req.name ?? `Virtual pad ${ctl.nextId - 1}`;
-    ctl.virtual.push({ id, name, type: 'x360', created_at: 3, last_event_at: null, auto: false });
-    ctl.controllers.push({ id: `evdev:${id}`, name, kind: 'virtual', virtual_id: id, vendor: '045e', product: '028e', device: `/dev/input/event1${ctl.nextId}`, steam: { type: 'xbox360', slot: ctl.controllers.length, name: 'Xbox 360 Controller' } });
-    ctlPush();
-    return json({ id, name, type: 'x360' }, 201);
-  }
-  const removePad = /^\/controllers\/virtual\/([^/]+)$/.exec(u.pathname);
-  if (removePad && init.method === 'DELETE') {
-    const id = decodeURIComponent(removePad[1]);
-    if (!ctl.virtual.some(v => v.id === id)) return json({ error: `unknown virtual controller ${id}` }, 404);
-    ctl.virtual = ctl.virtual.filter(v => v.id !== id);
-    ctl.controllers = ctl.controllers.filter(c => c.virtual_id !== id);
-    ctlPush();
-    return json({ removed: id });
-  }
-  if (u.pathname.startsWith('/ui/') && uiDevice.missing) return new Response('404: Not Found', { status: 404 });
-  if (u.pathname === '/ui/routes') return json(uiRoutes);
-  if (u.pathname === '/ui/navigate' && init.method === 'POST') {
-    const body = JSON.parse(init.body);
-    uiDevice.posts.push(body);
-    if (body.path && !/^\/(library|settings|tender)/.test(body.path)) return json({ error: `unknown path ${body.path}`, official: uiRoutes.official.map(r => r.path) }, 400);
-    if (body.path) uiRoutes.current = body.path;
-    return json({ ok: true, current: body.path ?? (body.action === 'plugin' ? `/quickaccess/${body.plugin}` : uiRoutes.current) });
-  }
-  if (u.pathname === '/apps' || u.pathname.startsWith('/apps/')) {
-    if (games.missing) return new Response('404: Not Found', { status: 404 });
-    if (u.pathname === '/apps') return json({ count: games.apps.length, apps: games.apps });
-    const m = /^\/apps\/(\d+)\/(dirs|saves)$/.exec(u.pathname);
-    const body = m && games[m[2]][m[1]];
-    return body ? json(body) : json({ error: 'app is not in this Steam library' }, 404);
-  }
-  if (u.pathname === '/mcp' && init.method === 'POST') {
-    const { id, params } = JSON.parse(init.body);
-    games.toolCalls.push(params);
-    const reply = games.tools[params.name]?.(params.arguments);
-    const result = reply === undefined
-      ? { content: [{ type: 'text', text: `unknown tool ${params.name}` }], isError: true }
-      : { content: [{ type: 'text', text: JSON.stringify(reply) }], isError: false };
-    return json({ jsonrpc: '2.0', id, result });
+  for (const [method, pattern, handler] of deviceRoutes) {
+    const m = (init.method ?? 'GET') === method && pattern.exec(u.pathname);
+    if (!m) continue;
+    try {
+      const value = handler(m, typeof init.body === 'string' ? JSON.parse(init.body) : {}, u.searchParams);
+      return value instanceof Response ? value : json(value);
+    } catch (e) {
+      if (e?.status) return json({ error: e.error }, e.status);
+      throw e;
+    }
   }
   if (u.pathname === '/fs' || u.pathname.startsWith('/fs/')) return fsRoute(u, init, json);
-  if (u.pathname === '/frame.jpg') return new Response(frameJpeg, { headers: { 'content-type': 'image/jpeg' } });
   const files = /^\/plugins\/([^/]+)\/files$/.exec(u.pathname);
   if (files && init.method === 'PUT') {
     device.filePuts = [...(device.filePuts ?? []), { dir: decodeURIComponent(files[1]), path: u.searchParams.get('path'), bytes: init.body.length }];
     return json({ dir: decodeURIComponent(files[1]), path: u.searchParams.get('path'), bytes: init.body.length });
-  }
-  const reload = /^\/plugins\/([^/]+)\/reload$/.exec(u.pathname);
-  if (reload && init.method === 'POST') {
-    const dir = decodeURIComponent(reload[1]);
-    const mode = u.searchParams.get('mode');
-    if (!mode) return json({ ok: true, dir });
-    device.liveReloads = [...(device.liveReloads ?? []), { dir, mode }];
-    return json({ dir, name: device.installMeta.name, mode, load_ms: 9, reloaded: true, errors: [], restored: ['panel'], routes: [] });
   }
   return new Response('not found', { status: 404 });
 };
@@ -1002,8 +1001,8 @@ await check('package.json: container, activation, commands, menus, version', asy
   };
   for (const [view, want] of Object.entries(titles)) assert.deepEqual(titleMenu(view), want, `${view} title`);
   for (const view of Object.keys(titles)) {
-    for (const viewItem of ['plugin', 'deck.unpaired', 'deck.paired', 'deck.session', 'deck.busy', 'deck.found', 'discovery.group', 'discovery.add', 'action', 'group.screen', 'controller.virtual', 'controller.physical', 'controller.unsupported',
-      'game', 'game.running', 'game.unsupported', 'deckyDir', 'deckyFile', 'gameGroup', 'gameLog']) {
+    for (const viewItem of ['plugin', 'deck.unpaired', 'deck.paired', 'deck.session', 'deck.busy', 'deck.found', 'discovery.group', 'discovery.add', 'action', 'group.screen', 'controller.virtual', 'controller.physical',
+      'game', 'game.running', 'deckyDir', 'deckyFile', 'gameGroup', 'gameLog']) {
       for (const inline of [true, false]) assert.deepEqual(dupes(itemMenu(view, viewItem, inline)), [], `${view} ${viewItem}`);
     }
   }
@@ -1182,7 +1181,7 @@ await check('connected, no plugin.json: Actions roots Screen / Plugin / Loader /
   const { roots, kids } = await actionsTree();
   const [screen, plugin] = roots;
   assert.equal(screen.description, '30 fps · 19.5 Mbps', 'stats polled because the Actions view is visible');
-  assert.match(kids.Screen[1].tooltip, /frame\.jpg/);
+  assert.match(kids.Screen[1].tooltip, /current frame as a JPEG/);
   assert.equal(plugin.description, 'no plugin.json in workspace');
   for (const c of kids.Plugin) {
     assert.equal(c.description, 'needs a plugin folder');
@@ -1320,6 +1319,7 @@ await check('detected plugin: Plugin group "<name> v<version>", dir in tooltip, 
   const reload = kids.Plugin[2];
   await run(reload.command.command, ...reload.command.arguments);
   assert.ok(fetched.includes('/plugins/my-plugin/reload'), fetched.join(', '));
+  assert.deepEqual(device.liveReloads.at(-1), { dir: 'my-plugin', mode: 'backend' });
   assert.equal(lastMessage('info').m, 'Decky Toolkit: reloaded my-plugin.');
   await openWorkspace(path.join(scratch, 'ws'));
   assert.equal(prompts().length, 1, 'the prompt shows once per session');
@@ -1409,8 +1409,6 @@ await check('auto-deploy on change: toggle leaf, watchers, one debounced deploy 
 
 await check('auto-deploy on a device with live sync: first change deploys, later ones push and reload in place', async () => {
   const root = path.join(scratch, 'ws', 'my-plugin');
-  const apiBefore = health.api_version;
-  health.api_version = 3;
   device.filePuts = [];
   device.liveReloads = [];
   mkdirSync(path.join(root, 'dist'), { recursive: true });
@@ -1437,7 +1435,6 @@ await check('auto-deploy on a device with live sync: first change deploys, later
   await settle(ext.AUTO_DEPLOY_DEBOUNCE_MS + 2500);
   assert.equal(device.installs.length, installs + 2, 'a manifest change deploys in full');
   await run('decky-toolkit.toggleAutoDeploy');
-  health.api_version = apiBefore;
   return `deploy, then push ${device.filePuts.map(f => f.path).join(' + ')} and a frontend reload ("${status}"), plugin.json → deploy`;
 });
 
@@ -1544,7 +1541,7 @@ function answerPicks(...labels) {
   return offered;
 }
 
-await check('remote input: title action, toggle command, status bar, unavailable / unsupported', async () => {
+await check('remote input: title action, toggle command, status bar, unavailable', async () => {
   const panel = calls.panels[0];
   const lastState = () => panel._posted.filter(m => m.type === 'input').at(-1)?.state;
   assert.match(panel.webview.html, /connect-src http:\/\/127\.0\.0\.1:(\d+) ws:\/\/127\.0\.0\.1:\1;/);
@@ -1586,13 +1583,6 @@ await check('remote input: title action, toggle command, status bar, unavailable
   assert.match(lastMessage('warning').m, /remote input is unavailable on 10\.1\.2\.3: no libei socket/);
   assert.equal(device.input.enabled, false, 'nothing PUT while unavailable');
 
-  device.inputSupported = false;
-  await run('decky-toolkit.toggleInput');
-  assert.match(lastMessage('warning').m, /not supported by this device version/);
-  await settle();
-  assert.equal(lastState(), null);
-
-  device.inputSupported = true;
   device.input = { enabled: false, backend: 'ei', available: true, reason: null };
   await run('decky-toolkit.refresh');
   await settle(100);
@@ -1607,7 +1597,7 @@ await check('remote input: title action, toggle command, status bar, unavailable
   sock.onclose({ code: 4003, reason: 'remote input is disabled' });
   assert.deepEqual(w.posted.at(-1), { type: 'refreshInput' });
   assert.equal(w.el('hint').textContent, 'remote input is disabled');
-  return 'title keyboard → record-keys while on, $(keyboard) in status bar, palette toggle off, unavailable warning, 404 → no state';
+  return 'title keyboard → record-keys while on, $(keyboard) in status bar, palette toggle off, unavailable warning';
 });
 
 await check('screen panel: title actions and icons, stream settings QuickPick, mute / volume / pause', async () => {
@@ -1688,7 +1678,7 @@ await check('screen panel: title actions and icons, stream settings QuickPick, m
   return 'title: keyboard, unmute, settings-gear, debug-pause, device-camera; mute → $(mute), pause → $(play); fps 60 PUT; volume 40% unmutes; audio off hides mute';
 });
 
-await check('Controllers view with fake clients: empty, physical + virtual, 404, error', async () => {
+await check('Controllers view with fake clients: empty, physical + virtual, error', async () => {
   const fakeConn = client => ({ connectedDevice: { id: 'x', name: 'h', host: 'h', port: 1 }, link: 'connected', authedClient: () => client, onDidChange: new EventEmitter().event, onDidChangeTarget: new EventEmitter().event, label: 'h' });
   const treeFor = controllers => new ext.ControllersTreeProvider(new ext.ControllerWatcher(fakeConn({ controllers }), async () => 'http://127.0.0.1:1/x'));
 
@@ -1719,16 +1709,13 @@ await check('Controllers view with fake clients: empty, physical + virtual, 404,
   assert.deepEqual(rows.map(inline), [[], ['decky-toolkit.removeVirtualController'], [], ['decky-toolkit.removeVirtualController']]);
   assert.match(rows[1].tooltip.value, /Steam Input: xbox360, Slot 2/);
 
-  const [old] = await treeFor(async () => { throw new ext.HttpError(404, '404: Not Found', '/controllers'); }).getChildren();
-  assert.deepEqual([old.label, old.description, old.iconPath.color.id, old.contextValue], ['Controllers', 'update Decky Toolkit on the device', 'disabledForeground', 'controller.unsupported']);
-  assert.deepEqual(inline(old), []);
   const [err] = await treeFor(async () => { throw new Error('boom'); }).getChildren();
   assert.equal(err.label, 'Could not load controllers: boom');
   assert.equal(err.command.command, 'decky-toolkit.refreshControllers');
-  return rows.map(r => `${r.label} — ${r.description}`).join(' | ') + `; 404 → "${old.description}"`;
+  return rows.map(r => `${r.label} — ${r.description}`).join(' | ');
 });
 
-await check('Controllers view live: SSE through the proxy, add / remove, 409 and Steam Input refusal as-is, poll fallback, 404', async () => {
+await check('Controllers view live: SSE through the proxy, add / remove, slot limit and Steam Input refusal as-is, poll fallback', async () => {
   const provider = tree('decky-toolkit.controllers').provider;
   const rowLabels = async () => labels(await provider.getChildren());
   await settle(100);
@@ -1753,7 +1740,7 @@ await check('Controllers view live: SSE through the proxy, add / remove, 409 and
   assert.equal(prompt.placeHolder, 'Virtual pad 1');
   assert.deepEqual(ctl.posts.at(-1), { name: 'Virtual pad 1' });
   assert.equal(lastMessage('info').m, 'Decky Toolkit: Virtual controller added and recognised by Steam Input (Virtual pad 1).');
-  let rows = await provider.getChildren();
+  const rows = await provider.getChildren();
   const added = rows.find(r => String(r.label).endsWith('Virtual pad 1'));
   assert.equal(added.description, 'virtual · Steam Input: xbox360 · Slot 4');
 
@@ -1797,19 +1784,7 @@ await check('Controllers view live: SSE through the proxy, add / remove, 409 and
   ctl.eventsStatus = 200;
   await settle(150);
   assert.ok(ctl.streams.size >= 1, 'stream reopened');
-
-  // An older device: one disabled row, add explains.
-  ctl.missing = true;
-  ctlCloseStreams();
-  await settle(150);
-  rows = await provider.getChildren();
-  assert.deepEqual(rows.map(r => [r.label, r.description]), [['Controllers', 'update Decky Toolkit on the device']]);
-  await run('decky-toolkit.addVirtualController');
-  assert.match(lastMessage('warning').m, /update Decky Toolkit on the device \(10\.1\.2\.3\)/);
-  ctl.missing = false;
-  await settle(150);
-  assert.deepEqual(await rowLabels(), ['1. Steam Deck', '2. Decky Toolkit pad (virtual)'], 'recovers once the device answers');
-  return `SSE update, add "Virtual pad 1" (slot 3), remove inline + palette, refusal and 409 as-is, poll fallback, 404 → "${rows[0].description}"`;
+  return 'SSE update, add "Virtual pad 1" (slot 3), remove inline + palette, refusal and slot limit as-is, poll fallback';
 });
 
 await check('screen panel: "Gamepad goes to" QuickPick, new pad, removed pad → Auto, pad field on gamepad messages', async () => {
@@ -1834,15 +1809,6 @@ await check('screen panel: "Gamepad goes to" QuickPick, new pad, removed pad →
   await run('decky-toolkit.refreshControllers');
   await settle(100);
   assert.equal(targets().at(-1), '', 'a removed target falls back to Auto');
-  ctl.missing = true;
-  await run('decky-toolkit.refreshControllers');
-  await settle();
-  const older = answerPicks();
-  await run('decky-toolkit.screen.settings');
-  assert.ok(!older[0].labels.some(l => /Gamepad/.test(l)), 'older device: no choice');
-  ctl.missing = false;
-  await run('decky-toolkit.refreshControllers');
-  await settle();
 
   const w = loadScreenJs();
   w.post({ type: 'input', state: { enabled: true } });
@@ -1860,10 +1826,10 @@ await check('screen panel: "Gamepad goes to" QuickPick, new pad, removed pad →
   assert.deepEqual([gp().at(-1).buttons.a, gp().at(-1).pad], [true, 'v2']);
   w.pads.list = [];
   w.fire('gamepaddisconnected');
-  return 'New virtual pad… → target, list Auto / Couch / New virtual pad…, removed → Auto, 404 → no choice; Auto → no pad field, v2 → pad "v2"';
+  return 'New virtual pad… → target, list Auto / Couch / New virtual pad…, removed → Auto; Auto → no pad field, v2 → pad "v2"';
 });
 
-await check('Steam UI navigation: Navigate to… QuickPick, template prompt, plugin panel, back / Quick Access / close menus, 400, 404', async () => {
+await check('Steam UI navigation: Navigate to… QuickPick, template prompt, plugin panel, back / Quick Access / close menus, refused path', async () => {
   let offered;
   ui.quickPick = (items, opts) => { offered = { items, opts }; return items.find(i => i.label === 'Settings'); };
   await run('decky-toolkit.navigate');
@@ -1917,14 +1883,20 @@ await check('Steam UI navigation: Navigate to… QuickPick, template prompt, plu
   await run('decky-toolkit.navigate');
   uiRoutes.official = realPaths;
   assert.equal(shown, 'Decky Toolkit: Steam UI navigation: unknown path /nowhere/1');
+  return `sections ${sections.join(' / ')}, placeholder "${placeHolder}", template → /library/app/620, plugin panel, back / quick_access / close_menus, refused "${shown}"`;
+});
 
-  uiDevice.missing = true;
-  await run('decky-toolkit.navigate');
-  assert.match(lastMessage('warning').m, /update Decky Toolkit on the device \(10\.1\.2\.3\)/);
-  await run('decky-toolkit.uiBack');
-  assert.match(lastMessage('warning').m, /update Decky Toolkit on the device/);
-  uiDevice.missing = false;
-  return `sections ${sections.join(' / ')}, placeholder "${placeHolder}", template → /library/app/620, plugin panel, back / quick_access / close_menus, 400 "${shown}", 404 → update`;
+await check('an outdated plugin on the device: one warning to update it', async () => {
+  delete health.api;
+  try {
+    await settle(150);
+    const warned = calls.messages.filter(m => m.kind === 'warning' && /too old for this client/.test(m.m));
+    assert.equal(warned.length, 1, 'once per device, not on every health poll');
+    assert.match(warned[0].m, /plugin on the device \(0\.2\.0\) is too old for this client; update it with Decky's Install Plugin from URL \(10\.1\.2\.3\)\.$/);
+    return warned[0].m;
+  } finally {
+    health.api = ['v1'];
+  }
 });
 
 await check('stats polling stops when the Actions view is hidden', async () => {
@@ -2379,7 +2351,7 @@ await check('the … overflow menu: only Rename and Forget device; no manual pai
   return offered.join(' | ');
 });
 
-await check('Games view with fake clients: Proton title with saves, native title, shortcut, 404 device, errors', async () => {
+await check('Games view with fake clients: Proton title with saves, native title, shortcut, errors', async () => {
   const device = { id: 'g', name: 'Deck', host: '10.0.70.18', port: 8765 };
   const fakeConn = client => ({ connectedDevice: device, link: 'connected', authedClient: () => client, onDidChangeTarget: new EventEmitter().event, label: 'Deck' });
   const listings = {
@@ -2451,10 +2423,6 @@ await check('Games view with fake clients: Proton title with saves, native title
     ['Save data', 'unavailable'], ['Could not load folders: app 4289220546 has no folders', undefined], ['Launch log', undefined]]);
   assert.deepEqual((await tree.getChildren(rom[0])).map(c => c.label), ['Could not load saves: Steam is busy']);
 
-  const old = new ext.GamesTreeProvider(fakeConn({ apps: async () => { throw new ext.HttpError(404, '404: Not Found', '/apps'); } }));
-  const [o] = await old.getChildren();
-  assert.deepEqual([o.label, o.description, o.contextValue], ['Games', 'update Decky Toolkit on the device', 'game.unsupported']);
-  assert.deepEqual(itemMenu('decky-toolkit.games', o.contextValue, true), []);
   let fail = true;
   const flaky = new ext.GamesTreeProvider(fakeConn({ apps: async () => { if (fail) throw new Error('boom'); return { count: 0, apps: [] }; } }));
   const [e] = await flaky.getChildren();
@@ -2513,18 +2481,18 @@ await check('Games commands: Find game reveals, Open save data adds a decky:// w
   assert.equal(calls.folderUpdates.at(-1).folders[0].name, 'Chained Together saves (10.1.2.3)');
 
   await run('decky-toolkit.gameLaunch', gameRow);
-  assert.deepEqual(games.toolCalls.at(-1), { name: 'app_launch', arguments: { appid: 2567870 } });
+  assert.deepEqual(games.calls.at(-1), { action: 'launch', appid: 2567870, body: {} });
   assert.match(lastMessage('info').m, /Chained Together is running/);
 
   const vRow = (await tree('decky-toolkit.games').provider.getChildren()).find(r => r.app?.appid === 70300);
-  const before = games.toolCalls.length;
+  const before = games.calls.length;
   ui.warning = () => undefined;
   await run('decky-toolkit.gameTerminate', vRow);
-  assert.equal(games.toolCalls.length, before, 'cancelled confirm sends nothing');
+  assert.equal(games.calls.length, before, 'cancelled confirm sends nothing');
   assert.match(lastMessage('warning').m, /Terminate VVVVVV on/);
   ui.warning = (_m, buttons) => buttons[0];
   await run('decky-toolkit.gameTerminate', vRow);
-  assert.deepEqual(games.toolCalls.at(-1), { name: 'app_terminate', arguments: { appid: 70300, confirm: true } });
+  assert.deepEqual(games.calls.at(-1), { action: 'terminate', appid: 70300, body: { confirm: true } });
 
   await run('decky-toolkit.gameProtonLog', gameRow);
   const doc = calls.docs.at(-1).doc;
@@ -2548,7 +2516,7 @@ await check('Games commands: Find game reveals, Open save data adds a decky:// w
   }
   await run('decky-toolkit.copyDeckyPath', gameRow);
   assert.equal(calls.clipboard.at(-1), `${STEAM}/steamapps/common/ChainedTogether`);
-  return `revealed ${rev.node.label}; folders ${calls.folderUpdates.map(f => f.folders[0].name).join(', ')}; tools ${games.toolCalls.map(t => t.name).join(', ')}`;
+  return `revealed ${rev.node.label}; folders ${calls.folderUpdates.map(f => f.folders[0].name).join(', ')}; app calls ${games.calls.map(c => c.action).join(', ')}`;
 });
 
 await check('remote FS provider against a fake /fs* server: stat, readDirectory, read/write round trip, mkdir, rename, delete (confirm), errors', async () => {
@@ -2597,7 +2565,7 @@ await check('remote FS provider against a fake /fs* server: stat, readDirectory,
   assert.deepEqual((await code(fs.rename(U(`${VV}/saves/slot2/edited.vvv`), U(`${VV}/saves/tsave.vvv`), { overwrite: false })))[0], 'FileExists');
   assert.deepEqual((await code(fs.rename(U(`${VV}/saves/tsave.vvv`), ext.deckyUri({ host: '10.9.9.9', port: 8765 }, '/x'), { overwrite: false })))[0], 'NoPermissions');
 
-  const raw = await deviceFetch(`https://10.1.2.3:8765/fs?path=${encodeURIComponent(`${VV}/saves/slot2`)}`, { method: 'DELETE', identity: pairedIdentity });
+  const raw = await deviceFetch(`https://10.1.2.3:8765/api/v1/fs?path=${encodeURIComponent(`${VV}/saves/slot2`)}`, { method: 'DELETE', identity: pairedIdentity });
   assert.equal(raw.status, 400, 'the fake server refuses a delete without confirm');
   await fs.delete(U(`${VV}/saves/slot2`), { recursive: true });
   assert.ok(fakeFs.log.includes(`DELETE /fs?path=${encodeURIComponent(`${VV}/saves/slot2`)}&confirm=1`), 'delete sends confirm=1');
@@ -2620,19 +2588,12 @@ await check('remote FS provider against a fake /fs* server: stat, readDirectory,
     ['Unavailable', 'not paired with Decky device Fresh; connect to it in the Decky view']);
   assert.deepEqual(await code(fs.readDirectory(ext.deckyUri({ host: '10.5.5.5', port: 8765 }, '/'))),
     ['Unavailable', 'no saved Decky device 10.5.5.5; add it in the Decky view']);
-  fakeFs.missing = true;
-  try {
-    assert.deepEqual(await code(fs.readFile(U(`${VV}/saves/tsave.vvv`))),
-      ['Unavailable', 'the Decky Toolkit plugin on Deck has no remote file access yet; update it']);
-  } finally {
-    fakeFs.missing = false;
-  }
   return `${fakeFs.log.length} /fs requests; events ${events.length}; errors map to FileNotFound / FileExists / FileIsADirectory / NoPermissions / Unavailable`;
 });
 
 // Captured from avahi-publish on the Bazzite device answering a legacy unicast PTR query (2026-11-04).
 const AVAHI_ANSWER = Buffer.from('1234840000010005000000000e5f6465636b792d746f6f6c6b6974045f746370056c6f63616c00000c0001c00c000c00010000000a000a0762617a7a697465c00cc037001000010000000a001c0769643d61626364056170693d310d76657273696f6e3d302e322e30c037002100010000000a001000000000223d0762617a7a697465c020c07b001c00010000000a0010fe800000000000001d7a890bd48de1ebc07b000100010000000a00040a004612', 'hex');
-const toolkitHealth = (hostname, version = '0.3.0', extra = {}) => ({ ok: true, name: 'decky-toolkit', version, api_version: 1, tools: 60, hostname, device_id: `id-${hostname}`, os: 'SteamOS', ...extra });
+const toolkitHealth = (hostname, version = '0.3.0', extra = {}) => ({ ok: true, name: 'decky-toolkit', version, api: ['v1'], tools: 60, hostname, device_id: `id-${hostname}`, os: 'SteamOS', ...extra });
 const legacyHealth = { ok: true, name: 'decky-mcp', version: '0.2.0', api_version: 1, tools: 51 };
 const useFakeLan = () => {
   net.interfaces = {
@@ -3037,6 +2998,10 @@ await check('proxy: stable port (next free when taken), persisted prefix, HTTPS 
 
 await check('no unexpected error messages', async () => {
   assert.deepEqual(calls.unexpectedErrors, []);
+});
+
+await check('the extension never calls the MCP tools (it uses the client API)', async () => {
+  assert.deepEqual(mcpCalls, []);
 });
 
 for (const d of ctx.subscriptions) d.dispose?.();

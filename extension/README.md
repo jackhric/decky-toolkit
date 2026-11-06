@@ -50,6 +50,10 @@ this editor), and a click reconnects; see [Losing the connection](#losing-the-co
 
 ## Sidebar
 
+The extension talks to the device through its versioned client API; device paths in this README such as
+`/stream/stats` are relative to `/api/v1` (only `/health` and `/mcp` sit at the top level). It never uses the MCP tools,
+which are meant for agents.
+
 Before you connect, the sidebar shows only **Devices**. After you connect, **Actions**, **Plugins**,
 **Games**, **Controllers** and **Preview** appear below it, all for the connected device. They stay
 there for the rest of the window, also after a disconnect, so the layout never jumps; while the
@@ -126,7 +130,7 @@ you expand or collapse.
 - **Screen** (description: fps and Mbit/s from `/stream/stats`, polled every 5 s only while the
   view is visible)
   - **Open screen panel**: the live screen in an editor tab.
-  - **Snapshot to file**: fetches `/frame.jpg` and saves it (default name `screen-<timestamp>.jpg`).
+  - **Snapshot to file**: fetches `/stream/frame` and saves it (default name `screen-<timestamp>.jpg`).
 - **Plugin** (description: `<name> v<version>` of the detected plugin; the tooltip names its folder
   and the directory it deploys to)
   - **Deploy** (fast, see [Deploy](#deploy)), **Deploy (full restart)**, **Reload backend**, **Show
@@ -146,10 +150,9 @@ you expand or collapse.
   - **Open plugin panel…**: picks an installed plugin (`/plugins`) and opens its Quick Access
     panel (`{action: "plugin"}`). Also in the right-click menu of a row in the Plugins view.
   - **Back**, **Quick Access**, **Close menus**: one click each.
-  - **Evaluate JS in Steam UI**, **Toast on device**.
+  - **Evaluate JS in Steam UI** (`POST /cef/evaluate`), **Toast on device** (`POST /ui/toast`).
 
-  The status bar briefly shows the page the Steam UI ended up on. A device whose plugin predates
-  navigation answers 404; the commands then say *update Decky Toolkit on the device*.
+  The status bar briefly shows the page the Steam UI ended up on.
 - **MCP**
   - **Write MCP config for this workspace** (runs the `decky-toolkit` CLI), **Copy MCP URL** (a local
     `http://127.0.0.1:<port>/<secret>/mcp` that stays the same across restarts; the port is
@@ -159,7 +162,7 @@ The view title has **Open screen** and **Refresh**.
 
 ### Plugins
 
-Lists the device's plugins (`GET /plugins`, falling back to the `plugin_list` tool) as
+Lists the device's plugins (`GET /plugins`) as
 `Name  version · dir`; hover for flags, `api_version` and `has_backend`. The inline icons reload a
 plugin's backend (`POST /plugins/{dir}/reload`) or open its log. The title bar has **Install
 plugin zip…** (pick a `.zip`, upload to `/plugins/install?restart=loader`, wait for the loader) and
@@ -180,7 +183,7 @@ also has **Open device path…** and Refresh.
 | a title without a compatibility tool (most shortcuts) | `native` |
 | a running title | green play icon, `· running` |
 
-The inline icons launch the game (`app_launch`) or, while it runs, terminate it (`app_terminate`,
+The inline icons launch the game (`POST /apps/{appid}/launch`) or, while it runs, terminate it (`.../terminate`,
 after a modal *Terminate X?* confirmation, since unsaved progress is lost), and open its save data.
 Expanding a game loads `/apps/{appid}/dirs` and `/apps/{appid}/saves` and shows:
 
@@ -202,8 +205,7 @@ Expanding a game loads `/apps/{appid}/dirs` and `/apps/{appid}/saves` and shows:
 
 Right-click a folder or file for **Open in Explorer** (also the inline icon on folders) and **Copy
 path**; right-click a game for **Open save data**, **Launch**/**Terminate**, **Show Proton log**
-and **Copy path** (the install folder). A device whose plugin predates the library routes shows one
-greyed-out row, *update Decky Toolkit on the device*.
+and **Copy path** (the install folder). **Show Proton log** reads `/apps/{appid}/proton-log`.
 
 #### Jump into a game's saves
 
@@ -231,8 +233,7 @@ not the connected one; the pairing comes from the identity file.
   can still write its saves.
 - **Errors**: a refused path (outside those folders, or Steam's login files such as
   `config/loginusers.vdf`) shows as *permission denied* with the device's reason; a device that is
-  not reachable, not paired or not saved shows as *unavailable* with the reason; a device whose
-  plugin predates these routes asks you to update it.
+  not reachable, not paired or not saved shows as *unavailable* with the reason.
 - **Open device path…** (Games title bar, palette) asks for a path (`/…` or `~/…`): folders open in
   the Explorer, files in the editor.
 - Changes on the device are not watched; use the Explorer's Refresh.
@@ -264,12 +265,11 @@ and whether it is the pad the device created on its own for forwarded input ("Au
   proxy), so a controller plugged in on the device appears at once. If the stream fails it polls
   every 5 s and retries the stream.
 - With no controllers the view says *No controllers seen by Steam Input.* with an **Add virtual
-  controller** button. A device whose plugin predates controller management shows one greyed-out
-  row, *update Decky Toolkit on the device*, and recovers on its own once the plugin is updated.
+  controller** button.
 
 ### Preview
 
-Fetches one `/frame.jpg` every 1.5 s while the view is visible (well under 1 Mbit/s, instead of the
+Fetches one `/stream/frame` every 1.5 s while the view is visible (well under 1 Mbit/s, instead of the
 ~40 Mbit/s stream), scaled to the sidebar width. Click **Open full screen view** or the title icon
 for the screen panel.
 
@@ -331,8 +331,7 @@ in place, usually within 100 ms of the build:
 
 You stay where you were: the plugin's Quick Access panel, its own page, the selected settings tab and the
 focused control. Errors the plugin logs while loading appear in the output channel with positions in your
-sources. Reloads report in the status bar. A device whose Decky Toolkit predates live sync gets a fast
-deploy for every change instead.
+sources. Reloads report in the status bar.
 
 ## Remote input
 
@@ -344,8 +343,7 @@ in the device's Decky Toolkit panel.
   off, `$(record-keys)` while on), or run **Decky: Toggle remote input** from the command palette. The extension sends
   `PUT /input/settings`; the panel itself never calls the device for this. While input is on the
   status bar shows `$(keyboard)` after the device's name. If the device cannot inject input, turning
-  it on shows a warning with the reason. A Deck whose plugin predates remote input shows
-  *not supported by this device version*.
+  it on shows a warning with the reason.
 - **Mouse and keyboard**: click the picture to capture input (a focus outline shows it). Mouse
   moves, clicks and the wheel land on the matching spot of the device screen, and keys are sent by
   physical position (`KeyboardEvent.code`), so VS Code keybindings do not fire while the picture
@@ -358,8 +356,7 @@ in the device's Decky Toolkit panel.
   **Auto** (the pad the device creates on its own, the default) or one of the virtual pads from the
   [Controllers](#controllers) view; **New virtual pad…** adds one and selects it. The choice goes
   into the `pad` field of every gamepad message; switching sends the old pad a neutral state first.
-  It falls back to Auto when that pad is removed. A device without controller management does not
-  offer it.
+  It falls back to Auto when that pad is removed.
 
 The panel's WebSocket (`/input`) goes through the same loopback proxy as the stream.
 
@@ -374,7 +371,7 @@ panel is the active editor of its group:
 | `$(unmute)` / `$(mute)` | Mute / Unmute | Sound on this computer only; shown while the device streams audio |
 | `$(settings-gear)` | Stream settings… | QuickPick, see below |
 | `$(debug-pause)` / `$(play)` | Pause / Resume | Freezes the picture; the stream stays connected |
-| `$(device-camera)` | Snapshot to file | Saves the current `/frame.jpg` with a Save dialog |
+| `$(device-camera)` | Snapshot to file | Saves the current `/stream/frame` with a Save dialog |
 | `$(plug)` | Reconnect | Only while not connected, in place of input, settings and snapshot; see [Losing the connection](#losing-the-connection) |
 
 **Stream settings…** lists:
@@ -487,7 +484,7 @@ All of these are also in the command palette under the `Decky:` category.
 | Decky: Add device… / Rename device / Forget device | Add a device (replacing the saved one), rename it, or forget it and its pairing |
 | Decky: Search network | Look for unsaved Decky Toolkit devices on the local network ([Discovery](#discovery)) |
 | Decky: Open screen | Live screen panel with sound; remote input, mute, stream settings, pause and snapshot as tab bar icons |
-| Decky: Snapshot to file | Saves the current `/frame.jpg` with a Save dialog |
+| Decky: Snapshot to file | Saves the current `/stream/frame` with a Save dialog |
 | Decky: Deploy plugin | Build if needed, zip, `POST /plugins/install`, reload just this plugin and confirm it (<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd>) |
 | Decky: Deploy plugin (full restart) | Same, but restarts Decky Loader and waits for `/health` |
 | Decky: Toggle auto-deploy on change | Flips `decky-toolkit.deploy.onChange` for the workspace |
@@ -503,8 +500,8 @@ All of these are also in the command palette under the `Decky:` category.
 | Decky: Show Proton log | `logs_read` with `source: proton` for a game, in an editor tab |
 | Decky: Refresh games | Reloads the Games view |
 | Decky: Install plugin zip… | Uploads a plugin zip from disk to `/plugins/install?restart=loader` |
-| Decky: Restart loader | `POST /loader/restart` (falls back to the `loader_restart` tool) |
-| Decky: Reload plugin | `POST /plugins/{dir}/reload` for one plugin backend |
+| Decky: Restart loader | `POST /loader/restart` |
+| Decky: Reload plugin | `POST /plugins/{dir}/reload` (backend mode) for one plugin |
 | Decky: Show loader logs | Streams `journalctl -u plugin_loader` via `/logs/stream` |
 | Decky: Show plugin logs | Streams a plugin's log from `~/homebrew/logs/<dir>/` |
 | Decky: Evaluate JS in Steam UI | Runs an expression with the `cef_evaluate` tool; result in an info message or the "Decky Toolkit Console" output |
@@ -549,8 +546,9 @@ Windows), one device per machine, and shared with the upcoming CLI.
   a built-in zip writer and uploads the zip. It confirms a fast reload from `/logs/tail` (the
   loader journal and the plugin's log) and `/plugins`. Build and deploy output goes to the
   "Decky" output channel.
-- **Older devices.** Logs need `/logs/stream`, deploy and reload need `/plugins/install` and
-  `/plugins/{dir}/reload`; on a device plugin without them you get a message asking you to update it.
+- **API version.** `/health` lists the client API versions the device serves (`api`). A device without `v1`
+  gets one warning per window asking you to update the Decky Toolkit plugin (Decky → Install Plugin from URL);
+  nothing falls back to older routes, and deploying refuses such a device too.
 
 ## Development
 
@@ -632,7 +630,7 @@ The plugin must be named `Decky Toolkit Test`, export `VERSION` from `src/versio
 `py_modules/testver/__init__.py`, set `window.__deckyToolkitTestVersion = VERSION` in its frontend and
 have a `version` method. The script rewrites those per round: first install, fast deploy with and
 without the `debug` flag, a deploy with nothing to build and one full restart (skipped while a
-`/stream.mjpeg` viewer is connected, unless `IGNORE_VIEWERS=1`). Each round checks the bundle's version via `cef_evaluate`,
+`/stream` viewer is connected, unless `IGNORE_VIEWERS=1`). Each round checks the bundle's version via `cef_evaluate`,
 the backend's via `loader/call_plugin_method`, `/plugins`, the number of `Loaded` lines and that
 exactly one backend process runs. At the end Decky uninstalls the plugin (no loader restart).
 
@@ -645,14 +643,14 @@ Code:
 DECKY_IDENTITY_FILE=~/deck-identity.json node scripts/dev-check.mjs [host] [port]
 ```
 
-It checks `/health`, `/stream.mjpeg` (at least two thirds of the device's fps cap for 5 s),
-`/plugins` and `/frame.jpg` through the proxy, runs `media/screen.js` in a minimal DOM against the
+It checks `/health`, `/stream` (at least two thirds of the device's fps cap for 5 s),
+`/stream/stats` and `/stream/frame` through the proxy, `/plugins` and `/stream/frame` through the client, runs `media/screen.js` in a minimal DOM against the
 proxy and compares its fps readout with `/stream/stats` (within 10 %), calls MCP `tools/list`
 through the client, opens a WebSocket to `/input` through the proxy and expects close code 4003
 (input must be off on the Deck; the check never turns it on), opens `/audio` through the proxy and
 expects the format frame and at least 10 PCM chunks within 1 s (audio must be on; the check never
-changes it), probes the newer routes (including `/controllers`, `/ui/routes` and
-`/controllers/events` through the proxy, read-only and passing on 404), validates a staged zip with `unzip -t`,
+changes it), reads `/controllers`, `/ui/routes` and `/controllers/events` (read-only), checks that the old top-level
+paths and the routes v1 dropped answer 404/405 and `/mcp` `GET`/`DELETE` 405, validates a staged zip with `unzip -t`,
 and prints `INFO` lines (never failures) for `/fs?path=/home/jackh/.local/share/VVVVVV`,
 `/apps/70300/saves` and a read-only `/fs/read` of the best VVVVVV save. The
 stream checks need a screen that changes: gamescope sends no frames while the screen is static.

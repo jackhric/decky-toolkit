@@ -241,12 +241,12 @@ def test_controller_routes_and_events():
     cs = make_controllers(svc)
 
     async def run(s, base):
-        async with s.get(f"{base}/controllers") as r:
+        async with s.get(f"{base}/api/v1/controllers") as r:
             assert r.status == 401
-        async with s.get(f"{base}/controllers", headers=H) as r:
+        async with s.get(f"{base}/api/v1/controllers", headers=H) as r:
             body = await r.json()
             assert body["controllers"] == [] and body["virtual"] == [] and body["input_enabled"] is False
-        async with s.get(f"{base}/controllers/events", headers=H) as ev:
+        async with s.get(f"{base}/api/v1/controllers/events", headers=H) as ev:
             assert ev.headers["Content-Type"].startswith("text/event-stream")
 
             async def next_event():
@@ -257,24 +257,24 @@ def test_controller_routes_and_events():
 
             first = await next_event()
             assert first["type"] == "controllers" and first["controllers"] == []
-            async with s.post(f"{base}/controllers/virtual", json={"name": "P1"}, headers=H) as r:
+            async with s.post(f"{base}/api/v1/controllers/virtual", json={"name": "P1"}, headers=H) as r:
                 assert r.status == 201 and await r.json() == {"id": "pad1", "name": "P1", "type": "x360"}
             ev1 = await asyncio.wait_for(next_event(), 3)
             while not ev1["controllers"] or not ev1["controllers"][0]["seen_by_steam"]:
                 ev1 = await asyncio.wait_for(next_event(), 3)
             assert ev1["virtual"][0]["id"] == "pad1" and ev1["controllers"][0]["virtual_id"] == "pad1"
-            async with s.delete(f"{base}/controllers/virtual/pad1", headers=H) as r:
+            async with s.delete(f"{base}/api/v1/controllers/virtual/pad1", headers=H) as r:
                 assert r.status == 200 and await r.json() == {"removed": "pad1"}
             ev2 = await asyncio.wait_for(next_event(), 3)
             while ev2["virtual"]:
                 ev2 = await asyncio.wait_for(next_event(), 3)
             assert ev2["controllers"] == []
-        async with s.delete(f"{base}/controllers/virtual/pad1", headers=H) as r:
+        async with s.delete(f"{base}/api/v1/controllers/virtual/pad1", headers=H) as r:
             assert r.status == 404
         for bad in ({"name": 3}, {"x": 1}, [1]):
-            async with s.post(f"{base}/controllers/virtual", json=bad, headers=H) as r:
+            async with s.post(f"{base}/api/v1/controllers/virtual", json=bad, headers=H) as r:
                 assert r.status == 400, bad
-        async with s.post(f"{base}/controllers/virtual", headers=H) as r:
+        async with s.post(f"{base}/api/v1/controllers/virtual", headers=H) as r:
             assert r.status == 201 and (await r.json())["name"] == "Virtual pad 2"
         for _ in range(50):
             if not cs._subscribers:
@@ -389,17 +389,17 @@ def test_ui_routes_http():
     fake = FakeSteamUi()
 
     async def run(s, base):
-        async with s.get(f"{base}/ui/routes", headers=H) as r:
+        async with s.get(f"{base}/api/v1/ui/routes", headers=H) as r:
             assert r.status == 200 and (await r.json())["current"] == "/library/home"
-        async with s.post(f"{base}/ui/navigate", json={"path": "/library/home"}, headers=H) as r:
+        async with s.post(f"{base}/api/v1/ui/navigate", json={"path": "/library/home"}, headers=H) as r:
             assert r.status == 200 and (await r.json())["ok"] is True
-        async with s.post(f"{base}/ui/navigate", json={"action": "fly"}, headers=H) as r:
+        async with s.post(f"{base}/api/v1/ui/navigate", json={"action": "fly"}, headers=H) as r:
             assert r.status == 400 and "back" in (await r.json())["error"]
-        async with s.post(f"{base}/ui/navigate", json={"path": "/nowhere"}, headers=H) as r:
+        async with s.post(f"{base}/api/v1/ui/navigate", json={"path": "/nowhere"}, headers=H) as r:
             assert r.status == 400 and "/library/home" in (await r.json())["error"]
-        async with s.post(f"{base}/ui/navigate", json={"path": "/a", "extra": 1}, headers=H) as r:
+        async with s.post(f"{base}/api/v1/ui/navigate", json={"path": "/a", "extra": 1}, headers=H) as r:
             assert r.status == 400
-        async with s.post(f"{base}/ui/navigate", json={"action": "back"}) as r:
+        async with s.post(f"{base}/api/v1/ui/navigate", json={"action": "back"}) as r:
             assert r.status == 401
     asyncio.run(with_server(run, ui=ui.UiNavigator(fake, settle=0)))
 
@@ -409,8 +409,8 @@ def test_ui_502_when_steam_unreachable():
         raise cdp.CdpError("Steam CEF debugger not reachable")
 
     async def run(s, base):
-        async with s.get(f"{base}/ui/routes", headers=H) as r:
+        async with s.get(f"{base}/api/v1/ui/routes", headers=H) as r:
             assert r.status == 502
-        async with s.post(f"{base}/ui/navigate", json={"action": "back"}, headers=H) as r:
+        async with s.post(f"{base}/api/v1/ui/navigate", json={"action": "back"}, headers=H) as r:
             assert r.status == 502
     asyncio.run(with_server(run, ui=ui.UiNavigator(down, settle=0)))

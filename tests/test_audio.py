@@ -177,7 +177,7 @@ def test_audio_ws_format_chunks_and_disable():
     cap.audio = aud
 
     async def run_ok(s, base):
-        async with s.ws_connect(f"{base}/audio", headers=H) as ws:
+        async with s.ws_connect(f"{base}/api/v1/audio", headers=H) as ws:
             assert await ws.receive_json(timeout=2) == FORMAT
             for _ in range(50):
                 if aud._subs:
@@ -187,37 +187,33 @@ def test_audio_ws_format_chunks_and_disable():
                 q.put_nowait(b"\x01\x02" * 1920)
             msg = await ws.receive(timeout=2)
             assert msg.type == WSMsgType.BINARY and len(msg.data) == CHUNK_BYTES
-            async with s.get(f"{base}/audio/stats", headers=H) as r:
-                st = await r.json()
+            async with s.get(f"{base}/api/v1/stream/stats", headers=H) as r:
+                st = (await r.json())["audio"]
                 assert st["enabled"] is True and st["format"]["rate"] == 48000
-            async with s.get(f"{base}/stream/stats", headers=H) as r:
-                assert (await r.json())["audio"]["enabled"] is True
-            async with s.put(f"{base}/stream/settings", json={"audio": False}, headers=H) as r:
+            async with s.put(f"{base}/api/v1/stream/settings", json={"audio": False}, headers=H) as r:
                 assert r.status == 200 and (await r.json())["audio"] is False
             msg = await ws.receive(timeout=2)
             assert msg.type == WSMsgType.CLOSE and ws.close_code == 4003
         assert cap.settings.audio_enabled is False and cap.saved == 1
-        async with s.ws_connect(f"{base}/audio", headers=H) as ws:
+        async with s.ws_connect(f"{base}/api/v1/audio", headers=H) as ws:
             msg = await ws.receive(timeout=2)
             assert msg.type == WSMsgType.CLOSE and ws.close_code == 4003 and "disabled" in msg.extra
-        async with s.put(f"{base}/stream/settings", json={"audio": True}, headers=H) as r:
+        async with s.put(f"{base}/api/v1/stream/settings", json={"audio": True}, headers=H) as r:
             assert (await r.json())["audio"] is True
-        async with s.ws_connect(f"{base}/audio", headers=H) as ws:
+        async with s.ws_connect(f"{base}/api/v1/audio", headers=H) as ws:
             assert (await ws.receive_json(timeout=2))["type"] == "format"
     asyncio.run(with_server(run_ok, capturer=cap, audio=aud))
 
 
 def test_audio_ws_auth_and_404():
     async def run(s, base):
-        async with s.get(f"{base}/audio") as r:
+        async with s.get(f"{base}/api/v1/audio") as r:
             assert r.status == 401
-        async with s.get(f"{base}/audio", headers={**H, "Origin": "http://evil.example"}) as r:
+        async with s.get(f"{base}/api/v1/audio", headers={**H, "Origin": "http://evil.example"}) as r:
             assert r.status == 403
     asyncio.run(with_server(run, audio=FakeAudio(Settings())))
 
     async def missing(s, base):
-        async with s.get(f"{base}/audio", headers=H) as r:
-            assert r.status == 404
-        async with s.get(f"{base}/audio/stats", headers=H) as r:
+        async with s.get(f"{base}/api/v1/audio", headers=H) as r:
             assert r.status == 404
     asyncio.run(with_server(missing))

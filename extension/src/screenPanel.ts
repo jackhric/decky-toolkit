@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
-import type { StreamSettings } from '@decky-toolkit/client/api';
+import type { InputSettings, StreamSettings } from '@decky-toolkit/client/api';
 import { HttpError, describeError } from '@decky-toolkit/client/client';
-import { Connection, ConnectionState, InputState, externalProxyBase, linkMessage, linkSuffix } from './connection';
+import { Connection, ConnectionState, externalProxyBase, linkMessage, linkSuffix } from './connection';
 import { ControllerWatcher, addVirtualController, isList } from './controllers';
 import { inputOn } from './input';
 
@@ -366,7 +366,7 @@ function setContext(key: string, value: unknown): Thenable<unknown> {
 }
 
 /** What media/screen.js needs for remote input; null until the first answer. */
-function webviewInputState(input: InputState | undefined) {
-  if (!input || input === 'unsupported') return null;
+function webviewInputState(input: InputSettings | undefined) {
+  if (!input) return null;
   return { enabled: input.enabled };
 }

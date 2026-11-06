@@ -2,6 +2,7 @@ import * as http from 'http';
 import { randomBytes } from 'crypto';
 import type { AddressInfo, Socket } from 'net';
 import type { Duplex } from 'stream';
+import { API_BASE } from '@decky-toolkit/client/client';
 import { Identity, deviceRequest } from '@decky-toolkit/client/transport';
 
 export interface ProxyTarget {
@@ -88,6 +89,11 @@ export class DeviceProxy {
   /** The MCP endpoint MCP clients are given (`.mcp.json`, Copy MCP URL). */
   async mcpUrl(): Promise<string> {
     return `${await this.start()}/mcp`;
+  }
+
+  /** The client API through the proxy, for the webviews and the controller event stream. */
+  async apiBase(): Promise<string> {
+    return `${await this.start()}${API_BASE}`;
   }
 
   /**

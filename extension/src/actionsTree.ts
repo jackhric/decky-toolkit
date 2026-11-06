@@ -75,7 +75,7 @@ export class ActionsTreeProvider implements vscode.TreeDataProvider<ActionNode>,
     ]);
     screen.description = screenDescription(this.conn);
     screen.tooltip = 'Live device display';
-    screen.children![1].tooltip = 'Save the current frame (/frame.jpg) as a JPEG';
+    screen.children![1].tooltip = 'Save the current frame as a JPEG';
 
     return [
       screen,

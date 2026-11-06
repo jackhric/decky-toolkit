@@ -1,4 +1,4 @@
-// Sidebar preview: one /frame.jpg every 1.5 s through the extension's loopback proxy, never the MJPEG stream.
+// Sidebar preview: one /stream/frame every 1.5 s through the extension's loopback proxy, never the MJPEG stream.
 (() => {
   const vscode = acquireVsCodeApi();
   const img = document.getElementById('img'), msg = document.getElementById('msg');
@@ -18,7 +18,7 @@
     if (!visible || !live) return;
     inflight = new AbortController();
     try {
-      const res = await fetch(base + '/frame.jpg?t=' + Date.now(), { signal: inflight.signal, cache: 'no-store' });
+      const res = await fetch(base + '/stream/frame?t=' + Date.now(), { signal: inflight.signal, cache: 'no-store' });
       if (res.status === 401) show('Token rejected.\nRe-pair the device from the Devices view.');
       else if (!res.ok) show('No frame: ' + (await res.text()).slice(0, 200));
       else {

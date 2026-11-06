@@ -274,20 +274,20 @@ def test_fs_route(tree, monkeypatch):
     monkeypatch.setenv("DECKY_USER_HOME", tree["home"])
 
     async def run(s, base):
-        async with s.get(f"{base}/fs?path=~/.local/share/VVVVVV&depth=2") as r:
+        async with s.get(f"{base}/api/v1/fs?path=~/.local/share/VVVVVV&depth=2") as r:
             assert r.status == 401
-        async with s.get(f"{base}/fs?path=~/.local/share/VVVVVV&depth=2", headers=H) as r:
+        async with s.get(f"{base}/api/v1/fs?path=~/.local/share/VVVVVV&depth=2", headers=H) as r:
             assert r.status == 200
             assert (await r.json())["count"] == 4
-        async with s.get(f"{base}/fs?path=~/.local/share/Steam/config/loginusers.vdf", headers=H) as r:
+        async with s.get(f"{base}/api/v1/fs?path=~/.local/share/Steam/config/loginusers.vdf", headers=H) as r:
             assert r.status == 403
-        async with s.get(f"{base}/fs?path=~/nope", headers=H) as r:
+        async with s.get(f"{base}/api/v1/fs?path=~/nope", headers=H) as r:
             assert r.status == 404
-        async with s.get(f"{base}/fs?path=relative", headers=H) as r:
+        async with s.get(f"{base}/api/v1/fs?path=relative", headers=H) as r:
             assert r.status == 400
-        async with s.get(f"{base}/fs", headers=H) as r:
+        async with s.get(f"{base}/api/v1/fs", headers=H) as r:
             assert r.status == 400
-        async with s.get(f"{base}/fs?path=/&depth=x", headers=H) as r:
+        async with s.get(f"{base}/api/v1/fs?path=/&depth=x", headers=H) as r:
             assert r.status == 400
     asyncio.run(with_server(run))
 
@@ -381,44 +381,44 @@ def test_fs_write_routes(tree, tmp_path, monkeypatch):
     q = "path=" + str(runtime / "sub/f.bin")
 
     async def run(s, base):
-        async with s.get(f"{base}/fs/read?path=~/.local/share/VVVVVV/saves/tsave.vvv", headers=H) as r:
+        async with s.get(f"{base}/api/v1/fs/read?path=~/.local/share/VVVVVV/saves/tsave.vvv", headers=H) as r:
             assert r.status == 200 and r.content_type == "application/octet-stream" and await r.read() == b"s"
         for method, url in (("GET", "/fs/read?path=~/.local/share/VVVVVV/saves/tsave.vvv"), ("PUT", f"/fs/write?{q}"),
                             ("POST", "/fs/mkdir"), ("POST", "/fs/rename"), ("DELETE", f"/fs?{q}&confirm=1")):
             async with s.request(method, base + url, headers=cookie) as r:
                 assert r.status == 401, url
-        async with s.get(f"{base}/fs/read?path=~/.local/share/Steam/config/loginusers.vdf", headers=H) as r:
+        async with s.get(f"{base}/api/v1/fs/read?path=~/.local/share/Steam/config/loginusers.vdf", headers=H) as r:
             assert r.status == 403
-        async with s.get(f"{base}/fs/read?path=~/nope", headers=H) as r:
+        async with s.get(f"{base}/api/v1/fs/read?path=~/nope", headers=H) as r:
             assert r.status == 404 and (await r.json())["code"] == "ENOENT"
-        async with s.get(f"{base}/fs/read?path=~/.local/share/VVVVVV", headers=H) as r:
+        async with s.get(f"{base}/api/v1/fs/read?path=~/.local/share/VVVVVV", headers=H) as r:
             assert r.status == 409 and (await r.json())["code"] == "EISDIR"
-        async with s.put(f"{base}/fs/write?{q}", data=b"\x00\x01binary", headers=H) as r:
+        async with s.put(f"{base}/api/v1/fs/write?{q}", data=b"\x00\x01binary", headers=H) as r:
             assert r.status == 200 and (await r.json())["created"] is True
         assert (runtime / "sub/f.bin").read_bytes() == b"\x00\x01binary"
-        async with s.put(f"{base}/fs/write?{q}&overwrite=0", data=b"x", headers=H) as r:
+        async with s.put(f"{base}/api/v1/fs/write?{q}&overwrite=0", data=b"x", headers=H) as r:
             assert r.status == 409 and (await r.json())["code"] == "EEXIST"
-        async with s.put(f"{base}/fs/write?path={home}/.bashrc", data=b"x", headers=H) as r:
+        async with s.put(f"{base}/api/v1/fs/write?path={home}/.bashrc", data=b"x", headers=H) as r:
             assert r.status == 403
-        async with s.put(f"{base}/fs/write?path={root}/config/loginusers.vdf", data=b"x", headers=H) as r:
+        async with s.put(f"{base}/api/v1/fs/write?path={root}/config/loginusers.vdf", data=b"x", headers=H) as r:
             assert r.status == 403
-        async with s.post(f"{base}/fs/mkdir", json={"path": str(runtime / "d")}, headers=H) as r:
+        async with s.post(f"{base}/api/v1/fs/mkdir", json={"path": str(runtime / "d")}, headers=H) as r:
             assert r.status == 200
-        async with s.post(f"{base}/fs/mkdir", json={"path": str(runtime / "d")}, headers=H) as r:
+        async with s.post(f"{base}/api/v1/fs/mkdir", json={"path": str(runtime / "d")}, headers=H) as r:
             assert r.status == 409
-        async with s.post(f"{base}/fs/rename", json={"from": str(runtime / "sub/f.bin"), "to": str(runtime / "d/g.bin")}, headers=H) as r:
+        async with s.post(f"{base}/api/v1/fs/rename", json={"from": str(runtime / "sub/f.bin"), "to": str(runtime / "d/g.bin")}, headers=H) as r:
             assert r.status == 200
-        async with s.post(f"{base}/fs/rename", json={"from": str(runtime / "d/g.bin")}, headers=H) as r:
+        async with s.post(f"{base}/api/v1/fs/rename", json={"from": str(runtime / "d/g.bin")}, headers=H) as r:
             assert r.status == 400
-        async with s.delete(f"{base}/fs?path={runtime}/d/g.bin", headers=H) as r:
+        async with s.delete(f"{base}/api/v1/fs?path={runtime}/d/g.bin", headers=H) as r:
             assert r.status == 400 and "confirm=1" in (await r.json())["error"]
-        async with s.delete(f"{base}/fs?path={runtime}/d/g.bin&confirm=1", headers=H) as r:
+        async with s.delete(f"{base}/api/v1/fs?path={runtime}/d/g.bin&confirm=1", headers=H) as r:
             assert r.status == 200 and (await r.json())["files"] == 1
-        async with s.delete(f"{base}/fs?path=~/.local/share/VVVVVV/saves/tsave.vvv&confirm=1", headers=H) as r:
+        async with s.delete(f"{base}/api/v1/fs?path=~/.local/share/VVVVVV/saves/tsave.vvv&confirm=1", headers=H) as r:
             assert r.status == 403
-        async with s.delete(f"{base}/fs?path=~/.local/share/Steam/config/loginusers.vdf&confirm=1", headers=H) as r:
+        async with s.delete(f"{base}/api/v1/fs?path=~/.local/share/Steam/config/loginusers.vdf&confirm=1", headers=H) as r:
             assert r.status == 403
-        async with s.delete(f"{base}/fs?path={runtime}/nope&confirm=1", headers=H) as r:
+        async with s.delete(f"{base}/api/v1/fs?path={runtime}/nope&confirm=1", headers=H) as r:
             assert r.status == 404
     asyncio.run(with_server(run))
     assert (Path(home) / ".local/share/VVVVVV/saves/tsave.vvv").exists()

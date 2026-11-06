@@ -1,7 +1,8 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { deployPlugin, readWorkspacePlugin } from '@decky-toolkit/client/deploy';
-import { LIVE_API_VERSION, LiveSync, startWatchBuild, stopWatchBuild, watchPlugin } from '@decky-toolkit/client/live';
+import { outdatedDevice } from '@decky-toolkit/client/client';
+import { LiveSync, startWatchBuild, stopWatchBuild, watchPlugin } from '@decky-toolkit/client/live';
 import { explain, pairedClient } from './device';
 
 // Per-build chatter from vite and rollup; errors, warnings and the "built"/"created" lines still show.
@@ -21,9 +22,9 @@ export async function dev(dir: string, build: boolean, out: (l: string) => void,
   const root = path.resolve(dir);
   const [p, { file, client }] = await Promise.all([readWorkspacePlugin(root), pairedClient()]);
   if (!p) throw new Error(`${root} has no readable plugin.json`);
-  const health = await client.health();
-  if (health.api_version < LIVE_API_VERSION) {
-    err(`The Decky Toolkit plugin on ${file.device.host} (${health.version}) has no live sync yet; update it on the device, then run dev again.`);
+  const outdated = outdatedDevice(await client.health());
+  if (outdated) {
+    err(`${outdated[0].toUpperCase()}${outdated.slice(1)}, then run dev again.`);
     return 1;
   }
 

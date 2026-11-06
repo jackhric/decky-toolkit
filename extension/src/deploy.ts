@@ -1,9 +1,9 @@
 import type { ChildProcess } from 'child_process';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { describeError } from '@decky-toolkit/client/client';
+import { describeError, outdatedDevice } from '@decky-toolkit/client/client';
 import { DeployPhase, WorkspacePlugin, readWorkspacePlugin } from '@decky-toolkit/client/deploy';
-import { LIVE_API_VERSION, LiveSync, startWatchBuild, stopWatchBuild } from '@decky-toolkit/client/live';
+import { LiveSync, startWatchBuild, stopWatchBuild } from '@decky-toolkit/client/live';
 import type { Connection } from './connection';
 import { BuildError, BuildMode, BuildStep, buildAndDeploy, findPluginRoots } from './pluginDeploy';
 
@@ -235,7 +235,7 @@ export class DeployController implements vscode.Disposable {
     const client = this.conn.connectedDevice && this.conn.authedClient();
     if (!client || !DeployController.autoDeployEnabled) return;
     const health = await client.health().catch(() => undefined);
-    if (!health || health.api_version < LIVE_API_VERSION) return;
+    if (!health || outdatedDevice(health)) return;
     this.live.get(p.root)?.dispose();
     const sync = new LiveSync(client, { ...p, dir }, {
       log: line => this.out.appendLine(line),

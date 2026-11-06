@@ -35,7 +35,7 @@ await esbuild.build({
   outfile,
   logLevel: 'warning',
 });
-const { DeviceProxy, DeckyClient, isConnectionError, stagePlugin, parseSse } = createRequire(import.meta.url)(outfile);
+const { API_BASE, DeviceProxy, DeckyClient, isConnectionError, stagePlugin, parseSse } = createRequire(import.meta.url)(outfile);
 
 const results = [];
 const redact = s => String(s).split(identity.key).join('<key>');
@@ -64,6 +64,8 @@ async function check(name, fn) {
 const state = new Map();
 const proxy = new DeviceProxy(() => ({ host, port, identity }), { get: k => state.get(k), update: async (k, v) => { state.set(k, v); } }, () => 0);
 const base = await proxy.start();
+// The client API through the proxy, as the webviews see it.
+const api = base + API_BASE;
 console.log(`proxy listening on ${new URL(base).origin}/<secret>, device ${host}:${port}`);
 
 await check('proxy rejects unknown prefix', async () => {
@@ -78,19 +80,19 @@ await check('/health via proxy', async () => {
   if (!res.ok || body.ok !== true) throw new Error(`HTTP ${res.status} ${JSON.stringify(body)}`);
   const cors = res.headers.get('access-control-allow-origin');
   if (cors !== 'vscode-webview://dev-check') throw new Error(`missing CORS header (${cors})`);
-  return `ok=true ${body.name} ${body.version} api_version=${body.api_version} tools=${body.tools}`;
+  return `ok=true ${body.name} ${body.version} api=${body.api} tools=${body.tools}`;
 });
 
 await check('authenticated route via proxy with foreign Origin', async () => {
-  const res = await fetch(base + '/stream/stats', { headers: { Origin: 'vscode-webview://dev-check' } });
+  const res = await fetch(api + '/stream/stats', { headers: { Origin: 'vscode-webview://dev-check' } });
   if (!res.ok) throw new Error(`HTTP ${res.status} ${await res.text()}`);
   const s = await res.json();
   return `stream/stats available=${s.available} running=${s.running} fps=${s.fps}`;
 });
 
-await check('/stream.mjpeg via proxy (5 s)', async () => {
+await check('/stream via proxy (5 s)', async () => {
   const ac = new AbortController();
-  const res = await fetch(base + '/stream.mjpeg', { signal: ac.signal, headers: { Origin: 'vscode-webview://dev-check' } });
+  const res = await fetch(api + '/stream', { signal: ac.signal, headers: { Origin: 'vscode-webview://dev-check' } });
   if (!res.ok) throw new Error(`HTTP ${res.status} ${await res.text()}`);
   const ctype = res.headers.get('content-type');
   const reader = res.body.getReader();
@@ -119,21 +121,17 @@ await check('/stream.mjpeg via proxy (5 s)', async () => {
   return `${parts} parts in 5 s (${(parts / 5).toFixed(1)} fps, cap ${cap}, min ${min}, ${mbps} Mbit/s, ${ctype})`;
 });
 
-await check('/plugins via proxy and client', async () => {
-  const res = await fetch(base + '/plugins', { headers: { Origin: 'vscode-webview://dev-check' } });
-  if (!res.ok) throw new Error(`HTTP ${res.status} ${await res.text()}`);
-  const viaProxy = await res.json();
-  const viaClient = await new DeckyClient({ host, port }, identity).listPlugins();
-  if (!Array.isArray(viaProxy) || viaProxy.length !== viaClient.length) throw new Error(`proxy ${viaProxy.length} vs client ${viaClient.length}`);
-  const bad = viaClient.find(p => typeof p.dir !== 'string');
+await check('plugin_list via client', async () => {
+  const plugins = await new DeckyClient({ host, port }, identity).listPlugins();
+  const bad = plugins.find(p => typeof p.dir !== 'string');
   if (bad) throw new Error(`entry without dir: ${JSON.stringify(bad)}`);
-  return viaClient.map(p => `${p.name ?? p.dir} ${p.version ?? '?'} (${p.dir}, backend=${p.has_backend})`).join('; ');
+  return plugins.map(p => `${p.name ?? p.dir} ${p.version ?? '?'} (${p.dir}, backend=${p.has_backend})`).join('; ');
 });
 
-await check('/frame.jpg via proxy (sidebar preview)', async () => {
+await check('/stream/frame via proxy (sidebar preview)', async () => {
   const sizes = [];
   for (let i = 0; i < 3; i++) {
-    const res = await fetch(`${base}/frame.jpg?t=${Date.now()}`, { headers: { Origin: 'vscode-webview://dev-check' } });
+    const res = await fetch(`${api}/stream/frame?t=${Date.now()}`, { headers: { Origin: 'vscode-webview://dev-check' } });
     if (!res.ok) throw new Error(`HTTP ${res.status} ${await res.text()}`);
     if (res.headers.get('access-control-allow-origin') !== 'vscode-webview://dev-check') throw new Error('missing CORS header');
     const buf = new Uint8Array(await res.arrayBuffer());
@@ -144,7 +142,7 @@ await check('/frame.jpg via proxy (sidebar preview)', async () => {
   return `3 frames at 1.5 s: ${sizes.map(s => `${(s / 1024).toFixed(0)} KiB`).join(', ')} (≈${(sizes.reduce((a, b) => a + b) * 8 / 4.5 / 1e6).toFixed(2)} Mbit/s)`;
 });
 
-await check('/frame.jpg via client (Snapshot to file)', async () => {
+await check('/stream/frame via client (Snapshot to file)', async () => {
   const jpeg = await new DeckyClient({ host, port }, identity).frame();
   if (jpeg[0] !== 0xff || jpeg[1] !== 0xd8 || jpeg.at(-2) !== 0xff || jpeg.at(-1) !== 0xd9) throw new Error('not a complete JPEG');
   return `${(jpeg.length / 1024).toFixed(0)} KiB JPEG`;
@@ -170,7 +168,7 @@ await check('screen panel fps readout matches the device', async () => {
     return els.get(id);
   };
   const listeners = [];
-  const document = { getElementById: el, body: { dataset: { base } }, addEventListener() {} };
+  const document = { getElementById: el, body: { dataset: { base: api } }, addEventListener() {} };
   const window = { addEventListener: (t, fn) => { if (t === 'message') listeners.push(fn); } };
   const post = data => listeners.forEach(fn => fn({ data }));
   new Function('acquireVsCodeApi', 'document', 'window', src)(() => ({ postMessage() {} }), document, window);
@@ -190,7 +188,7 @@ await check('screen panel fps readout matches the device', async () => {
 await check('/input WebSocket through the proxy upgrades and is closed with 4003 while input is off', async () => {
   const st = await new DeckyClient({ host, port }, identity).getInputSettings();
   if (st.enabled) throw new Error('input is enabled on the device; this check needs it off and does not change it');
-  const wsUrl = base.replace(/^http/, 'ws') + '/input';
+  const wsUrl = api.replace(/^http/, 'ws') + '/input';
   const outcome = url => new Promise(resolve => {
     const ws = new WebSocket(url);
     let opened = false;
@@ -211,9 +209,8 @@ await check('/input WebSocket through the proxy upgrades and is closed with 4003
 // Reads the device's audio flag but never changes it.
 await check('/audio WebSocket through the proxy: format frame and >= 10 PCM chunks in 1 s', async () => {
   const st = await new DeckyClient({ host, port }, identity).getStreamSettings();
-  if (st.audio === undefined) throw new Error('device predates audio streaming (no "audio" in /stream/settings)');
   if (!st.audio) throw new Error('audio is off on the device; this check needs it on and does not change it');
-  const ws = new WebSocket(base.replace(/^http/, 'ws') + '/audio');
+  const ws = new WebSocket(api.replace(/^http/, 'ws') + '/audio');
   ws.binaryType = 'arraybuffer';
   const r = await new Promise((resolve, reject) => {
     let format = null, chunks = 0, bytes = 0, first = 0;
@@ -245,11 +242,12 @@ await check('MCP tools/list via client', async () => {
 });
 
 await check('MCP tools/call logs_read via client', async () => {
-  const text = await new DeckyClient({ host, port }, identity).callToolText('logs_read', { source: 'loader', lines: 5 });
-  return `${(JSON.parse(text) as { text: string }).text.split('\n').length} lines`;
+  const r = await new DeckyClient({ host, port }, identity).callTool('logs_read', { source: 'loader', lines: 5 });
+  if (r.isError) throw new Error(r.content[0]?.text);
+  return `${JSON.parse(r.content[0].text).text.split('\n').length} lines`;
 });
 
-// Read-only: never adds pads or navigates on the shared device. Passes on 404 (older device).
+// Read-only: never adds pads or navigates on the shared device.
 await check('controllers and Steam UI routes probe (informational)', async () => {
   const c = new DeckyClient({ host, port }, identity);
   const parts = [];
@@ -269,7 +267,7 @@ await check('controllers and Steam UI routes probe (informational)', async () =>
   const ac = new AbortController();
   const t = setTimeout(() => ac.abort(), 5000);
   try {
-    const res = await fetch(base + '/controllers/events', { signal: ac.signal, headers: { Accept: 'text/event-stream', Origin: 'vscode-webview://dev-check' } });
+    const res = await fetch(api + '/controllers/events', { signal: ac.signal, headers: { Accept: 'text/event-stream', Origin: 'vscode-webview://dev-check' } });
     parts.push(`/controllers/events via proxy → ${res.status} ${res.headers.get('content-type') ?? ''}`.trim());
     ac.abort();
   } catch (e) {
@@ -280,13 +278,33 @@ await check('controllers and Steam UI routes probe (informational)', async () =>
   return parts.join('; ');
 });
 
-await check('planned routes probe (informational)', async () => {
+// The client API lives under API_BASE only; its old top-level paths and the twins v1 dropped answer 404/405.
+const GONE = [['POST', '/pair/request'], ['GET', '/pair/request/none'], ['GET', '/stream.mjpeg'], ['GET', '/frame.jpg'],
+  ['GET', '/stream/stats'], ['GET', '/input/settings'], ['GET', '/controllers'], ['GET', '/ui/routes'], ['GET', '/plugins'],
+  ['POST', '/plugins/install'], ['GET', '/logs/tail'], ['GET', '/apps'], ['GET', '/fs?path=/tmp'],
+  ...['/pair/requests', '/audio/stats', '/cef/console', '/cef/console/stream', '/recordings', '/recordings/none', '/stream.mjpeg',
+    '/frame.jpg'].map(p => ['GET', API_BASE + p]), ['POST', API_BASE + '/exec']];
+
+await check('old and dropped paths 404, /mcp GET and DELETE 405', async () => {
   const c = new DeckyClient({ host, port }, identity);
-  const probe = async (p, init) => (await c.fetch(p, { timeoutMs: 5000, ...init }).then(r => { r.body?.cancel(); return r.status; }));
+  const status = async (method, p) => {
+    const r = await c.fetch(p, { method, timeoutMs: 5000 });
+    await r.text();
+    return [r.status, r.headers.get('allow')];
+  };
+  const wrong = [];
+  for (const [method, p] of GONE) {
+    const [code] = await status(method, p);
+    if (code !== 404 && code !== 405) wrong.push(`${method} ${p} → ${code}`);
+  }
+  for (const method of ['GET', 'DELETE']) {
+    const [code, allow] = await status(method, '/mcp');
+    if (code !== 405 || allow !== 'POST') wrong.push(`${method} /mcp → ${code} Allow: ${allow}`);
+  }
+  if (wrong.length) throw new Error(wrong.join('; '));
   // Probes without filing a request, so nothing shows up under the device's Pairing requests.
   const pair = await new DeckyClient({ host, port }).pollPairing('dev-check-unknown', 0);
-  const stream = await probe('/logs/stream?tail=1', { headers: { Accept: 'text/event-stream' } });
-  return `/pair/request/<unknown> → ${typeof pair === 'string' ? pair : pair.status}, /pair/requests → ${await probe('/pair/requests')}, /logs/stream → ${stream}, /logs/tail → ${await probe('/logs/tail?tail=1')}, /plugins → ${await probe('/plugins')}`;
+  return `${GONE.length} old or dropped paths 404/405; /mcp GET/DELETE 405 Allow: POST; /pair/request/<unknown> → ${typeof pair === 'string' ? pair : pair.status}`;
 });
 
 await check('SSE parser', async () => {
@@ -328,7 +346,7 @@ await check('stage + zip a sample plugin', async () => {
   return `${listing.length} entries, unzip -t ok, exec bit kept (${files.join(' ')})`;
 });
 
-// Informational: game file routes. Printed, never counted as failures (older devices lack them).
+// Informational: game files. Printed, never counted as failures.
 async function info(name, fn) {
   try {
     console.log(`INFO  ${name}: ${await fn()}`);

@@ -30,8 +30,8 @@ async def wait_for(cond, timeout=3.0):
 def test_names_and_txt():
     assert instance_name("bazzite.internal") == "bazzite"
     assert instance_name("steamdeck") == "steamdeck"
-    assert txt_records("0.3.0", 1, "abcd") == ["api=1", "version=0.3.0", "id=abcd"]
-    assert txt_records("0.3.0", 1, None) == ["api=1", "version=0.3.0"]
+    assert txt_records("0.3.0", ("v1",), "abcd") == ["api=v1", "version=0.3.0", "id=abcd"]
+    assert txt_records("0.3.0", ("v1",), None) == ["api=v1", "version=0.3.0"]
 
 
 def test_publishes_until_stopped(tmp_path):

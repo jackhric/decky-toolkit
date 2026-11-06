@@ -31,8 +31,8 @@ def instance_name(hostname: str | None = None) -> str:
     return (name or "Decky Toolkit")[:63]
 
 
-def txt_records(version: str, api_version: int, device_id: str | None) -> list[str]:
-    txt = [f"api={api_version}", f"version={version}"]
+def txt_records(version: str, api: tuple[str, ...], device_id: str | None) -> list[str]:
+    txt = [f"api={','.join(api)}", f"version={version}"]
     if device_id:
         txt.append(f"id={device_id}")
     return txt

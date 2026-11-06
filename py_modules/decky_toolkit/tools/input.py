@@ -56,7 +56,7 @@ def register(reg: ToolRegistry, service: InputService | None, capturer: ScreenCa
     )
     async def input_settings(enabled: bool | None = None) -> dict[str, Any]:
         if enabled is None:
-            return svc().state()
+            return svc().status()
         return await svc().set_enabled(enabled)
 
     @reg.add(
