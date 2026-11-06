@@ -1,6 +1,9 @@
+import type { ChildProcess } from 'child_process';
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { describeError } from '@decky-toolkit/client/client';
 import { DeployPhase, WorkspacePlugin, readWorkspacePlugin } from '@decky-toolkit/client/deploy';
+import { LIVE_API_VERSION, LiveSync, startWatchBuild, stopWatchBuild } from '@decky-toolkit/client/live';
 import type { Connection } from './connection';
 import { BuildError, BuildMode, BuildStep, buildAndDeploy, findPluginRoots } from './pluginDeploy';
 
@@ -114,6 +117,10 @@ export class DeployController implements vscode.Disposable {
   private prompted = false;
   private autoSubs: vscode.Disposable[] = [];
   private readonly timers = new Map<string, NodeJS.Timeout>();
+  /** Per plugin root, once a deploy has put the device in step: later changes are pushed and reloaded in place. */
+  private readonly live = new Map<string, LiveSync>();
+  private readonly builders = new Map<string, ChildProcess>();
+  private liveDevice?: string;
 
   constructor(
     private readonly conn: Connection,
@@ -123,6 +130,8 @@ export class DeployController implements vscode.Disposable {
   ) {
     this.subs = [
       conn.onDidChange(() => { this.render(); this.maybePrompt(); }),
+      // Live sessions hold the old device's client.
+      conn.onDidChangeTarget(() => this.dropLive()),
       ws.onDidChange(() => { this.render(); this.maybePrompt(); this.armAutoDeploy(); }),
       vscode.workspace.onDidChangeConfiguration(e => { if (e.affectsConfiguration('decky-toolkit.deploy.onChange')) this.armAutoDeploy(); }),
     ];
@@ -179,25 +188,81 @@ export class DeployController implements vscode.Disposable {
     const on = !DeployController.autoDeployEnabled;
     await cfg.update('deploy.onChange', on, target);
     void vscode.window.setStatusBarMessage(on
-      ? 'Decky: auto-deploy on change is on (watching dist/index.js, main.py and py_modules; run your build in watch mode)'
+      ? 'Decky: auto-deploy on change is on (the first change deploys, later ones sync live)'
       : 'Decky: auto-deploy on change is off', 5000);
   }
 
   private armAutoDeploy(): void {
     this.autoSubs.forEach(s => s.dispose());
     this.autoSubs = [];
+    this.dropLive();
+    this.stopBuilders();
     if (!DeployController.autoDeployEnabled) return;
+    const watchBuild = vscode.workspace.getConfiguration('decky-toolkit').get<boolean>('deploy.watchBuild', true);
     for (const p of this.ws.plugins) {
-      for (const glob of ['dist/index.js', 'main.py', 'py_modules/**/*.py']) {
-        const w = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(p.root), glob));
-        const fire = () => this.onPluginFileChanged(p);
-        this.autoSubs.push(w, w.onDidChange(fire), w.onDidCreate(fire), w.onDidDelete(fire));
-      }
+      const w = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(
+        vscode.Uri.file(p.root), '{dist/**,py_modules/**,assets/**,defaults/**,main.py,plugin.json,package.json}'));
+      const fire = (uri: vscode.Uri) => this.onPluginFileChanged(p, uri);
+      this.autoSubs.push(w, w.onDidChange(fire), w.onDidCreate(fire));
+      if (watchBuild) void this.startBuilder(p);
     }
   }
 
-  private onPluginFileChanged(p: WorkspacePlugin): void {
+  private async startBuilder(p: WorkspacePlugin): Promise<void> {
+    const child = await startWatchBuild(p.root, line => this.out.appendLine(`[build ${p.name}] ${line}`));
+    if (!child) return;
+    if (!DeployController.autoDeployEnabled || this.builders.has(p.root)) {
+      stopWatchBuild(child);
+      return;
+    }
+    this.builders.set(p.root, child);
+    this.out.appendLine(`Started the watch build of ${p.name} (package.json "watch" script)`);
+    child.once('exit', () => { if (this.builders.get(p.root) === child) this.builders.delete(p.root); });
+  }
+
+  private stopBuilders(): void {
+    this.builders.forEach(stopWatchBuild);
+    this.builders.clear();
+  }
+
+  private dropLive(): void {
+    this.live.forEach(l => l.dispose());
+    this.live.clear();
+  }
+
+  /** After a deploy: devices with live sync take later changes as pushes and in-place reloads. */
+  private async startLive(p: WorkspacePlugin, dir: string): Promise<void> {
+    const client = this.conn.connectedDevice && this.conn.authedClient();
+    if (!client || !DeployController.autoDeployEnabled) return;
+    const health = await client.health().catch(() => undefined);
+    if (!health || health.api_version < LIVE_API_VERSION) return;
+    this.live.get(p.root)?.dispose();
+    const sync = new LiveSync(client, { ...p, dir }, {
+      log: line => this.out.appendLine(line),
+      fullDeploy: async () => { await this.deploy({ auto: true, plugin: p }); },
+      onSynced: step => {
+        if (step.error) {
+          vscode.window.setStatusBarMessage(`$(warning) Decky: live sync of ${p.name} failed (see output)`, 8000);
+        } else if (step.result && !step.result.scheduled) {
+          const errs = step.result.errors?.length ? ` with ${step.result.errors.length} error(s)` : '';
+          vscode.window.setStatusBarMessage(`$(check) Decky: reloaded ${p.name} (${step.mode}) in ${step.totalMs} ms${errs}`, 5000);
+          if (errs) this.out.show(true);
+        }
+      },
+    });
+    await sync.seed();
+    this.live.set(p.root, sync);
+    this.liveDevice = this.conn.connectedDevice?.name;
+    this.out.appendLine(`Live sync on for ${p.name}: changes now reload in place on ${this.liveDevice ?? 'the device'}`);
+  }
+
+  private onPluginFileChanged(p: WorkspacePlugin, uri: vscode.Uri): void {
     if (!this.conn.connectedDevice) return;
+    const sync = this.live.get(p.root);
+    if (sync && !this.running) {
+      sync.notify(path.relative(p.root, uri.fsPath));
+      return;
+    }
     clearTimeout(this.timers.get(p.root));
     this.timers.set(p.root, setTimeout(() => {
       this.timers.delete(p.root);
@@ -252,6 +317,7 @@ export class DeployController implements vscode.Disposable {
           });
         });
       this.report(p, step, !!req.auto);
+      if (!step.confirm || step.confirm.confirmed) await this.startLive(p, step.dir).catch(() => undefined);
       return step;
     } catch (e) {
       if (ac.signal.aborted) {
@@ -293,6 +359,8 @@ export class DeployController implements vscode.Disposable {
 
   dispose(): void {
     this.timers.forEach(t => clearTimeout(t));
+    this.dropLive();
+    this.stopBuilders();
     this.autoSubs.forEach(s => s.dispose());
     this.subs.forEach(s => s.dispose());
     this.item.dispose();

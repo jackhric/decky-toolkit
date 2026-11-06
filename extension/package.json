@@ -552,7 +552,12 @@
         "decky-toolkit.deploy.onChange": {
           "type": "boolean",
           "default": false,
-          "description": "Deploy the workspace plugin (fast, without building) whenever dist/index.js, main.py or py_modules/**/*.py change. Keep your build running in watch mode (`pnpm run watch`)."
+          "description": "Keep the device in step with the workspace plugin. The first change to dist/, py_modules/, assets/, defaults/, main.py or the manifests deploys it; after that (devices with live sync) changed files are pushed and the plugin reloads in place: a bundle change re-imports only the frontend, a Python change restarts the backend, a plugin.json or package.json change deploys again."
+        },
+        "decky-toolkit.deploy.watchBuild": {
+          "type": "boolean",
+          "default": true,
+          "description": "While auto-deploy on change is on, run the plugin's package.json \"watch\" script (vite, rollup, ...) in the background, with its output in the Decky Toolkit output channel."
         },
         "decky-toolkit.discovery.enabled": {
           "type": "boolean",

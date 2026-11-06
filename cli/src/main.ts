@@ -10,6 +10,7 @@ import * as identityFile from '@decky-toolkit/client/identity';
 import { CLAUDE_MCP_ADD as MCP_ADD } from '@decky-toolkit/client/mcpConfig';
 import { PairOutcome, requestApproval } from '@decky-toolkit/client/pairing';
 import { InvalidOption, StatusReport, deploy, deviceStatus, explain, onDevice, pairedClient, parseRestart } from './device';
+import { dev } from './dev';
 import { McpServer } from './mcp';
 import { VERSION } from './version';
 
@@ -22,6 +23,8 @@ Commands:
   status [--json]                      Show the paired device and whether it answers
   mcp                                  Run an MCP server over stdio with the device's tools
   deploy [dir] [--restart <mode>]      Install the Decky plugin in dir (default: .) on the device
+  dev [dir] [--no-build]               Deploy, then live-sync every change: runs the plugin's watch script,
+                                       pushes changed files and reloads only what changed
   call <tool> [json-args] [--out <file>]
                                        Call one of the device's tools; images are saved to a file
   forget                               Forget the pairing on this machine
@@ -260,6 +263,10 @@ const COMMANDS: Record<string, (argv: string[]) => Promise<number>> = {
       err(`Deploy failed: ${explain(e)}`);
       return 1;
     }
+  },
+  dev: async argv => {
+    const { values, positionals } = parse(argv, { 'no-build': { type: 'boolean' } }, 1);
+    return dev(positionals[0] ?? '.', !values['no-build'], out, err);
   },
   call: argv => {
     const { values, positionals } = parse(argv, { out: { type: 'string', short: 'o' } }, 2);

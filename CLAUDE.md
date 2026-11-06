@@ -14,7 +14,8 @@ See README.md for setup and docs/reference.md for the tool list and architecture
     `identity.py` (non-secret `hostname`/`device_id`/`os` for `/health`), `long_lived.py` (ends streams,
     websockets and long polls on shutdown).
   - `loader/`: `install.py` (plugin zip validation + atomic install), `logs.py` (journal / plugin log tail and
-    follow), `fixes.py` (workarounds for Decky Loader bugs, applied in our own process).
+    follow), `fixes.py` (workarounds for Decky Loader bugs, applied in our own process), `live.py` (live sync:
+    single-file writes into an installed plugin, frontend/backend reload in place with UI restore).
   - `steam/`: `cdp.py` (Chrome DevTools client for Steam CEF on 127.0.0.1:8080), `ui.py` (Steam UI navigation and
     element queries), `console.py` (background Steam UI console capture), `apps.py` (Steam library/launch via the
     client JS).
@@ -32,7 +33,7 @@ See README.md for setup and docs/reference.md for the tool list and architecture
   identity file, plugin staging; no `vscode`); the extension and the CLI import it as `@decky-toolkit/client/*`.
 - `cli/` — the `decky-toolkit` npm package: `pair`, `status`, `mcp` (hand-written stdio MCP server that answers
   `initialize`/`ping` locally and relays `tools/*` to the device's `/mcp`, plus local `deploy_plugin`/`device_status`),
-  `deploy`, `call`, `forget`. One esbuild bundle `dist/cli.js`, no runtime dependencies. `scripts/smoke.mjs` runs
+  `deploy`, `dev` (watch build + deploy once + live sync until Ctrl-C), `call`, `forget`. One esbuild bundle `dist/cli.js`, no runtime dependencies. `scripts/smoke.mjs` runs
   the built CLI as a child process against `scripts/fake-device.mjs` (installed through the client's hooks).
   The extension's "Write MCP config" writes `npx -y decky-toolkit mcp` into `.mcp.json`.
 - `src/index.tsx` — Quick Access panel (React, `@decky/ui`, `@decky/api`). Built by `pnpm run build` (Vite,
@@ -92,6 +93,31 @@ See README.md for setup and docs/reference.md for the tool list and architecture
 - A `restart=loader` install that swapped the plugin dir while the loader was running raced the watcher and
   left orphaned backends leaking memory; the install route now stages the dir and a systemd job stops the
   loader, swaps, and starts it.
+
+## Live sync and loader shutdown facts (verified 2026-11-06, Decky v3.3.1)
+- The frontend loads as an ES module: `DeckyPluginLoader.importPlugin(name, version)` does
+  `import("http://127.0.0.1:1337/plugins/<name>/dist/index.js?t=<now>")`, so it always reads the file on disk.
+  It unloads first (calls `onDismount`), leaves the backend alone and takes ~10 ms. Afterwards Decky's side
+  menu falls back to the plugin list; `deckyState.setActivePlugin(name)` reopens the panel.
+- Each load of a plugin's `@decky/api` (`__DECKY_SECRET_INTERNALS..._deckyLoaderAPIInit.connect`) replaces that
+  plugin's backend event listener map, so listeners cannot pile up across reloads even if `onDismount` forgets them.
+- Decky records no route owner. A reload re-registers the plugin's routes as new entries in
+  `routerHook.routerState._routes`, so entries whose object changed belong to it. `Navigation.Navigate` closes side menus.
+- `loader/reload_plugin` returns before the backend is restarted and the bundle re-imported; wait for the
+  plugin's entry in `DeckyPluginLoader.plugins` to be replaced.
+- `Runtime.evaluate` with `awaitPromise` on the reload sometimes failed with "Promise was collected"; holding the
+  promise on `window` until it settles fixed it (16/16 after, several failures before).
+- With the `debug` flag, in-place file writes (overwrite, or temp file + rename in the same dir) into an installed
+  plugin did NOT trigger the loader's file watcher; only the whole-dir swap of an install did.
+- Every ssh command to the device costs ~120 ms of session setup (PAM, shell) while the LAN round trip is
+  0.5 ms; a persistent connection (ours: keep-alive HTTPS to the plugin) makes a push take 2-10 ms.
+- Builds: vite (this repo) 35-90 ms; the stock decky-plugin-template's rollup ~450-500 ms, mostly
+  `@rollup/plugin-typescript` type-checking every build.
+- Shutdown: the loader closes the plugin socket right after SIGTERM and its reader (`localsocket.py`
+  `_listen_for_method_call`) then spins on `""` at EOF without yielding, starving `_unload` at its first real
+  await until the 5 s SIGKILL; `loader/fixes.py` patches that in our process. aiohttp's graceful shutdown waited
+  `shutdown_timeout` twice on long-lived requests; `server/long_lived.py` closes them. Reloads now stop in 0.1 s.
+  A plugin whose `_unload` never suspends (the template's) is not affected.
 
 ## Screen streaming facts (verified 2026-11-03)
 - gamescope publishes a PipeWire `Video/Source` node named `gamescope` (BGRx/NV12 1920x1080) that

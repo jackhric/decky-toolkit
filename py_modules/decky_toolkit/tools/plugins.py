@@ -119,9 +119,17 @@ def register(reg: ToolRegistry) -> None:
 
     @reg.add(
         "reload_plugin",
-        "Reload one plugin's backend through Decky (loader/reload_plugin) without restarting the loader.",
-        {"properties": {"dir": {"type": "string", "description": "Plugin directory name, as returned by list_plugins"}},
+        "Reload one plugin through Decky without restarting the loader. Without 'mode', ask Decky to reload it "
+        "(loader/reload_plugin) and return at once. mode 'frontend' re-imports only dist/index.js (~10 ms, the "
+        "backend keeps running); mode 'backend' restarts the backend too and waits until the new bundle is loaded. "
+        "Both modes reopen the plugin's panel, route, settings tab and focus if the user was there, and return "
+        "errors the plugin logged while loading.",
+        {"properties": {"dir": {"type": "string", "description": "Plugin directory name, as returned by list_plugins"},
+                        "mode": {"type": "string", "enum": ["frontend", "backend"]}},
          "required": ["dir"]},
     )
-    async def reload_plugin_tool(dir: str) -> dict[str, Any]:  # noqa: A002 - matches the documented argument name
-        return await reload_plugin(dir)
+    async def reload_plugin_tool(dir: str, mode: str | None = None) -> dict[str, Any]:  # noqa: A002 - documented name
+        if mode is None:
+            return await reload_plugin(dir)
+        from ..loader import live  # live builds on this module
+        return await live.reload(dir, mode)
