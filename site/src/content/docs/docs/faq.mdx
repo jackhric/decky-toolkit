@@ -1,6 +1,6 @@
 ---
 title: FAQ
-description: Answers about developing Decky Loader plugins for the Steam Deck with Decky Toolkit, from hot reload and logs to CEF debugging and MCP.
+description: Answers about developing Decky Loader plugins for the Steam Deck with Decky Toolkit, from live reload and logs to CEF debugging and MCP.
 ---
 
 export const faqs = [
@@ -17,7 +17,7 @@ export const faqs = [
     a: 'Start from the decky-plugin-template, open the plugin folder (any folder with a plugin.json) in VS Code or VSCodium, pair the editor with your device and press Ctrl+Alt+D. The extension builds the plugin if its sources changed, installs it on the device and reloads it.',
   },
   {
-    q: 'How do I hot reload a Decky plugin without restarting Decky Loader?',
+    q: 'How do I reload a Decky plugin on save without restarting Decky Loader?',
     a: 'Turn on deploy on change in the extension and keep your bundler in watch mode (pnpm run watch). Every save then reloads just your plugin, backend and frontend, without restarting Decky Loader or the Steam UI.',
   },
   {

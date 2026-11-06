@@ -13,7 +13,7 @@ export default defineConfig({
     sitemap(),
     starlight({
       title: 'Decky Toolkit',
-      description: 'Build, deploy and hot reload Decky Loader plugins on your Steam Deck from VS Code or VSCodium.',
+      description: 'Build, deploy and live reload Decky Loader plugins on your Steam Deck from VS Code or VSCodium.',
       components: { SiteTitle: './src/components/docs/SiteTitle.astro' },
       favicon: '/favicon.svg',
       social: [{ icon: 'github', label: 'GitHub', href: repo }],
