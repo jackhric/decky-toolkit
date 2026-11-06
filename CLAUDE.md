@@ -38,7 +38,7 @@ See README.md for setup and docs/reference.md for the tool list and architecture
   - `tools/`: only MCP tools: the registry and one module of tools per area (`input.py`, `controllers.py`, `ui.py`,
     `cef.py`, `apps.py`, `games.py`, `record.py`, `perf.py` for the Steam performance overlay, `plugin_tools.py` for tools other plugins register from their
     frontend, ...) and `plugin_api.py` (plugin backend methods, calls, frontend call check).
-- `packages/client/` — device client source shared by bundling (transport, API types, discovery, pairing,
+- `packages/client/` — device client source (private workspace package `@decky-toolkit/client`, never built) shared by bundling (transport, API types, discovery, pairing,
   identity file, plugin staging; no `vscode`); the extension and the CLI import it as `@decky-toolkit/client/*`.
 - `cli/` — the `decky-toolkit` npm package: `pair`, `status`, `mcp` (hand-written stdio MCP server that answers
   `initialize`/`ping` locally and relays `tools/*` to the device's `/mcp`, plus local `plugin_deploy`/`device_status`),
@@ -433,9 +433,14 @@ SharedJSContext via the `cef_evaluate` tool, or use `plugin_call` (`plugin: "Dec
   only touches it bumps nothing. Land client changes together with the consumer change (`extension/` or `cli/`)
   and scope the commit to that consumer (`feat(cli): ...`, `fix(extension): ...`).
 - Node matches Decky Loader's own CI (`node-version: 26` in SteamDeckHomebrew/decky-loader workflows).
-- Toolchain policy: one pnpm pinned by `packageManager` (with its sha512) in the root, `extension/` and `cli/`
-  `package.json` (CI's `pnpm/action-setup` reads it; run `npx pnpm@<that version>` or corepack locally), Node 26 in CI
-  and `.nvmrc`, and the same TypeScript, esbuild and `@types/node` across packages; bump them together.
+- Toolchain policy: one pnpm workspace (`pnpm-workspace.yaml`: the root plugin, `packages/client`, `extension`, `cli`,
+  `site`) with one `pnpm-lock.yaml`; `pnpm install` anywhere installs all of it. One pnpm pinned by `packageManager`
+  (with its sha512) in the root `package.json` only (CI's `pnpm/action-setup` reads it; run `npx pnpm@<that version>`
+  or corepack locally), Node 26 in CI and `.nvmrc`, and the same TypeScript, esbuild and `@types/node` across packages;
+  bump them together. The extension and the CLI do not depend on `@decky-toolkit/client` as a package: they reach it
+  through tsconfig `paths`, which esbuild follows, so their published `package.json` carries no `workspace:` specifier
+  and `vsce package --no-dependencies` / `npm pack` see no node_modules. esbuild targets `node20`: VS Code 1.90
+  (`engines.vscode`) runs Electron 29 / Node 20, and the CLI's `engines.node` is `>=20`.
 - GitHub Pages (`pages.yml`, source: GitHub Actions) serves the site plus the latest plugin release as
   `jackhric.github.io/decky-toolkit/decky-toolkit.zip`, the Decky "Install Plugin from URL" link. It deploys on
   plugin releases (called from `release.yml`), on pushes to `main` touching `site/`, and by hand. A deploy
