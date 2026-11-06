@@ -3,10 +3,9 @@
 Detailed reference for the plugin: tools, pairing, the screen panel, audio, remote input,
 controllers, UI navigation, HTTP routes and internals. For setup see the [README](../README.md).
 
-The plugin runs an HTTP server on the device (`http://<deck-ip>:8765`, protected by a token that
-clients get by [pairing](#pairing)). The VS Code extension and your own scripts all talk to
-it. The same server also speaks MCP Streamable HTTP on `/mcp`, so any MCP client can
-use the tools below.
+The plugin runs an HTTPS server on the device (`https://<deck-ip>:8765`, open only to clients you
+have [paired](#pairing)). The VS Code extension talks to it, and relays MCP to your coding agent on a
+loopback URL (`Decky: Copy MCP URL`), so any MCP client can use the tools below.
 
 ## MCP tools
 
@@ -55,7 +54,7 @@ use the tools below.
 
 ## Pairing
 
-A client never needs the token typed in. It asks the device for access, and you allow it on the
+A client never needs a secret typed in. It asks the device for access, and you allow it on the
 device itself. There is no time limit: a request waits as long as the client is waiting.
 
 From the VS Code extension (see [extension/README.md](../extension/README.md#pairing)):
@@ -67,19 +66,20 @@ From the VS Code extension (see [extension/README.md](../extension/README.md#pai
    (…) → Decky Toolkit. While a request is pending the panel shows only *Approve pairing request?* with
    *VS Code on <your-pc> (<your-ip>) · code 4821* and **Approve** / **Deny** side by side (several
    requests come one at a time, "1 of 3"). Check the code and press **Approve**.
-4. The extension stores the token and connects. Deny shows *Pairing denied on <device>* with
+4. The extension stores its pairing and connects. Deny shows *Pairing denied on <device>* with
    **Try again**; Cancel in the editor withdraws the request.
 
 Other clients (scripts, CLI agents) use the same routes:
-`POST /pair/request`, then long-poll `GET /pair/request/{id}?wait=25` until it returns the token;
+`POST /pair/request`, then long-poll `GET /pair/request/{id}?wait=25` until it returns the credentials;
 see [docs/api.md](api.md#pairing). Pending requests expire 60 s after their client stops
 polling, at most 10 can be pending (2 per address), and the toast and code let you spot a request
 you did not make.
 
 The normal panel is deliberately minimal: the device's IP address in large type ("port 8765"
 below it), which is all the extension's Add device needs, and one server status line. Everything
-else (server and remote input toggles, restart, regenerate token) is under
-**Advanced**.
+else (server and remote input toggles, restart) is under
+**Advanced**. The **Paired clients** section lists every paired client with its last use and a
+**Forget** button, which only works on the device.
 
 ## Screen panel
 
@@ -97,10 +97,10 @@ controls are icons in the editor tab bar:
 | `$(device-camera)` | Save the current frame as a JPEG |
 
 A settings change applies within a fraction of a second without dropping the connection. The
-stream routes are behind the same token: `/stream.mjpeg` (multipart MJPEG), `/frame.jpg` (one
+stream routes are open only to paired clients: `/stream.mjpeg` (multipart MJPEG), `/frame.jpg` (one
 current frame), `/stream/stats` (JSON), `/stream/settings` (`GET`/`PUT` JSON) and `/audio` (PCM
-over WebSocket). The extension reaches them through a loopback proxy that adds the token, so the
-webview never holds it.
+over WebSocket). The extension reaches them through a loopback proxy that holds the pairing, so the
+webview never does.
 
 Stream settings are device-wide; the last change wins. There is one capture pipeline, and every
 editor panel, recording and MCP tool call shares it, so changing the frame rate in one window
@@ -164,8 +164,8 @@ install.
 
 Security notes for input:
 
-- Input is full control of the device: store purchases, Desktop Mode, a terminal. It needs the
-  bearer token and passes the same `Origin` check as the other routes.
+- Input is full control of the device: store purchases, Desktop Mode, a terminal. It needs a
+  paired client and passes the same `Origin` check as the other routes.
 - Input is off until you turn it on.
 - The Deck shows a toast "Remote input from <ip>" when a client starts sending input, and every
   input session is written to the plugin log.
@@ -195,15 +195,16 @@ Besides `/mcp` the server has plain HTTP routes for scripts and editor integrati
 [docs/api.md](api.md) for the full list. The most useful ones:
 
 ```sh
-curl -H "Authorization: Bearer $TOKEN" -F file=@my-plugin.zip "http://<deck-ip>:8765/plugins/install?restart=loader"
-curl -N -H "Authorization: Bearer $TOKEN" "http://<deck-ip>:8765/logs/stream?plugin=my-plugin"   # SSE
-curl -H "Authorization: Bearer $TOKEN" "http://<deck-ip>:8765/logs/tail?source=loader&tail=50"
-curl -H "Authorization: Bearer $TOKEN" "http://<deck-ip>:8765/apps/70300/saves"
-curl -OJ -H "Authorization: Bearer $TOKEN" "http://<deck-ip>:8765/recordings/<name>"
-curl -X POST -H "Content-Type: application/json" -d '{"client_name":"my script","client_kind":"other"}' \
-  "http://<deck-ip>:8765/pair/request"                   # {id, code}; allow it on the device, then:
-curl "http://<deck-ip>:8765/pair/request/<id>?wait=25"   # {status: "approved", token, ...} once
+# C="--cert client.crt --key client.key --cacert server.crt"   (the files of a paired identity)
+curl $C -F file=@my-plugin.zip "https://<deck-ip>:8765/plugins/install?restart=loader"
+curl $C -N "https://<deck-ip>:8765/logs/stream?plugin=my-plugin"   # SSE
+curl $C "https://<deck-ip>:8765/logs/tail?source=loader&tail=50"
+curl $C "https://<deck-ip>:8765/apps/70300/saves"
+curl $C -OJ "https://<deck-ip>:8765/recordings/<name>"
 ```
+
+Pairing a script yourself (key generation, `POST /pair/request`, the credentials in the approval) is
+described in [docs/api.md](api.md#pairing).
 
 ## How it works
 
@@ -211,13 +212,13 @@ curl "http://<deck-ip>:8765/pair/request/<id>?wait=25"   # {status: "approved", 
   plugin's asyncio loop. `aiohttp` comes from the loader's own PyInstaller bundle, so there are no
   dependencies to vendor.
 - `py_modules/decky_toolkit/protocol.py` implements the JSON-RPC methods `initialize`, `ping`,
-  `tools/list`, `tools/call` and the HTTP transport rules (bearer auth, `Origin` check, 202 for
+  `tools/list`, `tools/call` and the HTTP transport rules (client-certificate auth, `Origin` check, 202 for
   notifications, 405 for GET).
 - `py_modules/decky_toolkit/cdp.py` is a tiny Chrome DevTools Protocol client used to talk to Steam's
   CEF debugger. The plugin deliberately does **not** connect to the loader's own websocket on port
   1337: the loader keeps a single client and would kick the Steam UI off.
 - `src/index.tsx` is the Quick Access panel. It only mirrors state: the endpoint, pairing requests to
-  approve or deny, the stream and input status, a server restart and token regeneration.
+  approve or deny, the paired clients, the stream and input status and a server restart.
 
 The plugin runs with the `root` flag so it can restart the loader, read every plugin's logs and write
 anywhere. The `debug` flag makes the loader hot-reload the plugin when its files change, which is how
@@ -236,22 +237,23 @@ pnpm run build       # or pnpm run watch, with deploy-on-change in the extension
 ./scripts/test.sh    # Python unit tests
 ```
 
-Connect Claude Code:
+Connect Claude Code through the extension's loopback relay: **Decky: Copy MCP URL** (or **Write MCP
+config for this workspace**) gives `http://127.0.0.1:8766/<secret>/mcp`, and
 
 ```sh
-claude mcp add --transport http decky http://<deck-ip>:8765/mcp -H "Authorization: Bearer <token>"
+claude mcp add --transport http decky <that url>
 ```
 
-The token lives in `~/homebrew/settings/decky-toolkit/settings.json` on the device (mode 0600, owned by
-root) and is shown in the plugin panel.
+needs no header. The port is `decky-toolkit.mcpPort` (default 8766; the next free one when taken), and the URL
+stays the same across restarts.
 
 ## Security notes
 
 - The server binds `0.0.0.0` by default. Bazzite's default firewalld zone already allows TCP
   1025-65535 inbound, so it is reachable from the LAN as soon as the plugin loads.
-- Traffic is plain HTTP, so the token is visible on the local network. Treat this as a development
-  tool on a trusted LAN. Disable it from the panel when not in use.
-- `write_file`, `read_file` and `cef_evaluate` are intentionally powerful: anyone with the token
+- Only paired clients are served. Treat this as a development tool on a trusted LAN and disable it
+  from the panel when not in use.
+- `write_file`, `read_file` and `cef_evaluate` are intentionally powerful: any paired client
   has root on the device.
 - The file browser tools (`fs_*`, `game_saves`) refuse Steam's login files (`config/loginusers.vdf`,
   `config/config.vdf`, `ssfn*`). Destructive tools (`fs_delete`, `app_terminate`, `recording_delete`) need

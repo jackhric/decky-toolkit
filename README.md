@@ -45,8 +45,8 @@
 - Loader and plugin logs streamed into VS Code output channels.
 - JavaScript console for Steam's `SharedJSContext`.
 - Games view: launch and stop games, and browse install dirs, Proton prefixes and saves as `decky://` folders.
-- HTTP API and MCP server for your own tools and agents.
-- Pairing approved on the device, with bearer-token auth.
+- MCP and an HTTP API for your own tools and agents, through the extension.
+- Pairing approved on the device; only devices you approve can connect.
 
 ## Getting started
 

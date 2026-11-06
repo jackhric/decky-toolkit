@@ -1,14 +1,14 @@
 # Decky Toolkit — notes for agents working in this repo
 
 ## What this is
-A Decky Loader plugin whose Python backend hosts an MCP Streamable-HTTP server (port 8765, bearer
-token) so external coding agents can inspect/control the Steam Deck during plugin development.
+A Decky Loader plugin whose Python backend hosts an MCP Streamable-HTTP server (port 8765, TLS with
+client certificates) so external coding agents can inspect/control the Steam Deck during plugin development.
 See README.md for setup and docs/reference.md for the tool list and architecture.
 
 ## Layout
 - `main.py` — Decky `Plugin` class: settings, aiohttp server lifecycle, frontend-callable methods.
 - `py_modules/decky_toolkit/` — `protocol.py` (JSON-RPC + HTTP transport), `http.py` (REST routes, see
-  `docs/api.md`), `auth.py`, `tools/` (tool registry and tools), `install.py` (plugin zip
+  `docs/api.md`), `auth.py` (client-certificate auth), `tls.py` (device identity, client certs, paired-client store), `tools/` (tool registry and tools), `install.py` (plugin zip
   validation + atomic install), `logs.py` (journal / plugin log tail and follow), `cdp.py` (Chrome
   DevTools client for Steam CEF on 127.0.0.1:8080), `settings.py`, `input/` (remote input: `ei.py`
   libei over ctypes, `uinput.py`, `keymap.py`, `service.py` owning state and the virtual pad registry; tools
@@ -305,16 +305,25 @@ See README.md for setup and docs/reference.md for the tool list and architecture
   automatically; that is accepted, it is added by address.
 
 ## Pairing
-A client files `POST /pair/request` and long-polls `GET /pair/request/{id}?wait=25`; the device owner
-approves or denies it in the panel, which shows only an "Approve pairing request?" prompt while one is
-pending (frontend methods `list_pair_requests`,
-`approve_pair_request`, `deny_pair_request`). No time limit. Requests live in memory
+The server is TLS-only (TLS 1.3, no setting to turn it off) and authenticates clients by certificate;
+there is no bearer token. `tls.py` mints the device's EC P-256 identity (self-signed, also the CA) under
+`<settings dir>/tls/` with `openssl`, and keeps the allow-list `clients.json` of paired fingerprints.
+A client generates its own key pair, files `POST /pair/request` with its public key and long-polls
+`GET /pair/request/{id}?wait=25`; the device owner approves or denies it in the panel, which shows only an
+"Approve pairing request?" prompt while one is pending (frontend methods `list_pair_requests`,
+`approve_pair_request`, `deny_pair_request`). The code is derived from the server cert, the client key and
+the request id, so the client can check it. No time limit. Requests live in memory
 (`py_modules/decky_toolkit/pairing.py`): a pending one expires 60 s after its last poll, a decided one 5 min
 after the decision, and a plugin restart forgets them all, so clients re-request (new code) on a 404.
-The token goes out once per approval.
-Approval is deliberately device-only (no HTTP/MCP route), the one exception to the remote-configurable
-rule below. `/mcp` always requires the bearer token. Events: `decky_toolkit_pair_request` (toast with name
-and code), `decky_toolkit_pair_requests` (list changed), `decky_toolkit_paired` (remote IP, client name). To
+The signed client certificate goes out once per approval. Paired clients are listed and forgotten on the
+device (`list_paired_clients`, `forget_paired_client`); a forgotten client gets a plain 401.
+Approving a request and forgetting a client are deliberately device-only (no HTTP/MCP route;
+`call_plugin_method` refuses them), the two exceptions to the remote-configurable rule below. `/mcp` needs a
+paired client certificate like every other route; external MCP agents reach it through the extension's
+loopback proxy (`decky-toolkit.mcpPort`, default 8766). Events: `decky_toolkit_pair_request` (toast with name
+and code), `decky_toolkit_pair_requests` (list changed), `decky_toolkit_paired` (remote IP, client name),
+`decky_toolkit_paired_clients` (allow-list changed). User-facing docs never mention TLS, certificates or
+tokens; only `docs/api.md` explains the mechanism. To
 drive frontend methods from a test, evaluate
 `window.DeckyBackend.call('loader/call_plugin_method', 'Decky Toolkit', '<method>', ...args)` in
 SharedJSContext via the `cef_evaluate` tool, or use `call_plugin_method` (`plugin: "Decky Toolkit"`).
@@ -343,11 +352,11 @@ SharedJSContext via the `cef_evaluate` tool, or use `call_plugin_method` (`plugi
   reads; `pr-title.yml` enforces a conventional title (`feat:`, `fix:`, `feat!:` for breaking, ...).
 
 ## Conventions
-- Every setting is configurable remotely (approving a pairing request is not a setting): through an MCP tool, the HTTP API and the
+- Every setting is configurable remotely (approving a pairing request and forgetting a paired client are not settings): through an MCP tool, the HTTP API and the
   extension's UI where it applies. The Decky panel only mirrors state (it polls `get_status` and
   listens for change events); it never holds a setting that cannot be changed remotely.
 - The live screen exists only in the VS Code extension: the device serves no browser viewer, and every route
-  except `/`, `/health` and `/pair/request*` is bearer-only (no cookie auth). The screen panel webview draws only
+  except `/`, `/health` and `/pair/request*` needs a paired client certificate (no cookie auth). The screen panel webview draws only
   the picture; its controls are `editor/title` actions with codicons (`when: activeWebviewPanelId ==
   'decky-toolkit.screen'`), toggles are command pairs switched by `decky-toolkit.screen.*` context keys, and
   choices go in QuickPicks. Don't add an in-page toolbar.

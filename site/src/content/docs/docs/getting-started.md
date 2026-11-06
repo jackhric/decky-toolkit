@@ -38,7 +38,7 @@ Open Quick Access (…) → **Decky Toolkit**. The panel shows the device's IP a
 3. The device shows a toast with the same code. In Quick Access → **Decky Toolkit**, check the code and
    press **Approve**.
 
-The token never has to be typed in. A request waits as long as the editor is waiting.
+Nothing has to be typed in. A request waits as long as the editor is waiting.
 
 ## 4. Deploy your plugin
 
