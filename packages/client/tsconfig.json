@@ -9,7 +9,6 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "noEmit": true,
-    "typeRoots": ["../../extension/node_modules/@types"],
     "types": ["node"]
   },
   "include": ["src"]
