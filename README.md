@@ -35,19 +35,6 @@
   <img alt="A game's save files and an .ini opened from the Deck over decky://, next to the game's page on the live screen" src="docs/images/media/games-files.png">
 </p>
 
-## Three parts
-
-- **Decky plugin** on the Steam Deck: hosts the device's tools (screen, logs, plugins, Steam UI, input).
-- **VS Code extension** ([extension/](extension/README.md)): deploy, hot reload, live screen and logs in the editor.
-- **CLI** ([cli/](cli/README.md), `npx decky-toolkit`): pairing, deploys and the MCP server for coding agents, no editor needed.
-
-```sh
-npx decky-toolkit pair
-claude mcp add decky -- npx -y decky-toolkit mcp
-```
-
-The extension and the CLI share one pairing per computer.
-
 ## Features
 
 - One-click deploy from VS Code / VSCodium that reloads just your plugin, with no loader restart.
