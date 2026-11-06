@@ -39,5 +39,5 @@ export async function stagePlugin(root: string, dirName: string): Promise<{ zip:
     files.push(name);
     await walk(abs, `${dirName}/${name}`, entries);
   }
-  return { zip: createZip(entries), files };
+  return { zip: await createZip(entries), files };
 }
