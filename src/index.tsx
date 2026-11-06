@@ -15,7 +15,7 @@ import {
 } from "@decky/ui";
 import { addEventListener, callable, definePlugin, removeEventListener, routerHook, toaster } from "@decky/api";
 import { ReactNode, useEffect, useState } from "react";
-import { FaCog, FaGamepad, FaLaptop, FaPlug, FaServer } from "react-icons/fa";
+import { FaCog, FaGamepad, FaLaptop, FaPlug, FaServer, FaUnlink } from "react-icons/fa";
 import { SteamingMark } from "./SteamingMark";
 
 type Status = {
@@ -29,7 +29,10 @@ type Status = {
   input: InputSettings | null;
   error: string | null;
   connected?: boolean;
+  client?: ConnectedClient | null;
 };
+
+type ConnectedClient = { name: string; kind: string; remote: string | null; connected_since: number | null };
 
 type PairRequest = {
   id: string;
@@ -48,6 +51,8 @@ type PairedClient = {
   added_at: number;
   last_seen: number | null;
   connected?: boolean;
+  connected_since?: number | null;
+  remote?: string | null;
 };
 
 type InputSettings = { enabled: boolean; backend: "ei" | "uinput" | null; available: boolean; reason: string | null };
@@ -78,6 +83,23 @@ function lastSeen(at: number | null): string {
   if (minutes < 60) return `seen ${minutes} min ago`;
   if (minutes < 48 * 60) return `seen ${Math.floor(minutes / 60)} h ago`;
   return `seen ${Math.floor(minutes / 1440)} days ago`;
+}
+
+function connectedFor(since: number | null, now: number): string {
+  const minutes = since === null ? 0 : Math.floor((now / 1000 - since) / 60);
+  if (minutes < 1) return "connected just now";
+  if (minutes < 60) return `connected ${minutes} min`;
+  const m = minutes % 60;
+  return `connected ${Math.floor(minutes / 60)} h${m ? ` ${m} min` : ""}`;
+}
+
+function useNow(everyMs: number): number {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), everyMs);
+    return () => clearInterval(id);
+  }, [everyMs]);
+  return now;
 }
 
 function serverState(s: Status): string {
@@ -171,6 +193,22 @@ function useToolkit() {
           }
         />,
       ),
+    disconnect: (name: string) =>
+      showModal(
+        <ConfirmModal
+          strTitle={`Disconnect ${name}?`}
+          strDescription="The editor is disconnected and has to pair again to connect."
+          strOKButtonText="Disconnect"
+          onOK={() =>
+            guarded(async () => {
+              // get_status names the connected client but not its fingerprint; only one client is ever paired.
+              for (const c of await listPairedClients()) setClients(await forgetPairedClient(c.fingerprint));
+              setStatus(await getStatus());
+              toast(`Disconnected ${name}`);
+            })
+          }
+        />,
+      ),
   };
 }
 
@@ -194,6 +232,7 @@ const STYLE = `
 .dtk-card { border-radius: 4px; background: rgba(255,255,255,0.04); transition: background 0.15s; }
 .dtk-card.dtk-focus { background: rgba(255,255,255,0.2); box-shadow: inset 0 0 0 2px rgba(255,255,255,0.45); }
 .dtk-link.dtk-focus { text-decoration: underline; color: #fff !important; }
+.dtk-icon-button.gpfocus { background: #fff !important; color: #000 !important; }
 .dtk-primary { background: #1a9fff !important; color: #fff !important; }
 .dtk-primary.gpfocus { background: #4fb4ff !important; box-shadow: 0 0 0 2px #fff; }
 .dtk-mark { color: #7a7f86; transition: color 0.4s; }
@@ -240,8 +279,38 @@ function Centered({ children, mark = "idle" }: { children: ReactNode; mark?: Mar
 
 const hint = { color: MUTED, fontSize: "15px", lineHeight: 1.45, margin: 0, maxWidth: "260px" } as const;
 
+function ConnectionCard({ client, status, busy, onDisconnect }: { client: ConnectedClient; status: Status; busy: boolean; onDisconnect: () => void }) {
+  const now = useNow(15000);
+  const stream = status.stream?.running ? status.stream : null;
+  const line = { fontSize: "14px", color: MUTED, marginTop: "2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } as const;
+  return (
+    <Focusable
+      className="dtk-card"
+      flow-children="row"
+      style={{ width: "100%", padding: "12px 10px 12px 14px", boxSizing: "border-box", display: "flex", alignItems: "center", gap: "10px", textAlign: "left" }}
+    >
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ ...line, fontSize: "20px", fontWeight: 600, color: "#fff", marginTop: 0 }}>{client.name}</div>
+        {/* Too narrow for "connected … · from …" on one line next to the button. */}
+        <div style={line}>{connectedFor(client.connected_since, now)}</div>
+        {client.remote && <div style={line}>from {client.remote}</div>}
+        {stream && <div style={line}>streaming{stream.fps > 0 && ` ${Math.round(stream.fps)} fps`}</div>}
+      </div>
+      <DialogButton
+        className="dtk-icon-button"
+        aria-label={`Disconnect ${client.name}`}
+        disabled={busy}
+        onClick={onDisconnect}
+        style={{ width: "40px", height: "40px", minWidth: 0, padding: 0, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}
+      >
+        <FaUnlink style={{ display: "block" }} />
+      </DialogButton>
+    </Focusable>
+  );
+}
+
 function Panel() {
-  const { status, pending, clients, busy, decide } = useToolkit();
+  const { status, pending, clients, busy, decide, disconnect } = useToolkit();
   const current = pending[0];
   const up = !!status && status.enabled && status.running && !status.error;
 
@@ -276,8 +345,17 @@ function Panel() {
     );
   }
 
+  if (up && status.client) {
+    const client = status.client;
+    return (
+      <Centered mark="connected">
+        <ConnectionCard client={client} status={status} busy={busy} onDisconnect={() => disconnect(client.name)} />
+      </Centered>
+    );
+  }
+
   return (
-    <Centered mark={up && status.connected ? "connected" : "idle"}>
+    <Centered mark="idle">
       <Focusable
         className="dtk-card"
         focusClassName="dtk-focus"
