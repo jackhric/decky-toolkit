@@ -1,0 +1,48 @@
+{
+  "name": "decky-toolkit",
+  "version": "0.0.1",
+  "description": "Pair with a Steam Deck running the Decky Toolkit plugin, deploy Decky plugins and give coding agents the device's MCP tools over stdio.",
+  "license": "MIT",
+  "author": "jackhric",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jackhric/decky-toolkit.git",
+    "directory": "cli"
+  },
+  "homepage": "https://jackhric.github.io/decky-toolkit/",
+  "bugs": "https://github.com/jackhric/decky-toolkit/issues",
+  "bin": {
+    "decky-toolkit": "dist/cli.js"
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "decky",
+    "decky loader",
+    "decky plugin",
+    "steam deck",
+    "steamos",
+    "bazzite",
+    "mcp",
+    "model context protocol",
+    "claude code",
+    "plugin development",
+    "cli"
+  ],
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "typecheck": "tsc --noEmit",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.9.0"
+  }
+}
