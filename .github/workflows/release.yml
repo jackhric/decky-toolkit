@@ -6,6 +6,14 @@ on:
       - 'plugin-v*'
       - 'extension-v*'
       - 'cli-v*'
+  # Re-run a release for a tag that already exists, e.g. after fixing this workflow; tags are protected
+  # and never moved. Builds from the dispatched ref, so the tag's version must match it.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag (plugin-vX.Y.Z, extension-vX.Y.Z or cli-vX.Y.Z)
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -15,13 +23,16 @@ jobs:
     name: Check tag
     runs-on: ubuntu-26.04
     outputs:
+      tag: ${{ steps.tag.outputs.tag }}
       component: ${{ steps.tag.outputs.component }}
       version: ${{ steps.tag.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: tag
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
-          tag="$GITHUB_REF_NAME"
+          tag="$TAG"
           case "$tag" in
             plugin-v*) component=plugin; version="${tag#plugin-v}"; files=(package.json plugin.json) ;;
             extension-v*) component=extension; version="${tag#extension-v}"; files=(extension/package.json) ;;
@@ -43,6 +54,7 @@ jobs:
               exit 1
             fi
           done
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "component=$component" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
@@ -73,10 +85,11 @@ jobs:
           subject-path: release/*
       - env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.check.outputs.tag }}
           COMPONENT: ${{ needs.check.outputs.component }}
           VERSION: ${{ needs.check.outputs.version }}
         run: |
-          tag="$GITHUB_REF_NAME"
+          tag="$TAG"
           case "$COMPONENT" in
             plugin) title="Decky Toolkit plugin $VERSION" ;;
             extension) title="Decky Toolkit for VS Code $VERSION" ;;
