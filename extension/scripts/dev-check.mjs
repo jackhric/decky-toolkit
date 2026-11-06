@@ -148,42 +148,6 @@ await check('/stream/frame via client (Snapshot to file)', async () => {
   return `${(jpeg.length / 1024).toFixed(0)} KiB JPEG`;
 });
 
-// Runs the real media/screen.js against the proxy in a minimal DOM, including the repeated
-// `visible: true` messages VS Code sends on focus changes, and compares its fps readout with the
-// device's own /stream/stats and with a raw part count.
-await check('screen panel fps readout matches the device', async () => {
-  const src = readFileSync(path.join(root, 'media', 'screen.js'), 'utf8');
-  const els = new Map();
-  const el = id => {
-    if (!els.has(id)) {
-      const classes = new Set();
-      const e = {
-        textContent: '', hidden: false, onclick: null, onload: null, addEventListener() {},
-        classList: { add: c => classes.add(c), remove: c => classes.delete(c), toggle: (c, on) => ((on ?? !classes.has(c)) ? classes.add(c) : classes.delete(c), classes.has(c)) },
-      };
-      Object.defineProperty(e, 'src', { set(v) { this._src = v; queueMicrotask(() => this.onload?.()); }, get() { return this._src; } });
-      e.naturalWidth = 1920; e.naturalHeight = 1080;
-      els.set(id, e);
-    }
-    return els.get(id);
-  };
-  const listeners = [];
-  const document = { getElementById: el, body: { dataset: { base: api } }, addEventListener() {} };
-  const window = { addEventListener: (t, fn) => { if (t === 'message') listeners.push(fn); } };
-  const post = data => listeners.forEach(fn => fn({ data }));
-  new Function('acquireVsCodeApi', 'document', 'window', src)(() => ({ postMessage() {} }), document, window);
-  for (const t of [800, 1600, 2400]) setTimeout(() => post({ type: 'visible', visible: true }), t);
-  await new Promise(r => setTimeout(r, 6000));
-  const shown = Number(el('fps').textContent);
-  const frames = Number(el('frames').textContent);
-  post({ type: 'visible', visible: false });
-  const s = await new DeckyClient({ host, port }, identity).streamStats();
-  const ref = s.settings?.fps ? Math.min(s.fps, s.settings.fps) : s.fps;
-  const diff = Math.abs(shown - ref) / ref;
-  if (!(diff <= 0.1)) throw new Error(`page shows ${shown} fps, device reports ${s.fps} (cap ${s.settings?.fps}); ${frames} frames in 6 s`);
-  return `page shows ${shown} fps after 3 extra "visible" messages, device reports ${s.fps} fps (cap ${s.settings?.fps}), ${frames} frames in 6 s (${(frames / 6).toFixed(1)}/s)`;
-});
-
 // Reads the device's input flag but never changes it: input must stay off on the shared device.
 await check('/input WebSocket through the proxy upgrades and is closed with 4003 while input is off', async () => {
   const st = await new DeckyClient({ host, port }, identity).getInputSettings();

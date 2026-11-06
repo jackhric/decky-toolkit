@@ -107,8 +107,9 @@ See README.md for setup and docs/reference.md for the tool list and architecture
 ## Plugin tools facts (verified 2026-11-06, Decky v3.3.1, Steam CEF Chrome 126)
 - A registration's plugin comes from its call stack: Decky imports bundles from
   `http://127.0.0.1:1337/plugins/<plugin.json name, URL-encoded>/dist/index.js?t=<time>` (the name, not the directory).
-- `DeckyPluginLoader.deckyState.eventBus` fires `update` whenever `DeckyPluginLoader.plugins` is replaced (load or
-  unload); a plugin reload (deploy with `restart=plugin`) dropped and re-added only the tools that changed, no gap.
+- `DeckyPluginLoader.deckyState.eventBus` fires `update` after every plugin load or unload. `importPlugin` filters
+  `plugins` into a new array, imports the bundle, then pushes the entry into that same array, so watch the entries, not
+  the array identity (a sync between the two steps missed the push after a loader restart). A plugin reload (deploy with `restart=plugin`) dropped and re-added only the tools that changed, no gap.
 - `Runtime.addBinding` on our long-lived SharedJSContext session is how the page pushes changes; a loader restart drops
   CEF :8080 for a few seconds and the session reconnects. The CLI learns a new hash from the `tools` event.
 
@@ -122,8 +123,6 @@ See README.md for setup and docs/reference.md for the tool list and architecture
 - `decky-toolkit mcp` sent `notifications/tools/list_changed` 28-32 ms after a frontend `plugin_reload` of a plugin
   whose tool description changes per load (before the reload call itself answered); after a `loader_restart` it came
   4.7 s after the call, with the reconnect's `hello`.
-- After a loader restart that first installed a plugin calling `registerTool`, its tool was not listed until the plugin's
-  frontend was reloaded once (seen once; looks like the registry sync running before Decky lists the plugin).
 
 ## Live sync and loader shutdown facts (verified 2026-11-06, Decky v3.3.1)
 - The frontend loads as an ES module: `DeckyPluginLoader.importPlugin(name, version)` does
