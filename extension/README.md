@@ -4,7 +4,7 @@ Companion extension for the [Decky Toolkit](https://github.com/jackhric/decky-to
 HTTP server on the device (port 8765; any machine running Decky Loader: Steam Deck, SteamOS,
 Bazzite, …) and gives you, inside VS Code or VSCodium:
 
-- a **Decky** sidebar (Activity Bar icon) that lists your devices; connect to one and its actions
+- a **Decky** sidebar (Activity Bar icon) that shows your device; connect to it and its actions
   (grouped by Screen, Plugin, Loader, Steam and MCP), plugins, controllers and a small live preview
   appear, so you never need the command palette,
 - a **Games** view: every installed title with its save data, install folder, Proton prefix, Steam
@@ -22,13 +22,14 @@ Bazzite, …) and gives you, inside VS Code or VSCodium:
 - a JavaScript console for the Steam UI (`SharedJSContext`) and toasts on the device,
 - a generated `.mcp.json` so Claude Code and other MCP clients in the workspace can use the device.
 
-The Decky Toolkit plugin must already be installed and enabled on the device.
+The Decky Toolkit plugin must already be installed and enabled on the device. For now the extension
+works with one device at a time: adding another replaces the saved one.
 
 ## Getting started
 
-1. **Click the Decky icon** (the Steam Deck logo) in the Activity Bar. The **Devices** view lists
-   your saved devices. The first time, it contains the device from the `decky-toolkit.host` setting; use
-   the **+** in the view title to add another (see [Adding a device](#adding-a-device)).
+1. **Click the Decky icon** (the Steam Deck logo) in the Activity Bar. The **Devices** view shows
+   your saved device. The first time, it contains the device from the `decky-toolkit.host` setting; use
+   the **+** in the view title to add one (see [Adding a device](#adding-a-device)).
 2. **Click the device** (or its plug icon). If it is not paired yet, pairing starts at once; see
    [Pairing](#pairing). If it is paired, it connects.
 3. **Work.** When it is connected, the **Actions**, **Plugins**, **Games**, **Controllers** and **Preview** views appear below
@@ -41,7 +42,8 @@ The Decky Toolkit plugin must already be installed and enabled on the device.
    approval.
 
 The status bar shows `$(vm-connect) <name>` while connected and `$(vm) Decky: not connected`
-otherwise. Click it to connect, switch device, disconnect, open the screen or add a device. When the
+otherwise. Click it for the device's actions: connect or disconnect, open the screen, rename or forget
+it (add a device when none is saved). When the
 device stops answering it turns into `$(debug-disconnect) <name>: connection lost` on a warning
 background (`$(key) <name>: pairing rejected` on an error background when the device no longer accepts
 this editor), and a click reconnects; see [Losing the connection](#losing-the-connection).
@@ -55,7 +57,7 @@ device is not connected they are empty and say why (see [Losing the connection](
 
 ### Devices
 
-Each device is shown once, and its row is also the connection state. If the name is the host, the
+The view holds one device at a time, and its row is also the connection state. If the name is the host, the
 row shows the host once and `vX.Y.Z · state` as the description; otherwise the description is
 `host:port · vX.Y.Z · state`.
 
@@ -75,10 +77,10 @@ The `…` icon and the right-click menu hold the rest: **Rename…** (the name o
 (also deletes its pairing). There is no manual pairing: no Re-pair and no address
 editing. A device that stops accepting this editor is paired again by connecting to it, which asks for
 approval on the device; a device that moved to another address is forgotten and added again (or found
-by [Discovery](#discovery)). Connect and disconnect live only here.
+by [Discovery](#discovery)). Connect and disconnect live here and in the status bar item's menu.
 
 The view title has **Add device** (+), **Search network** (`$(search)`, see [Discovery](#discovery))
-and **Refresh** (also checks which devices answer). With no saved devices and none found on the network,
+and **Refresh** (also checks which devices answer). With no saved device and none found on the network,
 a welcome view takes its place: the flat Decky Toolkit mark, an **Add a device** button, the line *The
 device needs Decky Loader and the Decky Toolkit plugin installed* (the plugin name links to this repo) and
 **How pairing works**, which opens the *Connect a Decky device* walkthrough (install the plugin, add the
@@ -87,10 +89,12 @@ device, approve it, open the screen). The welcome view and the Devices tree swit
 
 #### Discovery
 
-Below the saved devices, an **On this network** group lists Decky Toolkit devices on the local network
-that are not saved yet, the way Moonlight finds its hosts. Each row shows the device's host name with
-`ip · vX.Y.Z` (`ip:port` when the port is not 8765) and the `vm` icon. Click it, or its plug icon,
-to save the device and connect; an unpaired device goes straight into [pairing](#pairing). The group's
+Below the saved device, an **On this network** group lists Decky Toolkit devices on the local network,
+the way Moonlight finds its hosts. Each row shows the device's host name with `ip · vX.Y.Z` (`ip:port`
+when the port is not 8765) and the `vm` icon; the one that is saved says `· saved` with the `pass` icon,
+and a click connects to it. Click any other row, or its plug icon, to save the device and connect; an
+unpaired device goes straight into [pairing](#pairing). When a device is already saved, a modal asks
+**Replace <name>?** first, because the saved device and its pairing are forgotten. The group's
 last row is **Add a device by address…**. While a search runs the group shows a spinner and
 `searching…`; afterwards `N found` or `none found`.
 
@@ -104,9 +108,9 @@ How devices are found:
   This also finds older plugin builds that do not advertise, and networks that filter multicast.
   A /24 takes about 2.5 s.
 
-Only answers whose `/health` identifies Decky Toolkit (or its old name `decky-mcp`) are listed. Saved
-devices (same address or host name, and port) and a second address of the same device (`device_id`)
-are left out. Loopback, link-local, container, VM and VPN interfaces (`docker*`, `br-*`, `virbr*`,
+Only answers whose `/health` identifies Decky Toolkit (or its old name `decky-mcp`) are listed. The saved
+device is recognised by its address or host name, and port; a second address of the same device
+(`device_id`) is left out. Loopback, link-local, container, VM and VPN interfaces (`docker*`, `br-*`, `virbr*`,
 `veth*`, `tun*`, `wg*`, `tailscale*`, …) are skipped.
 
 Discovery covers the local network only: mDNS does not cross routers, and the probe never leaves
@@ -414,11 +418,14 @@ Other failures (for example too many pending requests) offer **Try again**.
 
 **Add device** asks for the IP address or hostname (`host:port` also works), then for an optional
 name (press Enter to use the host). The port is 8765. A picker then offers **Connect to <name>**,
-**Change port (8765)…** and **Not now**. Connect goes straight into the steps above.
+**Change port (8765)…** and **Not now**. Connect goes straight into the steps above. When a device is
+already saved, **Add device** first asks **Replace <name>?** (*Its pairing is deleted. This editor
+connects to one device at a time.*); **Replace** forgets the saved device and its pairing, **Cancel**
+keeps it.
 
 ## Connection model
 
-- **One state object.** `Connection` holds the saved devices, the active device and its pairing, the
+- **One state object.** `Connection` holds the saved device (stored as a list of one) and its pairing, the
   session (the connected device) and a state per device: `unpaired`, `disconnected` (paired),
   `connecting`, `pairing`, `connected` or `unreachable`. The views, status bar, screen panel and
   preview subscribe to its events.
@@ -427,7 +434,7 @@ name (press Enter to use the host). The port is 8765. A picker then offers **Con
   again. Commands such as Deploy need a connected device; if there is none they offer to connect.
 - **Reconnect.** The connected device is remembered. After a window reload the extension reconnects to
   it silently if it answers and the device still accepts it; if it does not answer yet, it reconnects as
-  soon as it does (saved devices that do not answer are probed every 15 s).
+  soon as it does (a saved device that does not answer is probed every 15 s).
 
 ### Losing the connection
 
@@ -438,7 +445,7 @@ fills again by itself when the device answers. The state (context key `decky-too
 | --- | --- | --- |
 | `connection lost` | `/health` fails (device asleep, network gone, Decky Loader restarting), or the screen stream drops and an immediate `/health` check fails | by itself: `/health` is retried every 2 s while lost |
 | `pairing rejected` | a request answers 401 (the `/input/settings` check after each `/health`, or the stats poll) | **Reconnect**, which pairs again (approve on the device) |
-| `disconnected` | you clicked Disconnect (or removed / switched the device) | **Reconnect** |
+| `disconnected` | you clicked Disconnect (or forgot / replaced the device) | **Reconnect** |
 | `connecting…` | a connect or pairing is running | by itself |
 
 - **Actions, Plugins, Games, Controllers**: stay visible but empty, with a welcome message for the
@@ -469,8 +476,8 @@ All of these are also in the command palette under the `Decky:` category.
 | Decky: Connect | Connects to a device; pairs first when it is not paired or no longer accepted |
 | Decky: Disconnect | Ends the session; keeps the pairing |
 | Decky: Reconnect | Connects to the device of the last session again (pairs again when it was rejected) |
-| Decky: Switch device / Add device… / Rename device / Forget device | Connect to another saved device, add one, rename it, or forget it and its pairing |
-| Decky: Search network | Look for unsaved Decky Toolkit devices on the local network ([Discovery](#discovery)) |
+| Decky: Add device… / Rename device / Forget device | Add a device (replacing the saved one), rename it, or forget it and its pairing |
+| Decky: Search network | Look for Decky Toolkit devices on the local network ([Discovery](#discovery)) |
 | Decky: Open screen | Live screen panel with sound; remote input, mute, stream settings, pause and snapshot as tab bar icons |
 | Decky: Snapshot to file | Saves the current `/frame.jpg` with a Save dialog |
 | Decky: Deploy plugin | Build if needed, zip, `POST /plugins/install`, reload just this plugin and confirm it (<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd>) |
@@ -509,9 +516,10 @@ All of these are also in the command palette under the `Decky:` category.
 | `decky-toolkit.pluginDirName` | (empty) | Target dir under `~/homebrew/plugins` for deploy; empty means the plugin folder's name |
 | `decky-toolkit.deploy.build` | `auto` | `auto`: build only when `src/` is newer than `dist/index.js`; `always`; `never` |
 | `decky-toolkit.deploy.onChange` | `false` | Fast-deploy (without building) when `dist/index.js`, `main.py` or `py_modules/**/*.py` change |
-| `decky-toolkit.discovery.enabled` | `true` | List unsaved Decky Toolkit devices on the local network under **On this network** (see [Discovery](#discovery)) |
+| `decky-toolkit.discovery.enabled` | `true` | List Decky Toolkit devices on the local network under **On this network** (see [Discovery](#discovery)) |
 
-Saved devices live in VS Code's global state (`decky-toolkit.devices`), so all windows share them.
+The saved device lives in VS Code's global state (`decky-toolkit.devices`), so all windows share it. A
+list with several devices saved by an older version is cut down to the last connected one at startup.
 Pairings are stored per `host:port` in secret storage.
 
 ## How it works
