@@ -13,11 +13,10 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
   <a href="https://github.com/jackhric/decky-toolkit/actions/workflows/ci.yml?query=branch%3Amain"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/jackhric/decky-toolkit/ci.yml?branch=main&label=CI&logo=githubactions&logoColor=white"></a>
-  <a href="https://github.com/jackhric/decky-toolkit/releases"><img alt="Plugin version" src="https://img.shields.io/github/package-json/v/jackhric/decky-toolkit?label=plugin&color=9C6AEC"></a>
+  <a href="https://github.com/jackhric/decky-toolkit/releases"><img alt="Decky Plugin version" src="https://img.shields.io/github/package-json/v/jackhric/decky-toolkit?label=Decky%20Plugin&color=9C6AEC"></a>
   <a href="https://marketplace.visualstudio.com/items?itemName=jackhric.decky-toolkit"><img alt="VS Code Marketplace" src="https://img.shields.io/github/package-json/v/jackhric/decky-toolkit?filename=extension%2Fpackage.json&label=VS%20Code%20Marketplace&color=0AA5FF&logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48cGF0aCBmaWxsPSIjZmZmIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiIGQ9Ik03MC45IDk5LjZDNzIuNSAxMDAuMiA3NC4zIDEwMC4yIDc1LjkgOTkuNEw5Ni41IDg5LjRDOTguNiA4OC40IDEwMCA4Ni4yIDEwMCA4My44VjE2LjJDMTAwIDEzLjggOTguNiAxMS42IDk2LjUgMTAuNkw3NS45IDAuNkM3My44LTAuNCA3MS4zLTAuMSA2OS41IDEuMkM2OS4zIDEuNCA2OSAxLjYgNjguOCAxLjhMMjkuNCAzOEwxMi4yIDI0LjlDMTAuNiAyMy43IDguNCAyMy44IDYuOSAyNS4xTDEuNCAzMC4yQy0wLjUgMzEuOC0wLjUgMzQuNyAxLjQgMzYuM0wxNi4yIDUwTDEuNCA2My43Qy0wLjUgNjUuMy0wLjUgNjguMiAxLjQgNjkuOEw2LjkgNzQuOUM4LjQgNzYuMiAxMC42IDc2LjMgMTIuMiA3NS4xTDI5LjQgNjJMNjguOCA5OC4yQzY5LjQgOTguOCA3MC4xIDk5LjMgNzAuOSA5OS42Wk03NSAyNy4yTDQ1LjEgNTBMNzUgNzIuOFYyNy4yWiIvPjwvc3ZnPg=="></a>
   <a href="https://open-vsx.org/extension/jackhric/decky-toolkit"><img alt="Open VSX" src="https://img.shields.io/open-vsx/v/jackhric/decky-toolkit?label=Open%20VSX&color=0AA5FF&logo=vscodium&logoColor=white"></a>
   <a href="https://www.npmjs.com/package/decky-toolkit"><img alt="npm" src="https://img.shields.io/npm/v/decky-toolkit?label=npm&color=CB3837&logo=npm&logoColor=white"></a>
-  <a href="https://github.com/SteamDeckHomebrew/decky-loader"><img alt="Decky Loader 3.3+" src="https://img.shields.io/badge/Decky%20Loader-3.3%2B-1B1B1B?logo=steam&logoColor=white"></a>
   <img alt="Platform: SteamOS and Bazzite" src="https://img.shields.io/badge/platform-SteamOS%20%7C%20Bazzite-555">
 </p>
 
@@ -29,77 +28,67 @@
 </p>
 
 <p align="center">
-  <img alt="VS Code with plugin code, the Deck's live screen showing the plugin's Quick Access panel, and the plugin's logs streaming below" src="docs/images/media/hero.png">
+  <img alt="VS Code with plugin code, the SteamOS device's live screen showing the plugin's Quick Access panel, and the plugin's logs streaming below" src="docs/images/media/hero.png">
 </p>
 
 <p align="center">
-  <img alt="A game's save files and an .ini opened from the Deck over decky://, next to the game's page on the live screen" src="docs/images/media/games-files.png">
+  <img alt="A game's save files and an .ini opened from the SteamOS device over decky://, next to the game's page on the live screen" src="docs/images/media/games-files.png">
 </p>
 
 ## Features
 
-- One-click deploy from VS Code / VSCodium that reloads just your plugin, with no loader restart.
-- Hot reloading: the device follows your edits as you save.
-- Live view of the Deck's screen, with sound, inside the extension.
-- Keyboard, mouse and gamepad input sent straight to the device.
-- Steam Input management and one-step jumps to any Steam page or your plugin's Quick Access panel.
-- Loader and plugin logs streamed into VS Code output channels.
-- JavaScript console for Steam's `SharedJSContext`.
-- Games view: launch and stop games, and browse install dirs, Proton prefixes and saves as `decky://` folders.
-- MCP and an HTTP API for your own tools and agents, through the extension.
-- Pairing approved on the device; only devices you approve can connect.
+- One-click deploy from VS Code or VSCodium without restarting Decky Loader
+- Live reload on save for both frontend and backend
+- Remote screen with sound and keyboard, mouse and gamepad input
+- Decky Loader, plugin and Steam UI logs in VS Code
+- Launch games and browse their files and saves
+- An MCP server for coding agents
 
 ## Getting started
 
 ### Requirements
 
-- A Steam Deck, SteamOS or Bazzite device running [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) 3.3 or newer.
-- On your computer: VS Code 1.90+ (or VSCodium).
+- A SteamOS or Bazzite device with [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) 3.3+.
+- VS Code 1.90+ or VSCodium.
 
-### 1. Install the extension in your IDE
+### 1. Install the extension
 
 <p align="center">
   <img alt="Installing Decky Toolkit from the Extensions view in VS Code" src="docs/images/install/vscode-install.gif" width="800">
 </p>
 
-Or if you fancy a terminal:
+Or from a terminal:
 
 ```sh
-code --install-extension jackhric.decky-toolkit     # VS Code
-codium --install-extension jackhric.decky-toolkit   # VSCodium
+code --install-extension jackhric.decky-toolkit
+codium --install-extension jackhric.decky-toolkit
 ```
 
-### 2. Install the plugin on the device
+### 2. Install the Decky Plugin
 
-On the device, turn on Decky's developer mode (Decky settings → **General** → **Other** →
-**Developer mode**). Then open **Developer** → **Third-Party Plugins** → **Install Plugin from URL**,
-enter `jackhric.github.io/decky-toolkit/decky-toolkit.zip` (always the latest plugin release) and
-press **Install**.
+1. On the device turn on Decky settings → **General** → **Other** → **Developer mode**.
+2. Open **Developer** → **Third-Party Plugins** → **Install Plugin from URL**.
+3. Enter `jackhric.github.io/decky-toolkit/decky-toolkit.zip` and press **Install**.
 
-### 3. Pair your editor with the device
+### 3. Pair
 
-1. Click the **Decky** icon in the Activity Bar, then **Add device** (or **+**) and enter the
-   device's IP address.
+1. In VS Code click the **Decky** icon in the Activity Bar and add the device's IP address with **+**.
 2. Click the device. VS Code shows a four-digit code.
-3. The device shows a toast with the same code. In Quick Access → **Decky Toolkit**, check the
-   code and press **Approve**.
+3. On the device open Quick Access → **Decky Toolkit** and approve the matching code.
 
-### 4. Deploy your plugin
+### 4. Deploy
 
-Open your plugin's folder in VS Code and press <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd>
-(<kbd>Cmd</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd> on macOS), or use the **Deploy** button in the status
-bar. The screen view opens on the first connect, so you see the result straight away.
+Open your plugin's folder and press <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd>
+(<kbd>Cmd</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd> on macOS) or click **Deploy** in the status bar.
 
-The [extension guide](extension/README.md) covers every view and setting. The
-[reference](docs/reference.md) covers the plugin itself, its HTTP API and how it works.
+See the [extension guide](extension/README.md) and the [reference](docs/reference.md) for more.
 
 ## AI Disclaimer
 
-This project was built with heavy use of [Claude Code](https://claude.com/claude-code). Because of
-this, the Decky Toolkit plugin will not be available in the default Decky Plugin Store, which does not
-accept plugins that contain LLM-generated code (see its
-[submission guidelines](https://wiki.deckbrew.xyz/en/plugin-dev/submitting-plugins#ai-llms-and-so-on)).
-Install it from source as described in [Getting started](#getting-started).
+This project was built with heavy use of [Claude Code](https://claude.com/claude-code). The Decky
+Plugin Store does not accept LLM-generated code
+([guidelines](https://wiki.deckbrew.xyz/en/plugin-dev/submitting-plugins#ai-llms-and-so-on)) so it is
+not listed there.
 
 ## License
 
