@@ -18,9 +18,7 @@
     },
     "cli": {
       "release-type": "node",
-      "component": "cli",
-      "package-name": "decky-toolkit",
-      "changelog-path": "CHANGELOG.md"
+      "component": "cli"
     }
   }
 }
