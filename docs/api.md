@@ -57,6 +57,39 @@ Status key: **live** = implemented and deployed, **planned** = agreed design, no
 | `POST /mcp` | client cert | live | MCP Streamable HTTP, stateless, JSON replies only. Methods: `initialize`, `ping`, `tools/list`, `tools/call`. Notifications get `202`. |
 | `GET /mcp`, `DELETE /mcp` | client cert | live | `405` with `Allow: POST`: no SSE stream, no session to end. |
 
+## Event stream
+
+`GET /api/v1/events` (client cert) is a `text/event-stream` that pushes device changes, so clients do not poll. Every
+event has an `event:` name and one `data:` line of JSON:
+
+```
+event: tools
+data: {"hash":"3f9c0d1e2a4b5c6d"}
+```
+
+The stream starts with `hello`: `{version, api, state}`, where `state` holds the current payload of every state event
+below that the device could read (one that fails, such as `controllers` while Steam is down, is left out). A client
+that (re)connects resyncs from it without extra requests. After `hello` the device sends each state event only when its
+payload changes, from any path (MCP tool, client route, the Decky panel, the device itself). A comment line
+`: heartbeat` comes every 15 s; a client that hears nothing for 40 s should treat the connection as dead and
+reconnect. Before the server stops (plugin reload, loader restart, the server being turned off) it sends `shutdown`
+(`{}`) and ends the stream; reconnect with backoff. Each subscriber has a queue of 64 events; a client that falls that
+far behind has its stream ended and reconnects (and resyncs from `hello`). Forgetting a paired client ends its stream.
+
+| Event | Payload | When |
+| --- | --- | --- |
+| `hello` | `{version, api: ["v1"], state: {<event>: <payload>, ...}}` | first, on every connect |
+| `tools` | `{hash}`: the `tools_hash` of `/health` | the MCP tool list changed (plugin-defined tools registered or dropped; a Decky Toolkit reload shows up as a new `hello`) |
+| `stream_settings` | `StreamSettings`, as `GET /stream/settings` | stream settings changed (panel, `PUT /stream/settings`, `stream_settings` tool) |
+| `input_settings` | `{enabled, backend, available, reason}`, as `GET /input/settings` | remote input was enabled or disabled |
+| `plugins` | `{plugins: [{dir, name, version}]}` | Decky loaded or unloaded a plugin (install, reload, its file watcher; seen through Steam's SharedJSContext) or a zip was installed |
+| `controllers` | `{controllers: [Controller], virtual: [VirtualPad]}` (see [Controllers](#controllers)) | the controller list changed; `last_event_at` alone does not count |
+| `pairing` | `{pending, paired}`: counts of pending pairing requests and paired clients | a request was filed, decided, cancelled or expired, or a client was paired or forgotten. Codes and request ids stay on the device. |
+| `shutdown` | `{}` | the server is stopping; the stream ends right after |
+
+Watching controllers costs a `/proc/bus/input/devices` read every second and a Steam UI query every 3 s (at once on an
+evdev change or pad add/remove), so it runs only while at least one stream is open.
+
 ## Screen
 
 | Route | Auth | Status | Notes |
@@ -127,12 +160,13 @@ are not inputs and are left out). An evdev gamepad Steam Input does not list is 
 Virtual pads are uinput Xbox 360 pads (045e:028e) that Steam Input opens and maps like a real controller;
 gamepad events go only into that device, so Steam Input's remapping and per-game configs apply.
 
+Changes arrive as the `controllers` event of the [event stream](#event-stream).
+
 | Route | Auth | Status | Notes |
 | --- | --- | --- | --- |
 | `GET /api/v1/controllers` | client cert | live | `{controllers: [Controller], virtual: [VirtualPad], input_enabled, steam_available}`. `404` on servers without input support. |
 | `POST /api/v1/controllers/virtual` | client cert | live | Body `{"name"?: str}` (optional; empty body allowed). Creates a pad, then waits up to 3 s for Steam Input to list it: `201 {id, name, type: "x360"}`. `503 {"error"}` if Steam Input is unreachable or never lists it (the pad is removed again) or uinput is unavailable; `400` for a bad body or when 4 explicit pads exist. Works while input is disabled (the pad exists; sending events needs input enabled). Explicit pads are never idle-removed. |
 | `DELETE /api/v1/controllers/virtual/{id}` | client cert | live | `200 {"removed": id}`, `404` if unknown. `auto` removes the implicit pad. |
-| `GET /api/v1/controllers/events` | client cert | live | `text/event-stream`. First event: the current state (`{"type":"controllers", controllers, virtual, input_enabled, steam_available}`), then `data: {"type":"controllers","controllers":[...],"virtual":[...]}` on every change: evdev polled every 1 s, Steam Input every 3 s and on evdev changes, immediately on pad add/remove. `last_event_at` alone does not count as a change. `: keepalive` every 15 s; the poller stops when the last client leaves. |
 
 `Controller`: `{id, name, kind: "physical"|"virtual", virtual_id, vendor, product, device, evdev_name,
 seen_by_steam, steam}`. `id` is the virtual pad id for our pads, else `steam:<serial>` or `evdev:<inputN>`.
@@ -441,8 +475,11 @@ and `tools_hash` in `/health` include plugin tools, so `decky-toolkit mcp` sends
 
 ## Events (backend → Decky frontend)
 
+The backend sends these to its own panel through the same event hub (`server/events.py`) that feeds `/api/v1/events`.
+
 | Event | Payload | Meaning |
 | --- | --- | --- |
+| `decky_toolkit_input_state` | `enabled: bool` | remote input was enabled or disabled; the panel refreshes |
 | `decky_toolkit_pair_request` | `{id, code, client_name, client_kind, remote}` | a client asked to pair; toast "<client_name> wants to pair · code <code>" |
 | `decky_toolkit_pair_requests` | the `list_pair_requests` list | requests were filed, decided, cancelled or expired; the panel refreshes |
 | `decky_toolkit_paired` | `remote_ip: string, client_name: string` | a pairing request was allowed on the device |

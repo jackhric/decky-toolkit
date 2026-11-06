@@ -29,7 +29,6 @@ import { WelcomeViewProvider } from './welcome';
 
 export { connectionTimings } from './connection';
 export { pairingTimings } from './pairing';
-export { controllerTimings } from './controllers';
 export { discoveryHooks, discoveryTimings } from './discovery';
 
 let conn: Connection | undefined;
@@ -59,7 +58,7 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   const pluginsView = vscode.window.createTreeView('decky-toolkit.plugins', { treeDataProvider: pluginsTree });
   const gamesTree = new GamesTreeProvider(c);
   const gamesView = vscode.window.createTreeView('decky-toolkit.games', { treeDataProvider: gamesTree, showCollapseAll: true });
-  const controllers = new ControllerWatcher(c, () => c.proxy.apiBase());
+  const controllers = new ControllerWatcher(c);
   const controllersTree = new ControllersTreeProvider(controllers);
   const controllersView = vscode.window.createTreeView('decky-toolkit.controllers', { treeDataProvider: controllersTree });
   ctx.subscriptions.push(
@@ -92,7 +91,6 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   let connectedContext: boolean | undefined;
   let linkContext: LinkState | undefined | null = null;
   let statsLease: vscode.Disposable | undefined;
-  let controllersLease: vscode.Disposable | undefined;
   let sessionId: string | undefined;
   const sync = () => {
     const connected = c.connectedDevice;
@@ -129,19 +127,11 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
       statsLease?.dispose();
       statsLease = undefined;
     }
-    if (c.paired && connected && controllersView.visible) {
-      controllersLease ??= controllers.watch();
-    } else {
-      controllersLease?.dispose();
-      controllersLease = undefined;
-    }
   };
   ctx.subscriptions.push(
     actionsView.onDidChangeVisibility(sync),
-    controllersView.onDidChangeVisibility(sync),
     c.onDidChange(sync),
     { dispose: () => statsLease?.dispose() },
-    { dispose: () => controllersLease?.dispose() },
   );
   sync();
 

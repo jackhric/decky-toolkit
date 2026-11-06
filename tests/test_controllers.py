@@ -13,6 +13,8 @@ from aiohttp import ClientSession, ClientTimeout, web  # noqa: E402
 
 from decky_toolkit.steam import cdp, ui  # noqa: E402
 from certauth import H, stub_auth  # noqa: E402
+import sse  # noqa: E402
+from decky_toolkit.server.events import EventHub  # noqa: E402
 from decky_toolkit.input.controllers import ControllerService, evdev_gamepads, merge, parse_bitmap  # noqa: E402
 from decky_toolkit.server.http import Api  # noqa: E402
 from decky_toolkit.input import uinput  # noqa: E402
@@ -181,9 +183,9 @@ def devices_text(svc):
     return "\n".join(blocks)
 
 
-def make_controllers(svc, **steam):
+def make_controllers(svc, events=None, **steam):
     return ControllerService(svc, LOG, read_devices=lambda: devices_text(svc), steam_query=FakeSteam(svc, **steam),
-                             poll=0.05, steam_poll=0.05, confirm_seconds=0.6)
+                             poll=0.05, steam_poll=0.05, confirm_seconds=0.6, events=events)
 
 
 def test_add_virtual_confirmed_by_steam():
@@ -238,7 +240,12 @@ async def with_server(fn, **kwargs):
 
 def test_controller_routes_and_events():
     svc = make_service()
-    cs = make_controllers(svc)
+    events = EventHub()
+    cs = make_controllers(svc, events=events)
+
+    async def listed():
+        return cs.event(await cs.snapshot())
+    events.sources["controllers"] = listed
 
     async def run(s, base):
         async with s.get(f"{base}/api/v1/controllers") as r:
@@ -246,28 +253,16 @@ def test_controller_routes_and_events():
         async with s.get(f"{base}/api/v1/controllers", headers=H) as r:
             body = await r.json()
             assert body["controllers"] == [] and body["virtual"] == [] and body["input_enabled"] is False
-        async with s.get(f"{base}/api/v1/controllers/events", headers=H) as ev:
-            assert ev.headers["Content-Type"].startswith("text/event-stream")
-
-            async def next_event():
-                while True:
-                    line = (await ev.content.readline()).decode()
-                    if line.startswith("data: "):
-                        return json.loads(line[6:])
-
-            first = await next_event()
-            assert first["type"] == "controllers" and first["controllers"] == []
+        async with s.get(f"{base}/api/v1/events", headers=H) as ev:
+            hello = await sse.wait_for(ev, "hello")
+            assert hello["state"]["controllers"] == {"controllers": [], "virtual": []}
             async with s.post(f"{base}/api/v1/controllers/virtual", json={"name": "P1"}, headers=H) as r:
                 assert r.status == 201 and await r.json() == {"id": "pad1", "name": "P1", "type": "x360"}
-            ev1 = await asyncio.wait_for(next_event(), 3)
-            while not ev1["controllers"] or not ev1["controllers"][0]["seen_by_steam"]:
-                ev1 = await asyncio.wait_for(next_event(), 3)
+            ev1 = await asyncio.wait_for(sse.wait_for(ev, "controllers", lambda d: d["controllers"] and d["controllers"][0]["seen_by_steam"]), 3)
             assert ev1["virtual"][0]["id"] == "pad1" and ev1["controllers"][0]["virtual_id"] == "pad1"
             async with s.delete(f"{base}/api/v1/controllers/virtual/pad1", headers=H) as r:
                 assert r.status == 200 and await r.json() == {"removed": "pad1"}
-            ev2 = await asyncio.wait_for(next_event(), 3)
-            while ev2["virtual"]:
-                ev2 = await asyncio.wait_for(next_event(), 3)
+            ev2 = await asyncio.wait_for(sse.wait_for(ev, "controllers", lambda d: not d["virtual"]), 3)
             assert ev2["controllers"] == []
         async with s.delete(f"{base}/api/v1/controllers/virtual/pad1", headers=H) as r:
             assert r.status == 404
@@ -277,11 +272,11 @@ def test_controller_routes_and_events():
         async with s.post(f"{base}/api/v1/controllers/virtual", headers=H) as r:
             assert r.status == 201 and (await r.json())["name"] == "Virtual pad 2"
         for _ in range(50):
-            if not cs._subscribers:
+            if cs._task is None or cs._task.done():
                 break
             await asyncio.sleep(0.05)
-        assert not cs._subscribers, "a closed event stream unsubscribes"
-    asyncio.run(with_server(run, input_service=svc, controllers=cs))
+        assert cs._task.done(), "the watcher stops once the last event stream closed"
+    asyncio.run(with_server(run, input_service=svc, controllers=cs, events=events))
 
 
 def test_controller_tools():

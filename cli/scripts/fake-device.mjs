@@ -71,6 +71,7 @@ async function deviceFetch(url, init = {}) {
     return json({ status: next });
   }
   if (!authed) return done(new Response('unauthorized', { status: 401 }));
+  if (route === '/events') return done(eventStream(s, init.signal));
   if (route === '/stream/stats') return done(json({ available: true, running: false, subscribers: 0, fps: 0 }));
   if (route === '/plugins') return done(json(s.plugins));
   if (route === '/plugins/install' && init.method === 'POST') {
@@ -124,6 +125,41 @@ async function deviceFetch(url, init = {}) {
     return done(json({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: `Unknown tool: ${params.name}` }], isError: true } }));
   }
   return done(new Response('404: Not Found', { status: 404 }));
+}
+
+// `hello`, then a `tools` event whenever state.health.tools_hash changes; bumping state.eventsGen sends `shutdown` and ends it.
+function eventStream(s, signal) {
+  const enc = new TextEncoder();
+  const ev = (name, data) => enc.encode(`event: ${name}\ndata: ${JSON.stringify(data)}\n\n`);
+  const gen = s.eventsGen ?? 0;
+  let hash = s.health.tools_hash, timer;
+  const body = new ReadableStream({
+    start(c) {
+      c.enqueue(ev('hello', { version: s.health.version, api: ['v1'], state: { tools: { hash } } }));
+      timer = setInterval(() => {
+        let now;
+        try {
+          now = load();
+        } catch {
+          return; // caught mid-write
+        }
+        if ((now.eventsGen ?? 0) !== gen) {
+          clearInterval(timer);
+          c.enqueue(ev('shutdown', {}));
+          c.close();
+        } else if (now.health.tools_hash !== hash) {
+          hash = now.health.tools_hash;
+          c.enqueue(ev('tools', { hash }));
+        }
+      }, 50);
+      signal?.addEventListener('abort', () => {
+        clearInterval(timer);
+        try { c.error(signal.reason); } catch { /* already closed */ }
+      }, { once: true });
+    },
+    cancel() { clearInterval(timer); },
+  });
+  return new Response(body, { headers: { 'content-type': 'text/event-stream' } });
 }
 
 export function installFake(h) {

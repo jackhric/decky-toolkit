@@ -26,7 +26,7 @@ await esbuild.build({
   stdin: {
     contents: "export * from './src/extension'; export * from './src/actionsTree'; export * from './src/pluginsTree'; " +
       "export * from './src/pluginDeploy'; export * from '../packages/client/src/deploy'; export * from '../packages/client/src/stage'; export { AUTO_DEPLOY_DEBOUNCE_MS } from './src/deploy'; " +
-      "export * from './src/controllers'; export * from './src/navigation'; export { DeckyClient, HttpError } from '../packages/client/src/client'; " +
+      "export * from './src/controllers'; export * from './src/navigation'; export { DeckyClient, HttpError, eventTimings } from '../packages/client/src/client'; " +
       "export * from './src/games'; export * from './src/remoteFs'; export * from './src/discovery'; export * from '../packages/client/src/transport'; " +
       "export { pairingCode } from './src/pairing'; export { DeviceProxy } from './src/proxy'; export { Connection } from './src/connection'; " +
       "export * as identityFile from '../packages/client/src/identity';",
@@ -280,20 +280,45 @@ let plugins = [
   { dir: 'decky-toolkit', name: 'Decky Toolkit', author: 'jackh', flags: ['root', 'debug'], api_version: 1, version: '0.1.0', has_backend: true },
   { dir: 'romm-tender', name: 'Tender', author: 'x', flags: [], api_version: 1, version: '0.33.0', has_backend: true },
 ];
-const device = { up: true, pairQueue: [], pairRequests: [], pairCancelled: [], pairUnsupported: false, installs: [], journal: ['boot'], pluginLog: {}, installMeta: { name: 'My Plugin', version: '1.2.3' }, downFor: 0, input: { enabled: false, backend: 'ei', available: true, reason: null } };
+const device = { pairQueue: [], pairRequests: [], pairCancelled: [], pairUnsupported: false, installs: [], journal: ['boot'], pluginLog: {}, installMeta: { name: 'My Plugin', version: '1.2.3' }, downFor: 0, input: { enabled: false, backend: 'ei', available: true, reason: null } };
+// Going down or forgetting this client ends its open streams, as on the device.
+let deviceUp = true, rejectToken = false;
+Object.defineProperties(device, {
+  up: { get: () => deviceUp, set: v => { deviceUp = v; if (!v) evEnd(); }, enumerable: true },
+  rejectToken: { get: () => rejectToken, set: v => { rejectToken = v; if (v) evEnd(); }, enumerable: true },
+});
 const frameJpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 0xff, 0xd9]);
-// Controllers and Steam UI routes as in the API contract; `streams` are open /controllers/events bodies.
+// Controllers and Steam UI routes as in the API contract.
 const steamDeck = { id: 'evdev:deck', name: 'Steam Deck', kind: 'physical', virtual_id: null, vendor: '28de', product: '1205', device: '/dev/input/event5', steam: { type: 'steamdeck', slot: 0, name: 'Steam Deck' } };
 const ctl = {
-  eventsStatus: 200, refuse: null, nextId: 1, posts: [], streams: new Set(),
+  refuse: null, nextId: 1, posts: [],
   controllers: [steamDeck, { id: 'evdev:auto', name: 'Decky Toolkit pad', kind: 'virtual', virtual_id: 'auto0', vendor: '045e', product: '028e', device: '/dev/input/event9', steam: { type: 'xbox360', slot: 1, name: 'Xbox 360 Controller' } }],
   virtual: [{ id: 'auto0', name: 'Decky Toolkit pad', type: 'x360', created_at: 1, last_event_at: 2, auto: true }],
 };
-const ctlPush = () => {
-  const line = new TextEncoder().encode(`data: ${JSON.stringify({ type: 'controllers', controllers: ctl.controllers, virtual: ctl.virtual })}\n\n`);
-  for (const s of ctl.streams) s.enqueue(line);
+// `/events`: `streams` are the open bodies; `status` other than 200 refuses new ones; `silent` ones get no hello.
+const ev = { status: 200, silent: false, streams: new Set(), opened: 0 };
+const evState = () => ({
+  tools: { hash: 'h1' },
+  stream_settings: { ...stats.settings, limits: streamLimits },
+  input_settings: device.input,
+  plugins: { plugins: plugins.map(({ dir, name, version }) => ({ dir, name, version })) },
+  controllers: { controllers: ctl.controllers, virtual: ctl.virtual },
+  pairing: { pending: 0, paired: 1 },
+});
+const evFrame = (name, data) => new TextEncoder().encode(`event: ${name}\ndata: ${JSON.stringify(data)}\n\n`);
+const evPush = (name, data) => { for (const c of ev.streams) c.enqueue(evFrame(name, data)); };
+const ctlPush = () => evPush('controllers', { controllers: ctl.controllers, virtual: ctl.virtual });
+/** Ends every open stream: cleanly, after `shutdown`, or as a dropped connection. */
+const evEnd = (how = 'drop') => {
+  for (const c of ev.streams) {
+    try {
+      if (how === 'shutdown') c.enqueue(evFrame('shutdown', {}));
+      if (how === 'drop') c.error(Object.assign(new TypeError('terminated'), { cause: { code: 'ECONNRESET' } }));
+      else c.close();
+    } catch { /* closed */ }
+  }
+  ev.streams.clear();
 };
-const ctlCloseStreams = () => { for (const s of ctl.streams) { try { s.close(); } catch { /* closed */ } } ctl.streams.clear(); };
 const uiRoutes = {
   current: '/library/home',
   official: [{ path: '/library/home', title: 'Library' }, { path: '/library/app/{appid}', title: 'Game details', template: true }, { path: '/settings', title: 'Settings' }],
@@ -452,11 +477,16 @@ const deviceRoutes = [
     if (device.streamSettingsMissing) fail(404, 'capture not available');
     device.streamPuts = [...(device.streamPuts ?? []), body];
     stats.settings = { ...stats.settings, ...body };
+    evPush('stream_settings', { ...stats.settings, limits: streamLimits });
     return { ...stats.settings, limits: streamLimits };
   }],
   ['GET', /^\/stream\/frame$/, () => new Response(frameJpeg, { headers: { 'content-type': 'image/jpeg' } })],
   ['GET', /^\/input\/settings$/, () => device.input],
-  ['PUT', /^\/input\/settings$/, (_m, body) => (device.input = { ...device.input, enabled: body.enabled })],
+  ['PUT', /^\/input\/settings$/, (_m, body) => {
+    device.input = { ...device.input, enabled: body.enabled };
+    evPush('input_settings', device.input);
+    return device.input;
+  }],
   ['GET', /^\/plugins$/, () => plugins],
   ['POST', /^\/plugins\/([^/]+)\/reload$/, (m, _b, q) => {
     const dir = decodeURIComponent(m[1]), mode = q.get('mode') ?? 'backend';
@@ -571,14 +601,23 @@ const deviceFetch = async (url, init = {}) => {
     // The watcher queues one reload per changed file.
     if (restart === 'none') for (const ms of [100, 400]) setTimeout(() => device.journal.push(`${loaded} #${device.installs.length}.${ms}`), ms);
     if (restart === 'loader') device.downFor = 1;
+    evPush('plugins', evState().plugins);
     device.pluginLog[dir] = [...(device.pluginLog[dir] ?? []), `[INFO]: ${meta.name} started #${device.installs.length}`];
     return json({ installed: { dir, name: meta.name, version: meta.version }, restarted: restart });
   }
-  if (u.pathname === '/controllers/events') {
-    if (ctl.eventsStatus !== 200) return json({ error: 'events unavailable' }, ctl.eventsStatus);
+  if (u.pathname === '/events') {
+    if (ev.status !== 200) return json({ error: 'events unavailable' }, ev.status);
+    ev.opened++;
     let c;
-    const body = new ReadableStream({ start(ctrl) { c = ctrl; ctl.streams.add(ctrl); }, cancel() { ctl.streams.delete(c); } });
-    init.signal?.addEventListener('abort', () => { ctl.streams.delete(c); try { c.error(new DOMException('aborted', 'AbortError')); } catch { /* closed */ } });
+    const body = new ReadableStream({
+      start(ctrl) {
+        c = ctrl;
+        ev.streams.add(ctrl);
+        if (!ev.silent) ctrl.enqueue(evFrame('hello', { version: health.version, api: ['v1'], state: evState() }));
+      },
+      cancel() { ev.streams.delete(c); },
+    });
+    init.signal?.addEventListener('abort', () => { ev.streams.delete(c); try { c.error(new DOMException('aborted', 'AbortError')); } catch { /* closed */ } });
     return new Response(body, { headers: { 'content-type': 'text/event-stream' } });
   }
   for (const [method, pattern, handler] of deviceRoutes) {
@@ -682,7 +721,7 @@ ext.connectionTimings.healthPollMs = 40;
 ext.connectionTimings.retryMs = 20;
 ext.pairingTimings.retryMs = 20;
 ext.identityFile.identityTimings.debounceMs = 5;
-ext.controllerTimings.pollMs = 40;
+ext.eventTimings.backoffMs = [10, 20, 40];
 
 // Fake LAN for discovery: interfaces, a /health per host and an mDNS responder behind a fake socket.
 const net = {
@@ -1045,7 +1084,7 @@ await check('fake client: plugin tree states, Actions Screen offline when unreac
     devices: [], activeDevice: undefined, address: { host: 'h', port: 1 }, label: 'h', paired: !!client, rejected: false,
     connectedDevice: client ? { id: 'x', name: 'h', host: 'h', port: 1 } : undefined, link: client ? 'connected' : undefined, linkLabel: 'h',
     health: { kind: 'ok', health }, onDidChange: new EventEmitter().event, onDidChangeTarget: new EventEmitter().event,
-    authedClient: () => client, watchStats: () => new Disposable(), ...extra,
+    onDidReceiveEvent: new EventEmitter().event, authedClient: () => client, watchStats: () => new Disposable(), ...extra,
   });
   const ok = new ext.PluginsTreeProvider(fakeConn({ listPlugins: async () => plugins }));
   assert.deepEqual(labels(await ok.getChildren()), ['Decky Toolkit', 'Tender']);
@@ -1679,8 +1718,8 @@ await check('screen panel: title actions and icons, stream settings QuickPick, m
 });
 
 await check('Controllers view with fake clients: empty, physical + virtual, error', async () => {
-  const fakeConn = client => ({ connectedDevice: { id: 'x', name: 'h', host: 'h', port: 1 }, link: 'connected', authedClient: () => client, onDidChange: new EventEmitter().event, onDidChangeTarget: new EventEmitter().event, label: 'h' });
-  const treeFor = controllers => new ext.ControllersTreeProvider(new ext.ControllerWatcher(fakeConn({ controllers }), async () => 'http://127.0.0.1:1/x'));
+  const fakeConn = client => ({ connectedDevice: { id: 'x', name: 'h', host: 'h', port: 1 }, link: 'connected', authedClient: () => client, onDidChange: new EventEmitter().event, onDidChangeTarget: new EventEmitter().event, onDidReceiveEvent: new EventEmitter().event, label: 'h' });
+  const treeFor = controllers => new ext.ControllersTreeProvider(new ext.ControllerWatcher(fakeConn({ controllers })));
 
   assert.deepEqual(await treeFor(async () => ({ controllers: [], virtual: [], input_enabled: false })).getChildren(), [], 'empty → welcome');
   const welcome = pkg.contributes.viewsWelcome.find(w => w.view === 'decky-toolkit.controllers').contents;
@@ -1715,16 +1754,15 @@ await check('Controllers view with fake clients: empty, physical + virtual, erro
   return rows.map(r => `${r.label} — ${r.description}`).join(' | ');
 });
 
-await check('Controllers view live: SSE through the proxy, add / remove, slot limit and Steam Input refusal as-is, poll fallback', async () => {
+await check('Controllers view live: controllers events, add / remove, slot limit and Steam Input refusal as-is', async () => {
   const provider = tree('decky-toolkit.controllers').provider;
   const rowLabels = async () => labels(await provider.getChildren());
   await settle(100);
   assert.deepEqual(await rowLabels(), ['1. Steam Deck', '2. Decky Toolkit pad (virtual)']);
   assert.equal(tree('decky-toolkit.controllers').view.description, '10.1.2.3');
-  assert.ok(fetched.includes('/controllers/events'), 'events requested through the proxy');
-  assert.ok(ctl.streams.size >= 1, 'event stream open');
+  assert.ok(ev.streams.size >= 1, 'event stream open');
 
-  // A change on the device arrives over SSE, without polling.
+  // A change on the device arrives as an event, without polling.
   fetched.length = 0;
   ctl.controllers = [...ctl.controllers, { id: 'evdev:8bd', name: '8BitDo Pro 2', kind: 'physical', virtual_id: null, vendor: '2dc8', product: '6003', device: '/dev/input/event7', steam: null }];
   ctlPush();
@@ -1774,17 +1812,67 @@ await check('Controllers view live: SSE through the proxy, add / remove, slot li
   assert.equal(lastMessage('warning').m, 'Decky Toolkit: all 4 virtual controller slots are in use');
   for (const v of ctl.virtual.filter(p => !p.auto)) await run('decky-toolkit.removeVirtualController', v.id);
 
-  // The stream fails: a 5 s poll (40 ms here) keeps the list current and the stream is retried.
-  ctl.eventsStatus = 500;
-  ctlCloseStreams();
-  await settle(60);
+  // A change while the stream is down arrives with the hello of the reconnect.
+  ev.status = 500;
+  evEnd();
   ctl.controllers = ctl.controllers.filter(c => c.id !== 'evdev:8bd');
+  await settle(60);
+  ev.status = 200;
   await settle(150);
-  assert.deepEqual(await rowLabels(), ['1. Steam Deck', '2. Decky Toolkit pad (virtual)'], 'poll picked up the change');
-  ctl.eventsStatus = 200;
+  assert.ok(ev.streams.size >= 1, 'stream reopened');
+  assert.deepEqual(await rowLabels(), ['1. Steam Deck', '2. Decky Toolkit pad (virtual)'], 'the hello brought the change');
+  return 'event update, add "Virtual pad 1" (slot 3), remove inline + palette, refusal and slot limit as-is, resync on reconnect';
+});
+
+await check('device events: no /health polling while the stream is up; input, plugins and stream settings follow events; shutdown, silence and drops reconnect', async () => {
+  await settle(100);
+  fetched.length = 0;
+  await settle(200);
+  assert.equal(fetched.filter(f => f === '/health').length, 0, '/health is not polled while the stream is up (40 ms poll here)');
+  assert.ok(!fetched.includes('/input/settings') && !fetched.includes('/controllers'), 'no input or controller polls');
+
+  const was = device.input.enabled;
+  device.input = { ...device.input, enabled: !was };
+  evPush('input_settings', device.input);
+  await settle();
+  assert.equal(status().endsWith('$(keyboard)'), !was, 'input settings follow the event');
+  device.input = { ...device.input, enabled: was };
+  evPush('input_settings', device.input);
+
+  let treeChanges = 0;
+  const sub = pluginsProvider().onDidChangeTreeData(() => treeChanges++);
+  evPush('plugins', evState().plugins);
+  await settle();
+  assert.equal(treeChanges, 0, 'the same plugin list reloads nothing');
+  plugins = [...plugins, { dir: 'extra', name: 'Extra', version: '1.0.0', flags: [], has_backend: false }];
+  evPush('plugins', evState().plugins);
+  await settle();
+  assert.equal(treeChanges, 1, 'a changed plugin list reloads the Plugins view');
+  plugins = plugins.filter(p => p.dir !== 'extra');
+  evPush('plugins', evState().plugins);
+  await settle();
+  sub.dispose();
+
+  // The device restarts: `shutdown`, then a reconnect with a fresh hello.
+  const opened = ev.opened;
+  evEnd('shutdown');
   await settle(150);
-  assert.ok(ctl.streams.size >= 1, 'stream reopened');
-  return 'SSE update, add "Virtual pad 1" (slot 3), remove inline + palette, refusal and slot limit as-is, poll fallback';
+  assert.ok(ev.opened > opened && ev.streams.size >= 1, 'reconnected after shutdown');
+  assert.equal(calls.context.get('decky-toolkit.link'), 'connected');
+
+  // A stream that goes quiet is dropped after the heartbeat timeout and reopened.
+  const timeout = ext.eventTimings.heartbeatTimeoutMs;
+  ext.eventTimings.heartbeatTimeoutMs = 60;
+  ev.silent = true;
+  evEnd('close');
+  await settle(60);
+  const silentOpen = ev.opened;
+  ev.silent = false;
+  await settle(250);
+  ext.eventTimings.heartbeatTimeoutMs = timeout;
+  assert.ok(ev.opened > silentOpen, 'a silent stream is replaced');
+  assert.equal(calls.context.get('decky-toolkit.link'), 'connected');
+  return `streams opened ${ev.opened}`;
 });
 
 await check('screen panel: "Gamepad goes to" QuickPick, new pad, removed pad → Auto, pad field on gamepad messages', async () => {
@@ -1889,9 +1977,13 @@ await check('Steam UI navigation: Navigate to… QuickPick, template prompt, plu
 await check('an outdated plugin on the device: one warning to update it', async () => {
   delete health.api;
   try {
+    // A plugin restart (here: with an older build) drops the event stream, and the editor looks at /health.
+    evEnd('shutdown');
+    await settle(150);
+    evEnd('shutdown');
     await settle(150);
     const warned = calls.messages.filter(m => m.kind === 'warning' && /too old for this client/.test(m.m));
-    assert.equal(warned.length, 1, 'once per device, not on every health poll');
+    assert.equal(warned.length, 1, 'once per device, not on every restart');
     assert.match(warned[0].m, /plugin on the device \(0\.2\.0\) is too old for this client; update it with Decky's Install Plugin from URL \(10\.1\.2\.3\)\.$/);
     return warned[0].m;
   } finally {
@@ -1983,7 +2075,7 @@ await check('connection lost: views stay but go blank, screen panel / preview / 
   assert.equal(panel.title, 'Screen: 10.1.2.3');
   assert.deepEqual(linkMsg(), { type: 'link', live: true, text: '' });
   assert.equal(calls.context.get('decky-toolkit.screen.live'), true);
-  assert.ok(fetched.includes('/stream/settings'), 'stream settings reloaded after the outage');
+  assert.ok(fetched.includes('/events'), 'events resumed; their hello brings the stream settings');
   assert.deepEqual(previewState(), { type: 'state', live: true, text: '' });
   assert.ok(lostNotes().slice(notesBefore).includes('[decky-toolkit] Connected to 10.1.2.3 again.'));
   assert.equal(deco.provideFileDecoration(file), undefined);
@@ -2064,10 +2156,7 @@ await check('user Disconnect: views stay blank with "Disconnected" and Reconnect
 await check('pairing rejected mid-session: views blank with Re-pair, status bar and device row say so, re-pairing restores', async () => {
   await run('decky-toolkit.connect', seedId());
   await settle();
-  // Without a stats lease the /health poll checks the pairing itself (stats polling would take 5 s).
-  const actions = tree('decky-toolkit.actions').view;
-  actions.visible = false;
-  actions._visibility.fire({ visible: false });
+  // Forgetting this editor ends its event stream; the reconnect gets a 401.
   device.rejectToken = true;
   await settle(150);
   assert.equal(calls.context.get('decky-toolkit.link'), 'rejected');
@@ -2088,8 +2177,6 @@ await check('pairing rejected mid-session: views blank with Re-pair, status bar 
   assert.ok(fetched.includes('/pair/request'), 'Re-pair runs pairing');
   assert.equal(calls.context.get('decky-toolkit.link'), 'connected');
   assert.equal(status(), '$(vm-connect) 10.1.2.3');
-  actions.visible = true;
-  actions._visibility.fire({ visible: true });
   await run('decky-toolkit.disconnectDevice');
   await settle();
   return 'rejected → Re-pair → connected';

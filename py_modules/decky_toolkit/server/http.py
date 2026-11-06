@@ -22,6 +22,7 @@ from ..media.capture import BOUNDARY, CaptureUnavailable, ScreenCapturer
 from ..input.controllers import ControllerService
 from ..input.ei import EiError
 from ..input.service import InputDisabled, InputService, InputUnavailable
+from .events import EventHub, frame
 from .long_lived import LongLivedRequests
 from .pairing import MAX_WAIT_SECONDS, POLL_AFTER_MS, PairingLimit, PairingRequests
 from .protocol import SERVER_INFO, McpServer
@@ -32,9 +33,17 @@ from ..tools.cef import toast
 from ..tools.system import list_plugins, schedule_loader_restart
 
 LOG_KEEPALIVE_SECONDS = 15.0
+HEARTBEAT_SECONDS = 15.0
 INPUT_REFUSED = 4003
 AUDIO_REFUSED = 4003
 FOCUS_REFRESH_SECONDS = 3.0
+
+SSE_HEADERS = {"Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store", "X-Accel-Buffering": "no"}
+
+
+def _closed(request: web.Request) -> bool:
+    return request.transport is None or request.transport.is_closing()
+
 
 def _error(status: int, message: str) -> web.Response:
     return web.json_response({"error": message}, status=status)
@@ -85,7 +94,8 @@ def _appid(request: web.Request) -> int:
 class Api:
     def __init__(self, *, auth: CertAuth, mcp: McpServer, capturer: ScreenCapturer | None, logger: logging.Logger, pairing: PairingRequests | None = None, log_keepalive: float = LOG_KEEPALIVE_SECONDS,
                  input_service: InputService | None = None, audio: AudioCapturer | None = None,
-                 controllers: ControllerService | None = None, ui: UiNavigator | None = None):
+                 controllers: ControllerService | None = None, ui: UiNavigator | None = None,
+                 events: EventHub | None = None, heartbeat: float = HEARTBEAT_SECONDS):
         self.auth = auth
         self.mcp = mcp
         self.capturer = capturer
@@ -96,12 +106,16 @@ class Api:
         self.audio = audio
         self.controllers = controllers
         self.ui = ui
+        self.events = events if events is not None else EventHub(logger=logger)
+        self.heartbeat = heartbeat
         self._apps: Apps | None = None
         self.long_lived = LongLivedRequests()
 
     def build_app(self) -> web.Application:
         app = web.Application(client_max_size=64 * 1024 * 1024,
                               middlewares=[self.auth.middleware(), audit.middleware(self.log)])
+        # Before long_lived drops the transports, so event streams get to write `shutdown`.
+        app.on_shutdown.append(lambda _app: self.events.close())
         self.long_lived.install(app)
         live = self.long_lived.track
         v1 = [
@@ -120,7 +134,7 @@ class Api:
             web.get("/controllers", self.handle_controllers),
             web.post("/controllers/virtual", self.handle_controller_add),
             web.delete("/controllers/virtual/{id}", self.handle_controller_remove),
-            web.get("/controllers/events", live(self.handle_controller_events)),
+            web.get("/events", live(self.handle_events)),
             web.get("/ui/routes", self.handle_ui_routes),
             web.post("/ui/navigate", self.handle_ui_navigate),
             web.post("/ui/toast", self.handle_ui_toast),
@@ -407,20 +421,35 @@ class Api:
             return _error(404, f"no virtual gamepad {pad_id!r}")
         return web.json_response({"removed": pad_id})
 
-    async def handle_controller_events(self, request: web.Request) -> web.StreamResponse:
-        if self.controllers is None:
-            return _error(404, "controllers not available")
-        controllers = self.controllers
+    # ---- events ----
 
-        async def events():
-            source = controllers.subscribe()
+    async def handle_events(self, request: web.Request) -> web.StreamResponse:
+        res = web.StreamResponse(headers=SSE_HEADERS)
+        await res.prepare(request)
+        loop = asyncio.get_running_loop()
+        with self.events.subscribe() as sub:
             try:
-                async for event in source:
-                    yield json.dumps(event)
-            finally:
-                await source.aclose()
-
-        return await self._sse(request, events())
+                await res.write(frame("hello", {"version": SERVER_INFO["version"], "api": list(API_VERSIONS),
+                                                "state": await self.events.snapshot()}))
+                last_write = loop.time()
+                while True:
+                    try:
+                        # aiohttp does not cancel handlers on disconnect, so wake up to look at the transport.
+                        chunk = await asyncio.wait_for(sub.queue.get(), min(1.0, self.heartbeat))
+                    except asyncio.TimeoutError:
+                        if _closed(request):
+                            break
+                        if loop.time() - last_write >= self.heartbeat:
+                            await res.write(b": heartbeat\n\n")
+                            last_write = loop.time()
+                        continue
+                    if chunk is None:
+                        break
+                    await res.write(chunk)
+                    last_write = loop.time()
+            except (ConnectionResetError, asyncio.CancelledError):
+                pass
+        return res
 
     # ---- steam ui ----
 
@@ -477,7 +506,7 @@ class Api:
                 return _error(400, "missing multipart field 'file'")
             tmp.flush()
             try:
-                result = await plugins.install(tmp.name, restart, self.log)
+                result = await plugins.install(tmp.name, restart, self.log, self.events)
             except (ValueError, FileNotFoundError) as e:
                 return _error(400, str(e))
             except cdp.CdpError as e:
@@ -532,11 +561,7 @@ class Api:
 
     async def _sse(self, request: web.Request, lines) -> web.StreamResponse:
         """Stream an async iterator of strings as `data:` events with keepalive comments."""
-        res = web.StreamResponse(headers={
-            "Content-Type": "text/event-stream; charset=utf-8",
-            "Cache-Control": "no-store",
-            "X-Accel-Buffering": "no",
-        })
+        res = web.StreamResponse(headers=SSE_HEADERS)
         await res.prepare(request)
         pending: asyncio.Future[str] | None = None
         loop = asyncio.get_running_loop()
@@ -551,7 +576,7 @@ class Api:
                 if not done:
                     # aiohttp does not cancel handlers on disconnect, so poll the transport to stop
                     # the follower promptly instead of on the next failed keepalive write.
-                    if request.transport is None or request.transport.is_closing():
+                    if _closed(request):
                         break
                     if loop.time() - last_write >= self.log_keepalive:
                         await res.write(b": keepalive\n\n")

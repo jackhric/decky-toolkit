@@ -154,7 +154,7 @@ OLD_TOP_LEVEL = [("POST", "/pair/request"), ("GET", "/pair/request/x"), ("GET", 
                  ("GET", "/pair"), ("GET", "/viewer")]
 DROPPED = [("GET", "/api/v1/pair/requests"), ("GET", "/api/v1/audio/stats"), ("GET", "/api/v1/cef/console"),
            ("GET", "/api/v1/cef/console/stream"), ("GET", "/api/v1/recordings"), ("GET", "/api/v1/recordings/clip"),
-           ("POST", "/api/v1/exec"), ("GET", "/api/v1/stream.mjpeg"), ("GET", "/api/v1/frame.jpg")]
+           ("POST", "/api/v1/exec"), ("GET", "/api/v1/controllers/events"), ("GET", "/api/v1/stream.mjpeg"), ("GET", "/api/v1/frame.jpg")]
 
 
 def test_old_and_dropped_paths_are_gone_and_mcp_is_post_only():

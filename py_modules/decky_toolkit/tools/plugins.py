@@ -6,12 +6,15 @@ import json
 import logging
 import os
 import shlex
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..steam import cdp
 from ..loader.install import install_plugin_zip
 from . import ToolRegistry
 from .system import plugins_dir, require_confirm, run
+
+if TYPE_CHECKING:
+    from ..server.events import EventHub
 
 RESTART_MODES = ("loader", "plugin", "none")
 log = logging.getLogger("decky_toolkit.plugins")
@@ -84,11 +87,14 @@ async def _swap_while_stopped(staged: str, target: str) -> None:
         raise RuntimeError(out)
 
 
-async def install(src: str | bytes, restart: str = "loader", logger: logging.Logger = log) -> dict[str, Any]:
+async def install(src: str | bytes, restart: str = "loader", logger: logging.Logger = log,
+                  events: "EventHub | None" = None) -> dict[str, Any]:
     if restart not in RESTART_MODES:
         raise ValueError(f"restart must be one of {', '.join(RESTART_MODES)}")
     if restart != "loader":
         installed = await asyncio.to_thread(install_plugin_zip, src, plugins_dir(), logger=logger)
+        if events is not None:
+            events.refresh("plugins")
         if restart == "plugin":
             await reload_plugin(installed["dir"])
         return {"installed": installed, "restarted": restart}
@@ -129,12 +135,12 @@ def register(reg: ToolRegistry) -> None:
                 raise ValueError("path must be absolute")
             if not os.path.isfile(path):
                 raise FileNotFoundError(path)
-            return await install(path, restart)
+            return await install(path, restart, events=reg.events)
         try:
             data = base64.b64decode(zip_base64 or "", validate=True)
         except binascii.Error as e:
             raise ValueError(f"zip_base64 is not valid base64: {e}") from None
-        return await install(data, restart)
+        return await install(data, restart, events=reg.events)
 
     @reg.add(
         "plugin_reload",
