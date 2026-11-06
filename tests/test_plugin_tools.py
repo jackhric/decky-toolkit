@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 from decky_toolkit.loader import sourcemap  # noqa: E402
 from decky_toolkit.server.events import EventHub  # noqa: E402
 from harness import make_registry  # noqa: E402
-from decky_toolkit.tools.plugin_tools import PluginTools, prefix_of  # noqa: E402
+from decky_toolkit.steam.plugin_tools import PluginTools, prefix_of  # noqa: E402
 
 URL = "http://127.0.0.1:1337/plugins/My%20Plugin/dist/index.js?t=1"
 SCHEMA = {"type": "object", "properties": {"appid": {"type": "number"}}, "required": ["appid"], "additionalProperties": False}

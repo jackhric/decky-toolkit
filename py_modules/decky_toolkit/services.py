@@ -14,8 +14,9 @@ from .server.pairing import PairingRequests
 from .settings import Settings
 from .steam.apps import Apps
 from .steam.console import ConsoleCollector
+from .steam.perf import PerfOverlay
+from .steam.plugin_tools import PluginTools
 from .steam.ui import UiNavigator
-from .tools.plugin_tools import PluginTools
 
 
 @dataclass
@@ -27,6 +28,7 @@ class Services:
     controllers: ControllerService
     ui: UiNavigator
     apps: Apps
+    perf: PerfOverlay
     console: ConsoleCollector
     activity: InputActivity
     plugin_tools: PluginTools
@@ -40,7 +42,7 @@ class Services:
         input_service = InputService(get_settings, save_settings, logger, events)
         return cls(
             events=events, capturer=capturer, audio=audio, input=input_service,
-            controllers=ControllerService(input_service, logger, events), ui=UiNavigator(), apps=Apps(),
+            controllers=ControllerService(input_service, logger, events), ui=UiNavigator(), apps=Apps(), perf=PerfOverlay(),
             console=ConsoleCollector(logger), activity=InputActivity(logger), plugin_tools=PluginTools(logger, events),
             pairing=PairingRequests(events, server_cert),
         )

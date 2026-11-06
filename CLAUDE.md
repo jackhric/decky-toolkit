@@ -22,25 +22,25 @@ See README.md for setup and docs/reference.md for the tool list and architecture
     `identity.py` (non-secret `hostname`/`device_id`/`os` for `/health`), `long_lived.py` (ends streams,
     websockets and long polls on shutdown), `events.py` (the event hub: one publish path for `GET /api/v1/events`
     and the panel's `decky.emit` events; per-event sources feed `hello` and `refresh`, see `docs/api.md`).
-  - `loader/`: `install.py` (plugin zip validation + atomic install), `logs.py` (journal / plugin log tail and
-    follow), `fixes.py` (workarounds for Decky Loader bugs, applied in our own process), `live.py` (live sync:
+  - `loader/`: `install.py` (plugin zip validation + atomic install), `logs.py` (every log read, filter, follow and
+    wait: the journal, plugin log files, the Steam console; the `/logs` routes and `logs_*` tools both call it), `fixes.py` (workarounds for Decky Loader bugs, applied in our own process), `live.py` (live sync:
     single-file writes into an installed plugin, frontend/backend reload in place with UI restore), `plugins.py`
     (installed plugins: list, name lookup, install with restart, reload, loader restart).
   - `steam/`: `cdp.py` (Chrome DevTools client for Steam CEF on 127.0.0.1:8080), `ui.py` (Steam UI navigation and
     element queries), `console.py` (background Steam UI console capture), `apps.py` (Steam library/launch via the
-    client JS).
+    client JS), `perf.py` (the performance overlay level via `SteamClient.System.Perf`), `toast.py` (Decky toasts),
+    `plugin_tools.py` (the tools other plugins register from their frontend, synced over one SharedJSContext session).
   - `media/`: `capture.py` (gamescope screen stream), `audio.py` (audio stream), `record.py` (recording to MKV).
   - `input/`: remote input (`ei.py` libei over ctypes, `uinput.py`, `keymap.py`, `service.py` owning state, the
     virtual pad registry and the last remote event), `activity.py` (reads every non-virtual evdev device without
-    grabbing, keeping only times, for `device_activity`) and `controllers.py` (Steam Input controller list + evdev merge, virtual pad creation
+    grabbing, keeping only times; `someone_at_device` is the one rule `ui_state` and `device_activity` use) and `controllers.py` (Steam Input controller list + evdev merge, virtual pad creation
     confirmed by Steam).
   - `games/`: `files.py` (game/prefix/save paths, `fs_*` file browser with its sensitive-path and delete guards,
     `fs_read`/`fs_write`/`fs_mkdir`/`fs_rename` behind `writable` for the `/fs/*` routes, Proton logs), `vdf.py`
     (KeyValues parser).
   - `loader/sourcemap.py` maps `dist/*.js` positions in plugin stacks to `src/` through the installed `.map`.
   - `tools/`: only MCP tools: the registry and one module of tools per area (`input.py`, `controllers.py`, `ui.py`,
-    `cef.py`, `apps.py`, `games.py`, `record.py`, `perf.py` for the Steam performance overlay, `plugin_tools.py` for tools other plugins register from their
-    frontend, ...) and `plugin_api.py` (plugin backend methods, calls, frontend call check).
+    `cef.py`, `apps.py`, `games.py`, `record.py`, `perf.py`, ...) and `plugin_api.py` (plugin backend methods, calls, frontend call check).
 - `packages/client/` — device client source (private workspace package `@decky-toolkit/client`, never built) shared by bundling (transport, API types, discovery, pairing,
   identity file, plugin staging; no `vscode`); the extension and the CLI import it as `@decky-toolkit/client/*`.
 - `cli/` — the `decky-toolkit` npm package: `pair`, `status`, `mcp` (hand-written stdio MCP server that answers

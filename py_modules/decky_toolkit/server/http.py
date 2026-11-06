@@ -28,7 +28,7 @@ from .long_lived import LongLivedRequests
 from .pairing import MAX_WAIT_SECONDS, POLL_AFTER_MS
 from .protocol import SERVER_INFO, McpServer
 from ..services import Services
-from ..tools.cef import toast
+from ..steam.toast import toast
 
 LOG_KEEPALIVE_SECONDS = 15.0
 HEARTBEAT_SECONDS = 15.0

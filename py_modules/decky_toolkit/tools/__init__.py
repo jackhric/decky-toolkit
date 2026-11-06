@@ -9,10 +9,11 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable, Container
 
 from .. import errors
 from ..server import audit
+from ..steam.plugin_tools import PluginToolError
 
 if TYPE_CHECKING:
     from ..services import Services
-    from .plugin_tools import PluginTools
+    from ..steam.plugin_tools import PluginTools
 
 ToolFn = Callable[..., Awaitable[Any]]
 _CONTENT_TYPES = {"text", "image", "audio", "resource", "resource_link"}
@@ -32,7 +33,7 @@ class ToolRegistry:
         # McpServer points this at the plugin logger; audit lines go there.
         self.log = logging.getLogger("decky_toolkit.tools")
         self.audited: set[str] = set(audit.AUDITED_TOOLS)
-        # Tools other plugins register from their frontend; set by PluginTools.attach.
+        # Tools other plugins register from their frontend; set by build_registry.
         self.plugin_tools: "PluginTools | None" = None
 
     def __len__(self) -> int:
@@ -70,7 +71,14 @@ class ToolRegistry:
                 return error_result(f"Invalid arguments for {name}: {problem}. {describe_arguments(plugin_tool.input_schema)}")
             # Code from another plugin running as root: always audited.
             self.log.info(audit.tool_line(name, arguments, plugin_tool.input_schema.get("properties", {})))
-            return await plugins.call(plugin_tool, arguments)
+            try:
+                value = await plugins.call(plugin_tool, arguments)
+            except PluginToolError as e:
+                return error_result(str(e))
+            result = ok_result(value)
+            if plugin_tool.output_schema and isinstance(value, dict):
+                result["structuredContent"] = value
+            return result
         if problem := argument_problem(tool, arguments):
             # Checked against the schema up front, so a TypeError inside the tool is reported as the bug it is.
             return error_result(f"Invalid arguments for {name}: {problem}. {describe_arguments(tool.input_schema)}")
@@ -154,8 +162,9 @@ def build_registry(services: "Services") -> ToolRegistry:
     apps.register(reg, s.apps)
     games.register(reg, s.apps)
     record.register(reg, s.capturer)
-    perf.register(reg)
+    perf.register(reg, s.perf)
     shell.register(reg)
     activity.register(reg, s.activity, s.input, s.capturer, s.ui)
-    s.plugin_tools.attach(reg)
+    reg.plugin_tools = s.plugin_tools
+    s.plugin_tools.set_builtin(reg.names())
     return reg

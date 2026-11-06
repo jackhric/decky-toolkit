@@ -8,11 +8,10 @@ import logging
 import os
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Iterable
 
 from ..loader import sourcemap
-from ..steam import cdp
-from . import ToolRegistry, error_result, ok_result
+from . import cdp
 from ..loader.plugins import plugins_dir
 
 if TYPE_CHECKING:
@@ -83,6 +82,10 @@ _CALL = """((plugin, name, args, ms, id) => {
 _ABORT = "window.__deckyToolkitCalls?.get(__ID__)?.ac.abort(new Error('the agent cancelled the call'))"
 
 
+class PluginToolError(RuntimeError):
+    """A plugin tool call that failed in the page or could not be made; the message is the tool result."""
+
+
 def prefix_of(dirname: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", dirname.lower()).strip("_")
 
@@ -127,9 +130,8 @@ class PluginTools:
 
     # ---- naming ----
 
-    def attach(self, reg: ToolRegistry) -> None:
-        self.builtin = set(reg.names())
-        reg.plugin_tools = self
+    def set_builtin(self, names: Iterable[str]) -> None:
+        self.builtin = set(names)
         self._resolve()
 
     def _dirs(self) -> dict[str, str]:
@@ -200,10 +202,10 @@ class PluginTools:
 
     # ---- calls ----
 
-    async def call(self, tool: PluginTool, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def call(self, tool: PluginTool, arguments: dict[str, Any]) -> Any:
         tab = self._tab
         if tab is None:
-            return error_result(f"{tool.name}: the Steam UI is not reachable right now ({self.error or 'connecting'})")
+            raise PluginToolError(f"{tool.name}: the Steam UI is not reachable right now ({self.error or 'connecting'})")
         call_id = next(self._ids)
         args = ", ".join(json.dumps(a) for a in (tool.plugin, tool.tool, arguments, CALL_TIMEOUT_MS, call_id))
         try:
@@ -215,20 +217,16 @@ class PluginTools:
         out = json.loads(raw)
         if out.get("gone"):
             self._dirty.set()
-            return error_result(f"{tool.name} is gone: {tool.plugin} unloaded or reloaded without it")
+            raise PluginToolError(f"{tool.name} is gone: {tool.plugin} unloaded or reloaded without it")
         if "invalid" in out:
-            return error_result(f"Invalid arguments for {tool.name}: {out['invalid']}")
+            raise PluginToolError(f"Invalid arguments for {tool.name}: {out['invalid']}")
         if "error" in out:
             e = out["error"]
             text = e.get("stack") or f"{e.get('name')}: {e.get('message')}"
             dirs = self._dirs()
-            text = sourcemap.map_stack(text, lambda name: os.path.join(plugins_dir(), dirs[name], "dist") if name in dirs else None)
-            return error_result(text)
-        value = out.get("value")
-        result = ok_result(value)
-        if tool.output_schema and isinstance(value, dict):
-            result["structuredContent"] = value
-        return result
+            raise PluginToolError(sourcemap.map_stack(
+                text, lambda name: os.path.join(plugins_dir(), dirs[name], "dist") if name in dirs else None))
+        return out.get("value")
 
     # ---- connection ----
 

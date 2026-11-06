@@ -21,7 +21,7 @@ from decky_toolkit.settings import Settings  # noqa: E402
 from decky_toolkit.tools import ToolRegistry  # noqa: E402
 from harness import make_registry, make_services  # noqa: E402
 from decky_toolkit.loader import plugins as plugin_ops  # noqa: E402
-from decky_toolkit.tools.plugin_tools import PluginTools  # noqa: E402
+from decky_toolkit.steam.plugin_tools import PluginTools  # noqa: E402
 
 LOG = logging.getLogger("t")
 

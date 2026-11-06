@@ -467,7 +467,7 @@ must keep that contract. A registration records the plugin and the bundle URL De
 Schemas, and a `call(input, signal)` that validates the input with the Standard Schema, runs `execute` and validates
 the result against `outputSchema`.
 
-`tools/plugin_tools.py` keeps one DevTools session to SharedJSContext with `Runtime.addBinding`
+`steam/plugin_tools.py` keeps one DevTools session to SharedJSContext with `Runtime.addBinding`
 (`__deckyToolkitToolsChanged`, which the helper calls on every change) and `Page.enable` (a Steam UI reload empties the
 registry). On each change it reads the registry: a tool belongs to the `DeckyPluginLoader.plugins` entry current when
 it is first seen, and is dropped once that entry is replaced or removed (a reload or unload) or a newer bundle load of
