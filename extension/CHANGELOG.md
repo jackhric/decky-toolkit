@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.10.0](https://github.com/jackhric/decky-toolkit/compare/extension-v0.9.0...extension-v0.10.0) (2026-11-06)
+
+
+### ⚠ BREAKING CHANGES
+
+* versioned client API under /api/v1, trimmed routes ([#89](https://github.com/jackhric/decky-toolkit/issues/89))
+
+### Features
+
+* push device changes to clients over /api/v1/events ([#90](https://github.com/jackhric/decky-toolkit/issues/90)) ([9578ea8](https://github.com/jackhric/decky-toolkit/commit/9578ea8d0c25a735bc6ab47868660b989acaa3c3))
+* versioned client API under /api/v1, trimmed routes ([#89](https://github.com/jackhric/decky-toolkit/issues/89)) ([4da45cb](https://github.com/jackhric/decky-toolkit/commit/4da45cb898d516e13f87c2e95ed6ac65095f8ce0))
+
+
+### Bug Fixes
+
+* list a plugin's tools when it loads during a registry sync ([#91](https://github.com/jackhric/decky-toolkit/issues/91)) ([44aea48](https://github.com/jackhric/decky-toolkit/commit/44aea48dc5f03f9a6dcf8564385f70c679871554))
+* pre-release cleanup ([#92](https://github.com/jackhric/decky-toolkit/issues/92)) ([35d9029](https://github.com/jackhric/decky-toolkit/commit/35d9029e1443f480973fc48c3fd28edf2c825912))
+
 ## [0.9.0](https://github.com/jackhric/decky-toolkit/compare/extension-v0.8.0...extension-v0.9.0) (2026-11-06)
 
 
