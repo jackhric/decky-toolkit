@@ -3,9 +3,10 @@ import * as readline from 'readline';
 import type { Readable, Writable } from 'stream';
 import type { ToolCallResult, ToolDescription } from '@decky-toolkit/client/api';
 import type { DeckyClient, EventSubscription } from '@decky-toolkit/client/client';
+import { BUILD_MODES } from '@decky-toolkit/client/deploy';
 import * as identityFile from '@decky-toolkit/client/identity';
 import {
-  InvalidOption, NotPairedError, PAIR_HINT, Paired, RESTART_MODES, deploy, deviceStatus, explain, onDevice, pairedWith, parseRestart,
+  InvalidOption, NotPairedError, PAIR_HINT, Paired, RESTART_MODES, deploy, deviceStatus, explain, onDevice, pairedWith, parseBuild, parseRestart,
 } from './device';
 import { VERSION } from './version';
 
@@ -15,12 +16,14 @@ const LOCAL_TOOLS: ToolDescription[] = [
   {
     name: 'plugin_deploy',
     description: 'Package a Decky plugin folder (plugin.json, dist/, main.py, py_modules/, ...) from this machine, install it on the paired device '
-      + 'and confirm the device loaded it. Run the plugin\'s own build first; dist/ must exist. Without `restart`, a new plugin restarts '
+      + 'and confirm the device loaded it. A plugin already installed under the same plugin.json name is updated in its own directory. '
+      + 'Without `restart`, a new plugin restarts '
       + 'Decky Loader, a plugin with the debug flag is left to the loader\'s file watcher, and any other installed one is reloaded.',
     inputSchema: {
       type: 'object',
       properties: {
         dir: { type: 'string', description: 'Plugin folder on this machine; relative paths start at the working directory. Default: the working directory.' },
+        build: { type: 'string', enum: [...BUILD_MODES], description: 'auto (default): run the package.json build script when src/ is newer than dist/index.js; always; never.' },
         restart: { type: 'string', enum: RESTART_MODES, description: 'none: only swap the files (a plugin with the debug flag is still reloaded by the loader\'s file watcher); plugin: reload this plugin; loader: restart Decky Loader.' },
       },
       additionalProperties: false,
@@ -133,7 +136,7 @@ export class McpServer {
       try {
         const dir = args.dir ?? '.';
         if (typeof dir !== 'string') throw new InvalidOption('dir must be a string');
-        return result(id, text(JSON.stringify(await deploy(dir, parseRestart(args.restart), this.log), null, 2)));
+        return result(id, text(JSON.stringify(await deploy(dir, parseRestart(args.restart), parseBuild(args.build), this.log), null, 2)));
       } catch (e) {
         return result(id, text(e instanceof InvalidOption ? e.message : `deploy failed: ${explain(e)}`, true));
       }

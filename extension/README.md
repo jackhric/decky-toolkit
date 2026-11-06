@@ -277,7 +277,8 @@ for the screen panel.
 The extension looks for Decky plugins in the workspace: every folder with a `plugin.json`, in a
 workspace folder or up to two levels below it (not in `node_modules`). It reads the name, author,
 flags and `api_version` from `plugin.json` and the version from `package.json`, and installs to
-`~/homebrew/plugins/<folder name>` (setting `decky-toolkit.pluginDirName` overrides the name). Plugins
+`~/homebrew/plugins/<folder name>` (setting `decky-toolkit.pluginDirName` overrides the name). A plugin the
+device already has under the same `plugin.json` name is updated in its own directory instead. Plugins
 are expected to follow the [decky-plugin-template](https://github.com/SteamDeckHomebrew/decky-plugin-template)
 layout. Edits to `plugin.json` or `package.json` are picked up at once.
 
@@ -523,7 +524,7 @@ All of these are also in the command palette under the `Decky:` category.
 | `decky-toolkit.host` | (empty) | Device IP or hostname. When set, seeds the first saved device; used when the device list is empty |
 | `decky-toolkit.port` | `8765` | Decky Toolkit server port (same rules as `host`) |
 | `decky-toolkit.mcpPort` | `8766` | Local port MCP clients connect to; the next free port is used when another window holds it. Takes effect after a window reload |
-| `decky-toolkit.pluginDirName` | (empty) | Target dir under `~/homebrew/plugins` for deploy; empty means the plugin folder's name |
+| `decky-toolkit.pluginDirName` | (empty) | Target dir under `~/homebrew/plugins` for a first install; empty means the plugin folder's name. A plugin the device already has under the same `plugin.json` name is updated in its own dir |
 | `decky-toolkit.deploy.build` | `auto` | `auto`: build only when `src/` is newer than `dist/index.js`; `always`; `never` |
 | `decky-toolkit.deploy.onChange` | `false` | Keep the device in step: deploy on the first change, then push changed files and reload the plugin in place |
 | `decky-toolkit.deploy.watchBuild` | `true` | While auto-deploy is on, run the plugin's `watch` script in the background |

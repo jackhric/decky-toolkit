@@ -527,7 +527,7 @@
         "decky-toolkit.pluginDirName": {
           "type": "string",
           "default": "",
-          "description": "Directory name under ~/homebrew/plugins to deploy to. Empty means the workspace folder's name."
+          "description": "Directory name under ~/homebrew/plugins for the first install. Empty means the plugin folder's name. A plugin the device already has under the same plugin.json name is updated in its own directory."
         },
         "decky-toolkit.openScreenOnConnect": {
           "type": "boolean",
