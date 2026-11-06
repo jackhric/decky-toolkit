@@ -13,9 +13,12 @@ loopback URL (`Decky: Copy MCP URL`), so any MCP client can use the tools below.
 | --- | --- |
 | `decky_status` | Loader version, OS, Python runtime, uid, installed plugins |
 | `list_plugins` | Plugins under `~/homebrew/plugins` with their `plugin.json` metadata |
-| `read_plugin_log` | Tail a plugin's backend log from `~/homebrew/logs/<plugin>/` |
+| `read_plugin_log` | Tail a plugin's backend log from `~/homebrew/logs/<plugin>/`; `run` 1 is the previous backend run, `match` a regex filter |
 | `backend_stacks` | Decky Toolkit's own backend: every thread and asyncio task stack, event loop lag and stalls |
-| `loader_log` | Tail `journalctl -u plugin_loader`, optional substring filter |
+| `loader_log` | Tail `journalctl -u plugin_loader`; `since`/`until` (journalctl times such as `-2min`), substring `grep` or regex `match` |
+| `wait_for_log` | Block until a loader journal or plugin log line matches a regex (`since_s` also accepts recent lines), instead of polling |
+| `run_command` | Run a shell command on the device as the desktop user (its `XDG_RUNTIME_DIR`, D-Bus, `DISPLAY=:0`), or as root with `root: true`; timeout, output cap, every command logged |
+| `device_activity` | Whether someone is using the device: last physical input (any non-virtual input device, times only), last remote input and client, the app in front, screen viewers |
 | `restart_loader` | Restart `plugin_loader.service` (scheduled 1 s out so the call returns); needs `confirm: true` |
 | `install_plugin` | Install a plugin zip (device path or base64) atomically, then restart the loader (needs `confirm: true`), reload the plugin, or neither |
 | `reload_plugin` | Reload one plugin's backend through Decky without restarting the loader |
@@ -36,6 +39,7 @@ loopback URL (`Decky: Copy MCP URL`), so any MCP client can use the tools below.
 | `input_gamepad` | Press buttons, move sticks and triggers on a virtual Xbox 360 pad (`pad` picks one), or run a sequence |
 | `list_controllers` | Gamepads as Steam Input sees them (type, slot, active), merged with evdev detail |
 | `add_virtual_controller` / `remove_virtual_controller` | Plug in or unplug a virtual Xbox 360 pad; returns once Steam Input lists it |
+| `ui_state` | Where the Steam UI is in one small answer: route, open menu, Quick Access tab, Decky panel, running game, focused element |
 | `ui_routes` | Steam and Decky pages you can navigate to, plugin routes, current page and menu state |
 | `ui_navigate` | Go to a page (`/settings/display`, `/decky/settings`), back, open Quick Access / a Decky plugin panel / a game page |
 | `ui_query` | Find elements by CSS selector or text, with screen coordinates ready for `input_mouse` |

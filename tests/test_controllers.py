@@ -366,7 +366,7 @@ def test_navigator():
         assert any(o["path"] == "/library/app/{appid}" and o["template"] for o in r["official"])
         res = await nav.navigate(path="/settings/display")
         assert res == {"ok": True, "current": "/settings/display", "side_menu": "quick_access",
-                       "quick_access_tab": "decky", "active_plugin": "Tender"}
+                       "quick_access_tab": "decky", "active_plugin": "Tender", "running_app": None}
         assert 'N.Navigate("/settings/display"); N.CloseSideMenus()' in fake.scripts[-2]
         with pytest.raises(ValueError, match="unknown route '/nowhere'.*/library/home"):
             await nav.navigate(path="/nowhere")

@@ -320,6 +320,8 @@ class InputService:
         self.rate = rate
         self._backend: Backend | None = None
         self._backend_lock = asyncio.Lock()
+        # Last injected event (not releases): wall time, client and session kind, for device_activity.
+        self.last_remote: dict[str, Any] | None = None
         self._ei_failed_at = -EI_RETRY_SECONDS
         self._pads: dict[str, VirtualPad] = {}
         self._pad_seq = 0
@@ -583,6 +585,7 @@ class InputService:
             if self._tokens < 1:
                 raise ValueError(f"input rate limit ({self.rate} events/s) exceeded; event dropped")
             self._tokens -= 1
+            self.last_remote = {"at": time.time(), "client": s.remote, "kind": s.kind}
         if not s.started:
             s.started = True
             self.log.info("input session from %s (%s) started", s.remote, s.kind)

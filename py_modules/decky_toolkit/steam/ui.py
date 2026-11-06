@@ -52,7 +52,9 @@ _STATE_JS = """(() => {
   const menu = win?.MenuStore;
   return {current: win?.LocationPathName ?? null, side_menu: menu?.GetOpenSideMenu?.() ?? null,
           quick_access_tab: menu?.GetQuickAccessTab?.() ?? null,
-          active_plugin: window.DeckyPluginLoader?.deckyState?.publicState?.().activePlugin?.name ?? null};
+          active_plugin: window.DeckyPluginLoader?.deckyState?.publicState?.().activePlugin?.name ?? null,
+          running_app: (() => { const id = window.SteamUIStore?.MainRunningAppID;
+            return id ? {appid: id, name: window.appStore?.GetAppOverviewByAppID?.(id)?.display_name ?? null} : null; })()};
 })()"""
 
 _ROUTES_JS = """(() => {
@@ -154,7 +156,8 @@ def _state(raw: dict[str, Any] | None) -> dict[str, Any]:
     tab = raw.get("quick_access_tab")
     names = {v: k for k, v in QUICK_ACCESS_TABS.items()}
     return {"current": raw.get("current"), "side_menu": SIDE_MENUS.get(raw.get("side_menu"), raw.get("side_menu")),
-            "quick_access_tab": names.get(tab, tab), "active_plugin": raw.get("active_plugin")}
+            "quick_access_tab": names.get(tab, tab), "active_plugin": raw.get("active_plugin"),
+            "running_app": raw.get("running_app")}
 
 
 class UiNavigator:
