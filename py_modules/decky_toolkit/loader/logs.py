@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import AsyncIterator
 
 from ..system import clean_env, run, tail
+from .plugins import check_dir_name
 
 DEFAULT_TAIL = 100
 MAX_TAIL = 5000
@@ -15,9 +16,7 @@ SOURCES = ("loader", "plugin")
 
 
 def plugin_log_dir(plugin: str) -> str:
-    if not plugin or "/" in plugin or plugin.startswith("."):
-        raise ValueError("plugin must be a bare plugin directory name")
-    return os.path.join(os.environ.get("DECKY_HOME", ""), "logs", plugin)
+    return os.path.join(os.environ.get("DECKY_HOME", ""), "logs", check_dir_name(plugin))
 
 
 def newest_log(log_dir: str) -> str | None:

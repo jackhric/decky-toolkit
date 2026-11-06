@@ -8,13 +8,13 @@ import asyncio
 import collections
 import json
 import os
-import pwd
 import shutil
 import signal
 import time
 from typing import Any, AsyncIterator, Callable
 
 from ..settings import STREAM_LIMITS, Settings
+from ..system import clean_env, user_runtime_dir
 
 IDLE_STOP_SECONDS = 10
 BOUNDARY = b"frame"
@@ -36,15 +36,6 @@ TICK_SECONDS = 5.0
 
 class CaptureUnavailable(RuntimeError):
     pass
-
-
-def _user_runtime_dir() -> str:
-    user = os.environ.get("DECKY_USER", "deck")
-    try:
-        uid = pwd.getpwnam(user).pw_uid
-    except KeyError:
-        uid = 1000
-    return f"/run/user/{uid}"
 
 
 def jpeg_size(data: bytes) -> tuple[int, int] | None:
@@ -126,8 +117,8 @@ class ScreenCapturer:
     def unavailable_reason(self) -> str | None:
         if shutil.which("gst-launch-1.0") is None:
             return "gst-launch-1.0 not found on this OS image"
-        if not os.path.exists(os.path.join(_user_runtime_dir(), "pipewire-0")):
-            return f"PipeWire socket not found in {_user_runtime_dir()} (is the user session running?)"
+        if not os.path.exists(os.path.join(user_runtime_dir(), "pipewire-0")):
+            return f"PipeWire socket not found in {user_runtime_dir()} (is the user session running?)"
         return None
 
     @property
@@ -163,9 +154,8 @@ class ScreenCapturer:
         ]
 
     def _env(self) -> dict[str, str]:
-        env = {k: v for k, v in os.environ.items() if k != "LD_LIBRARY_PATH"}
-        # The plugin runs as root; PipeWire lives in the desktop user's session.
-        env["XDG_RUNTIME_DIR"] = _user_runtime_dir()
+        env = clean_env()
+        env["XDG_RUNTIME_DIR"] = user_runtime_dir()
         env.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin")
         return env
 

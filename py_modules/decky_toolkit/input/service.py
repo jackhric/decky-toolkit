@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Protocol
 
 from . import ei, keymap, uinput
-from ..media.capture import _user_runtime_dir
+from ..system import clean_env, desktop_user, user_runtime_dir
 
 PAD_IDLE_SECONDS = 60.0
 MAX_PADS = 4
@@ -274,20 +274,15 @@ def mouse_button(name: Any) -> int:
     raise ValueError(f"unknown mouse button {name!r}; use {', '.join(MOUSE_BUTTONS)}")
 
 
-def _clean_env() -> dict[str, str]:
-    return {k: v for k, v in os.environ.items() if k != "LD_LIBRARY_PATH"}
-
-
 async def xdotool_focus_size() -> tuple[int, int] | None:
     """Focused X window size on the Steam display, via xdotool as the desktop user (root is refused by X)."""
     cmd = ["xdotool", "getwindowfocus", "getwindowgeometry"]
     for display in (":0", ":1"):
-        env = _clean_env()
+        env = clean_env()
         env["DISPLAY"] = display
         argv = cmd
         if os.geteuid() == 0:
-            user = os.environ.get("DECKY_USER", "deck")
-            argv = ["runuser", "-u", user, "--", "env", f"DISPLAY={display}", *cmd]
+            argv = ["runuser", "-u", desktop_user().pw_name, "--", "env", f"DISPLAY={display}", *cmd]
         try:
             proc = await asyncio.create_subprocess_exec(*argv, env=env, stdout=asyncio.subprocess.PIPE,
                                                         stderr=asyncio.subprocess.DEVNULL)
@@ -302,7 +297,7 @@ async def xdotool_focus_size() -> tuple[int, int] | None:
 
 class InputService:
     def __init__(self, get_settings: Callable[[], Any], save_settings: Callable[[], None] | None, logger: logging.Logger,
-                 on_session: OnSession | None = None, *, runtime_dir: Callable[[], str] = _user_runtime_dir,
+                 on_session: OnSession | None = None, *, runtime_dir: Callable[[], str] = user_runtime_dir,
                  make_backend: Callable[[str], Backend] | None = None, make_gamepad: Callable[[], Gamepad] | None = None,
                  uinput_available: Callable[[], bool] = uinput.available,
                  focus_probe: Callable[[], Awaitable[tuple[int, int] | None]] = xdotool_focus_size,

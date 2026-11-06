@@ -13,7 +13,7 @@ import time
 from typing import Any
 
 from .server.audit import request_origin
-from .system import clean_env
+from .system import clean_env, desktop_user, user_runtime_dir
 
 DEFAULT_TIMEOUT = 60
 MAX_TIMEOUT = 600
@@ -26,18 +26,9 @@ DEFAULT_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 log = logging.getLogger("decky_toolkit.shell")
 
 
-def desktop_user() -> pwd.struct_passwd:
-    """Decky's user (the one Steam runs as); the current user when not under the loader (tests)."""
-    name = os.environ.get("DECKY_USER")
-    try:
-        return pwd.getpwnam(name) if name else pwd.getpwuid(os.getuid())
-    except KeyError:
-        return pwd.getpwuid(os.getuid())
-
-
 def _env(user: pwd.struct_passwd, as_root: bool) -> dict[str, str]:
     base = clean_env()
-    runtime = f"/run/user/{user.pw_uid}"
+    runtime = user_runtime_dir()
     env = {
         "PATH": base.get("PATH") or DEFAULT_PATH,
         "LANG": base.get("LANG", "C.UTF-8"),
