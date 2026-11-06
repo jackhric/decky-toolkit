@@ -107,8 +107,15 @@ def register(reg: ToolRegistry) -> None:
             "os": {k: os_release.get(k) for k in ("PRETTY_NAME", "IMAGE_ID", "VERSION_ID")},
         }
 
-    reg.add("plugin_list", "Plugins installed under ~/homebrew/plugins with their plugin.json metadata; 'dir' is what "
-                           "the plugin_* tools take as plugin.")(list_plugins)
+    @reg.add("plugin_list", "Plugins installed under ~/homebrew/plugins with their plugin.json metadata; 'dir' is what "
+                            "the plugin_* tools take as plugin. 'mcp_tools' lists the MCP tools a plugin registered from "
+                            "its frontend, and the ones refused with the reason.")
+    async def plugin_list() -> list[dict[str, Any]]:
+        plugins = await list_plugins()
+        for p in plugins if reg.plugin_tools else []:
+            if tools := reg.plugin_tools.of_plugin(p["dir"]):
+                p["mcp_tools"] = tools
+        return plugins
 
     @reg.add(
         "toolkit_stacks",

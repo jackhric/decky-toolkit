@@ -5,7 +5,7 @@ import json
 import logging
 import traceback
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Container
 
 from ..server import audit
 from ..steam import cdp
@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from ..steam.console import ConsoleCollector
     from ..input.controllers import ControllerService
     from ..steam.ui import UiNavigator
+    from .plugin_tools import PluginTools
 
 ToolFn = Callable[..., Awaitable[Any]]
 # Exceptions that are expected, user-facing failures: reported without a traceback.
@@ -39,9 +40,14 @@ class ToolRegistry:
         # McpServer points this at the plugin logger; audit lines go there.
         self.log = logging.getLogger("decky_toolkit.tools")
         self.audited: set[str] = set(audit.AUDITED_TOOLS)
+        # Tools other plugins register from their frontend; set by PluginTools.attach.
+        self.plugin_tools: "PluginTools | None" = None
 
     def __len__(self) -> int:
-        return len(self._tools)
+        return len(self.describe())
+
+    def names(self) -> list[str]:
+        return list(self._tools)
 
     def add(self, name: str, description: str, input_schema: dict[str, Any] | None = None) -> Callable[[ToolFn], ToolFn]:
         def deco(fn: ToolFn) -> ToolFn:
@@ -53,7 +59,8 @@ class ToolRegistry:
         return deco
 
     def describe(self) -> list[dict[str, Any]]:
-        return [{"name": t.name, "description": t.description, "inputSchema": t.input_schema} for t in self._tools.values()]
+        own = [{"name": t.name, "description": t.description, "inputSchema": t.input_schema} for t in self._tools.values()]
+        return own + (self.plugin_tools.describe() if self.plugin_tools else [])
 
     def fingerprint(self) -> str:
         """Changes whenever a tool, its description or its schema does; clients compare it to refresh their list."""
@@ -63,7 +70,15 @@ class ToolRegistry:
     async def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         tool = self._tools.get(name)
         if tool is None:
-            raise ValueError(f"Unknown tool: {name}")
+            plugins = self.plugin_tools
+            plugin_tool = plugins.get(name) if plugins else None
+            if plugins is None or plugin_tool is None:
+                raise ValueError(f"Unknown tool: {name}")
+            if problem := schema_problem(plugin_tool.input_schema, arguments):
+                return error_result(f"Invalid arguments for {name}: {problem}. {describe_arguments(plugin_tool.input_schema)}")
+            # Code from another plugin running as root: always audited.
+            self.log.info(audit.tool_line(name, arguments, plugin_tool.input_schema.get("properties", {})))
+            return await plugins.call(plugin_tool, arguments)
         if problem := argument_problem(tool, arguments):
             # Checked against the schema up front, so a TypeError inside the tool is reported as the bug it is.
             return error_result(f"Invalid arguments for {name}: {problem}. {describe_arguments(tool.input_schema)}")
@@ -78,17 +93,24 @@ class ToolRegistry:
         return ok_result(result)
 
 
-def argument_problem(tool: Tool, arguments: dict[str, Any]) -> str | None:
-    props = tool.input_schema.get("properties", {})
-    unknown = [k for k in arguments if k not in props]
+def schema_problem(schema: dict[str, Any], arguments: dict[str, Any], defaulted: Container[str] = ()) -> str | None:
+    """Unknown or missing arguments; unknown ones are refused unless the schema explicitly allows extra properties."""
+    props = schema.get("properties", {})
+    unknown = [] if schema.get("additionalProperties") not in (None, False) else [k for k in arguments if k not in props]
     if unknown:
         return f"unknown argument{'s' if len(unknown) > 1 else ''} {', '.join(repr(k) for k in unknown)}"
-    # A required argument the function has a default for is the tool's to explain (e.g. "needs confirm: true").
-    params = inspect.signature(tool.fn).parameters
-    missing = [k for k in tool.input_schema.get("required", []) if k not in arguments
-               and (k not in params or params[k].default is inspect.Parameter.empty)]
+    missing = [k for k in schema.get("required", []) if k not in arguments and k not in defaulted]
     if missing:
         return f"missing required {', '.join(repr(k) for k in missing)}"
+    return None
+
+
+def argument_problem(tool: Tool, arguments: dict[str, Any]) -> str | None:
+    # A required argument the function has a default for is the tool's to explain (e.g. "needs confirm: true").
+    params = inspect.signature(tool.fn).parameters
+    defaulted = {k for k, p in params.items() if p.default is not inspect.Parameter.empty}
+    if problem := schema_problem(tool.input_schema, arguments, defaulted):
+        return problem
     try:
         inspect.signature(tool.fn).bind(**arguments)
     except TypeError as e:
@@ -121,7 +143,8 @@ def error_result(text: str) -> dict[str, Any]:
 
 def build_registry(capturer: ScreenCapturer | None = None, input_service: InputService | None = None,
                    controllers: "ControllerService | None" = None, navigator: "UiNavigator | None" = None,
-                   console: "ConsoleCollector | None" = None, activity: "InputActivity | None" = None) -> ToolRegistry:
+                   console: "ConsoleCollector | None" = None, activity: "InputActivity | None" = None,
+                   plugin_tools: "PluginTools | None" = None) -> ToolRegistry:
     from ..steam.apps import Apps as AppsLib
     from . import (activity as activity_tools, apps, cef, controllers as controller_tools, games, input, logs, perf,
                    plugin_api, plugins, record, screen, shell, system, ui)
@@ -147,4 +170,6 @@ def build_registry(capturer: ScreenCapturer | None = None, input_service: InputS
     perf.register(reg)
     shell.register(reg)
     activity_tools.register(reg, activity, input_service, capturer, navigator)
+    if plugin_tools is not None:
+        plugin_tools.attach(reg)
     return reg

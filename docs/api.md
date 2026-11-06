@@ -384,6 +384,32 @@ Quick Access performance tab (`SteamClient.System.Perf.UpdateSettings`); gamesco
 into its PipeWire stream, so captures and recordings never show it. `device_run`: as `POST /exec`. `device_info`,
 `device_activity`, `toolkit_stacks`, `ui_toast`, `cef_targets`, `cef_evaluate`, `cef_screenshot`, `screen_capture`.
 
+## Plugin tools
+
+Other plugins register MCP tools from their frontend with `registerTool` from the npm package's `decky-toolkit/tools`
+export (`cli/src/tools.ts`, WebMCP-shaped: `name`, `description`, `inputSchema`, `outputSchema`, `annotations`,
+`execute(input, {signal})`, plus `{signal}` to remove it). Each plugin bundles its own copy of the helper; the copies
+share one v1 registry on `window.__deckyToolkitTools` (`{version: 1, tools: Set}`) in SharedJSContext, so every copy
+must keep that contract. A registration records the plugin and the bundle URL Decky imported it from
+(`http://127.0.0.1:1337/plugins/<plugin.json name>/dist/index.js?t=<time>`, found in the call stack), the JSON
+Schemas, and a `call(input, signal)` that validates the input with the Standard Schema, runs `execute` and validates
+the result against `outputSchema`.
+
+`tools/plugin_tools.py` keeps one DevTools session to SharedJSContext with `Runtime.addBinding`
+(`__deckyToolkitToolsChanged`, which the helper calls on every change) and `Page.enable` (a Steam UI reload empties the
+registry). On each change it reads the registry: a tool belongs to the `DeckyPluginLoader.plugins` entry current when
+it is first seen, and is dropped once that entry is replaced or removed (a reload or unload) or a newer bundle load of
+the same plugin registers. Names are `<prefix>_<name>`, the prefix being the plugin directory lowercased with every run
+of other characters turned into `_`. Refused: a prefix equal to a built-in area, names over 64 characters, a clash with
+a built-in tool or another plugin's tool, a plugin whose `plugin.json` name matches no directory.
+
+A call checks unknown and missing arguments against the advertised schema like any tool, is always audited (argument
+names only), then evaluates the registration's `call` in the page with a 120 s timeout (cancelling the MCP request
+aborts `signal`). Schema refusals in the page come back as `Invalid arguments for <tool>: <issues>`; an exception as an
+error result with the page's stack, cut below `execute` and mapped to `src/` through the plugin's installed
+`dist/*.js.map` (`loader/sourcemap.py`). A result with `outputSchema` also carries `structuredContent`. The tool list
+and `tools_hash` in `/health` include plugin tools, so `decky-toolkit mcp` sends `tools/list_changed` when they change.
+
 ## Events (backend → Decky frontend)
 
 | Event | Payload | Meaning |

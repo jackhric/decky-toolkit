@@ -29,6 +29,10 @@ Tools are named `<area>_<action>`. Each table row is one area.
 | `fs_` | `fs_list`, `fs_stat`, `fs_read`, `fs_write` (as root; Steam credential/session files and SSH keys refused), `fs_delete` (only inside game, prefix, userdata or plugin data dirs; `confirm: true`) |
 | `perf_` | `perf_overlay` (no `level`: read; `level` 0-4 as on the Quick Access performance tab: set) |
 
+Other plugins can add their own tools from their frontend with `registerTool` from `decky-toolkit/tools`; they are
+listed as `<plugin directory>_<name>` (see [api.md](api.md#plugin-tools) and the site's "Give agents your plugin's own
+tools" page). `plugin_list` shows each plugin's tools under `mcp_tools`, and the refused ones with the reason.
+
 The CLI's `decky-toolkit mcp` adds `plugin_deploy` (package and install a plugin folder from the machine it runs on) and
 `device_status` (which device this machine is paired with and whether it answers).
 

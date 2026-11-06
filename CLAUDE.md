@@ -30,14 +30,18 @@ See README.md for setup and docs/reference.md for the tool list and architecture
   - `games/`: `files.py` (game/prefix/save paths, `fs_*` file browser with its sensitive-path and delete guards,
     `fs_read`/`fs_write`/`fs_mkdir`/`fs_rename` behind `writable` for the `/fs/*` routes, Proton logs), `vdf.py`
     (KeyValues parser).
+  - `loader/sourcemap.py` maps `dist/*.js` positions in plugin stacks to `src/` through the installed `.map`.
   - `tools/`: the MCP tool registry and one module of tools per area (`input.py`, `controllers.py`, `ui.py`,
-    `cef.py`, `apps.py`, `games.py`, `record.py`, `perf.py` for the Steam performance overlay, ...), plus `guard.py`
+    `cef.py`, `apps.py`, `games.py`, `record.py`, `perf.py` for the Steam performance overlay, `plugin_tools.py` for tools other plugins register from their
+    frontend, ...), plus `guard.py`
     (sensitive-path deny list) and `plugin_api.py` (plugin backend methods, calls, frontend call check).
 - `packages/client/` — device client source shared by bundling (transport, API types, discovery, pairing,
   identity file, plugin staging; no `vscode`); the extension and the CLI import it as `@decky-toolkit/client/*`.
 - `cli/` — the `decky-toolkit` npm package: `pair`, `status`, `mcp` (hand-written stdio MCP server that answers
   `initialize`/`ping` locally and relays `tools/*` to the device's `/mcp`, plus local `plugin_deploy`/`device_status`),
-  `deploy`, `dev` (watch build + deploy once + live sync until Ctrl-C), `call`, `forget`. One esbuild bundle `dist/cli.js`, no runtime dependencies. `scripts/smoke.mjs` runs
+  `deploy`, `dev` (watch build + deploy once + live sync until Ctrl-C), `call`, `forget`. One esbuild bundle `dist/cli.js`, no runtime dependencies.
+  The package also exports `decky-toolkit/tools` (`src/tools.ts`, browser ESM `dist/tools.js` + `.d.ts`): plugins'
+  `registerTool`, with compile-time type tests in `cli/test/` (part of `typecheck`). `scripts/smoke.mjs` runs
   the built CLI as a child process against `scripts/fake-device.mjs` (installed through the client's hooks).
   The extension's "Write MCP config" writes `npx -y decky-toolkit mcp` into `.mcp.json`.
 - `src/index.tsx` — Quick Access panel (React, `@decky/ui`, `@decky/api`). Built by `pnpm run build` (Vite,
@@ -97,6 +101,15 @@ See README.md for setup and docs/reference.md for the tool list and architecture
 - A `restart=loader` install that swapped the plugin dir while the loader was running raced the watcher and
   left orphaned backends leaking memory; the install route now stages the dir and a systemd job stops the
   loader, swaps, and starts it.
+
+## Plugin tools facts (verified 2026-11-06, Decky v3.3.1, Steam CEF Chrome 126)
+- A registration's plugin comes from its call stack: Decky imports bundles from
+  `http://127.0.0.1:1337/plugins/<plugin.json name, URL-encoded>/dist/index.js?t=<time>` (the name, not the directory).
+- `DeckyPluginLoader.deckyState.eventBus` fires `update` whenever `DeckyPluginLoader.plugins` is replaced (load or
+  unload); a plugin reload (deploy with `restart=plugin`) dropped and re-added only the tools that changed, no gap.
+- `Runtime.addBinding` on our long-lived SharedJSContext session is how the page pushes changes; a loader restart drops
+  CEF :8080 for a few seconds and the session reconnects. The CLI notices a new `tools_hash` on its next health poll
+  (~15 s).
 
 ## Live sync and loader shutdown facts (verified 2026-11-06, Decky v3.3.1)
 - The frontend loads as an ES module: `DeckyPluginLoader.importPlugin(name, version)` does
