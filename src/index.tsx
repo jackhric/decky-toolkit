@@ -4,18 +4,18 @@ import {
   DialogButton,
   DialogButtonPrimary,
   DialogControlsSection,
-  DialogControlsSectionHeader,
   Field,
   Focusable,
   Navigation,
   TextField,
   ToggleField,
+  SidebarNavigation,
   showModal,
   staticClasses,
 } from "@decky/ui";
 import { addEventListener, callable, definePlugin, removeEventListener, routerHook, toaster } from "@decky/api";
 import { ReactNode, useEffect, useState } from "react";
-import { FaCog, FaPlug } from "react-icons/fa";
+import { FaCog, FaGamepad, FaLaptop, FaPlug, FaServer } from "react-icons/fa";
 import { Mark } from "./Mark";
 
 type Status = {
@@ -179,7 +179,7 @@ const showPairingHelp = () =>
       strDescription={
         <ol style={{ margin: 0, paddingLeft: "1.4em", lineHeight: 1.6 }}>
           <li>Install the Decky Toolkit extension in VS Code on your computer.</li>
-          <li>In the extension, add the address shown in this panel.</li>
+          <li>In the extension, add the address shown in the Decky Toolkit panel.</li>
           <li>A request appears here. Approve it if its code matches the one on your computer.</li>
         </ol>
       }
@@ -188,8 +188,10 @@ const showPairingHelp = () =>
 
 const STYLE = `
 .dtk-card { border-radius: 4px; background: rgba(255,255,255,0.04); transition: background 0.15s; }
-.dtk-card.dtk-focus { background: rgba(255,255,255,0.16); }
+.dtk-card.dtk-focus { background: rgba(255,255,255,0.2); box-shadow: inset 0 0 0 2px rgba(255,255,255,0.45); }
 .dtk-link.dtk-focus { text-decoration: underline; color: #fff !important; }
+.dtk-primary { background: #1a9fff !important; color: #fff !important; }
+.dtk-primary.gpfocus { background: #4fb4ff !important; box-shadow: 0 0 0 2px #fff; }
 `;
 
 function Centered({ children }: { children: ReactNode }) {
@@ -224,7 +226,7 @@ function Panel() {
   if (current) {
     return (
       <Centered>
-        <DialogButtonPrimary style={{ width: "100%" }} disabled={busy} onClick={() => decide(current, true)}>
+        <DialogButtonPrimary className="dtk-primary" style={{ width: "100%" }} disabled={busy} onClick={() => decide(current, true)}>
           Approve {current.client_name}
         </DialogButtonPrimary>
         <div style={{ color: MUTED, fontSize: "14px", marginTop: "-6px" }}>
@@ -295,27 +297,24 @@ function SettingsPage() {
     run(() => setPort(n), `Server moved to port ${n}`);
   };
 
-  return (
-    <div style={{ marginTop: "40px", height: "calc(100% - 40px)", overflowY: "auto" }}>
-      <DialogBody>
-        <DialogControlsSection>
-          <DialogControlsSectionHeader>Server</DialogControlsSectionHeader>
-          <ToggleField
-            label="Enable server"
-            description="Lets paired computers connect to this device."
-            checked={!!status?.enabled}
-            disabled={busy || !status}
-            onChange={(v) => run(() => setEnabled(v), v ? "Server enabled" : "Server disabled")}
-          />
-          <Field label="Status" focusable>
-            {status ? serverState(status) : "Loading…"}
-          </Field>
-          <Field label="Address" focusable>
-            {status ? `${status.ip}:${status.port}` : "…"}
-          </Field>
+  const server = (
+    <DialogBody>
+      <DialogControlsSection>
+        <ToggleField
+          label="Enable server"
+          description="Lets paired computers connect to this device."
+          checked={!!status?.enabled}
+          disabled={busy || !status}
+          onChange={(v) => run(() => setEnabled(v), v ? "Server enabled" : "Server disabled")}
+        />
+        <Field label="Status" focusable>
+          {status ? serverState(status) : "Loading…"}
+        </Field>
+        <Field label="Address" focusable>
+          {status ? `${status.ip}:${status.port}` : "…"}
+        </Field>
+        <Field label="Port" description="1024-65535. Changing it restarts the server." childrenContainerWidth="fixed">
           <TextField
-            label="Port"
-            description="1024-65535. Changing it restarts the server."
             mustBeNumeric
             rangeMin={1024}
             rangeMax={65535}
@@ -325,41 +324,59 @@ function SettingsPage() {
             onBlur={applyPort}
             onKeyDown={(e) => e.key === "Enter" && applyPort()}
           />
-          <Field label="Restart server" description="Stops and starts the server; connected computers reconnect.">
-            <DialogButton style={{ minWidth: "160px" }} disabled={busy} onClick={() => run(restartServer, "Server restarted")}>
-              Restart
+        </Field>
+        <Field label="Restart server" description="Stops and starts the server; connected computers reconnect.">
+          <DialogButton style={{ minWidth: "160px" }} disabled={busy} onClick={() => run(restartServer, "Server restarted")}>
+            Restart
+          </DialogButton>
+        </Field>
+      </DialogControlsSection>
+    </DialogBody>
+  );
+
+  const input = (
+    <DialogBody>
+      <DialogControlsSection>
+        <ToggleField
+          label="Allow remote input"
+          description={
+            status?.input && !status.input.available
+              ? status.input.reason ?? "Unavailable"
+              : "Lets paired computers send keyboard, mouse and controller input."
+          }
+          checked={!!status?.input?.enabled}
+          disabled={busy || !status?.input?.available}
+          onChange={setInput}
+        />
+      </DialogControlsSection>
+    </DialogBody>
+  );
+
+  const devices = (
+    <DialogBody>
+      <DialogControlsSection>
+        {clients.length === 0 && <Field label="None yet" focusable />}
+        {clients.map((c) => (
+          <Field key={c.fingerprint} label={c.name} description={`${KIND_LABELS[c.kind] ?? c.kind} · ${lastSeen(c.last_seen)}`}>
+            <DialogButton style={{ minWidth: "160px" }} disabled={busy} onClick={() => forget(c)}>
+              Forget
             </DialogButton>
           </Field>
-        </DialogControlsSection>
+        ))}
+      </DialogControlsSection>
+    </DialogBody>
+  );
 
-        <DialogControlsSection>
-          <DialogControlsSectionHeader>Remote input</DialogControlsSectionHeader>
-          <ToggleField
-            label="Allow remote input"
-            description={
-              status?.input && !status.input.available
-                ? status.input.reason ?? "Unavailable"
-                : "Lets paired computers send keyboard, mouse and controller input."
-            }
-            checked={!!status?.input?.enabled}
-            disabled={busy || !status?.input?.available}
-            onChange={setInput}
-          />
-        </DialogControlsSection>
-
-        <DialogControlsSection>
-          <DialogControlsSectionHeader>Paired clients</DialogControlsSectionHeader>
-          {clients.length === 0 && <Field label="None yet" focusable />}
-          {clients.map((c) => (
-            <Field key={c.fingerprint} label={c.name} description={`${KIND_LABELS[c.kind] ?? c.kind} · ${lastSeen(c.last_seen)}`}>
-              <DialogButton style={{ minWidth: "160px" }} disabled={busy} onClick={() => forget(c)}>
-                Forget
-              </DialogButton>
-            </Field>
-          ))}
-        </DialogControlsSection>
-      </DialogBody>
-    </div>
+  return (
+    <SidebarNavigation
+      title="Decky Toolkit"
+      showTitle
+      pages={[
+        { title: "Server", icon: <FaServer />, content: server, identifier: "server" },
+        { title: "Remote input", icon: <FaGamepad />, content: input, identifier: "input" },
+        { title: "Paired devices", icon: <FaLaptop />, content: devices, identifier: "devices" },
+      ]}
+    />
   );
 }
 
