@@ -306,7 +306,7 @@ def test_fs_read_write_mkdir_rename(tree, tmp_path):
     scope = (roots, keys)
     assert "vvvvvv" in keys and "chainedtogether" in keys
 
-    assert games.fs_read("~/.local/share/VVVVVV/saves/tsave.vvv", home=home) == b"s"
+    assert games.fs_read("~/.local/share/VVVVVV/saves/tsave.vvv", home=home) == (b"s", 1)
     with pytest.raises(SensitivePath):
         games.fs_read(f"{root}/config/loginusers.vdf", home=home)
     with pytest.raises(IsADirectoryError):
@@ -327,6 +327,14 @@ def test_fs_read_write_mkdir_rename(tree, tmp_path):
     assert games.fs_write(new, b"again", scope, home=home)["created"] is False
     assert Path(new).read_bytes() == b"again" and oct(Path(new).stat().st_mode & 0o777) == "0o600"
     assert not [p for p in os.listdir(runtime / "a/b") if p.endswith(".tmp")]
+    script = str(runtime / "a/run.sh")
+    games.fs_write(script, b"x", scope, home=home, mode=0o700)
+    assert oct(Path(script).stat().st_mode & 0o777) == "0o700"
+    games.fs_write(script, b"#!/bin/sh", scope, home=home, mode=games.parse_mode("0755"))
+    assert oct(Path(script).stat().st_mode & 0o777) == "0o755"
+    for bad in ("755x", "9", "", "07777777"):
+        with pytest.raises(ValueError):
+            games.parse_mode(bad)
 
     save = f"{home}/.local/share/VVVVVV/saves/tsave.vvv"
     pfx_file = f"{tree['pfx_user']}/AppData/Local/ChainedTogether/Saved/SaveGames/New.sav"
@@ -381,7 +389,7 @@ def test_fs_write_anywhere(tree, tmp_path):
         games.fs_write(f"{root}/config/loginusers.vdf", b"x", None, home=home)
     with pytest.raises(SensitivePath):
         games.fs_write(f"{root}/config/libraryfolders.vdf", b"x", None, home=home)
-    assert games.fs_read(str(target), max_bytes=1, truncate=True) == b"h"
+    assert games.fs_read(str(target), max_bytes=1, truncate=True) == (b"h", 2)
 
 
 def test_fs_write_routes(tree, tmp_path, monkeypatch):
