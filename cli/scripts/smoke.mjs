@@ -62,7 +62,7 @@ const setState = patch => writeFileSync(stateFile, JSON.stringify({ ...state(), 
 writeFileSync(stateFile, JSON.stringify({
   hosts: ['192.168.77.20', '127.0.0.1'], discoverable: ['192.168.77.20:8765'], health, downFor: 0,
   serverCert: readFileSync(path.join(certDir, 'server.crt'), 'utf8'), clientCert: readFileSync(path.join(certDir, 'client.crt'), 'utf8'),
-  journal: ['boot'], pairQueue: [], pairRequests: [], pairCancelled: [], requests: [], rpc: [], installs: [],
+  journal: ['boot'], pairQueue: [], pairRequests: [], pairCancelled: [], requests: [], rpc: [], installs: [], reloads: [],
   plugins: [{ dir: 'my-plugin', name: 'My Plugin', version: '1.0.0', flags: [] }], installMeta: { name: 'My Plugin', version: '1.2.3' },
   tools: [
     { name: 'decky_status', description: 'Loader status', inputSchema: { type: 'object', properties: {} } },
@@ -72,10 +72,11 @@ writeFileSync(stateFile, JSON.stringify({
 }));
 const env = { ...process.env, DECKY_TOOLKIT_CONFIG_DIR: configDir, FAKE_DEVICE: fakeDir };
 
-/** Runs the CLI to completion; `onStdout` may write to stdin or signal the child. */
-function cli(args, { input, onStdout, timeoutMs = 20000 } = {}) {
+/** Runs the CLI to completion; `onSpawn` and `onStdout` may write to stdin or signal the child. */
+function cli(args, { input, onSpawn, onStdout, timeoutMs = 20000 } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [harness, ...args], { cwd: scratch, env, stdio: ['pipe', 'pipe', 'pipe'] });
+    onSpawn?.(child);
     let stdout = '', stderr = '';
     const t = setTimeout(() => { child.kill('SIGKILL'); reject(new Error(`${args.join(' ')} timed out\nstdout: ${stdout}\nstderr: ${stderr}`)); }, timeoutMs);
     child.stdout.on('data', d => { stdout += d; onStdout?.(stdout, child); });
@@ -218,39 +219,28 @@ writeFileSync(path.join(plugin, 'src', 'index.tsx'), 'not shipped\n');
 
 /** Drives `mcp` over stdio, sending each message once the previous request was answered. */
 async function mcp(messages) {
-  const replies = new Map();
-  const lines = [];
   const queue = [...messages];
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [harness, 'mcp'], { cwd: scratch, env, stdio: ['pipe', 'pipe', 'pipe'] });
-    let stdout = '', stderr = '', buf = '';
-    const t = setTimeout(() => { child.kill('SIGKILL'); reject(new Error(`mcp timed out\nstdout: ${stdout}\nstderr: ${stderr}`)); }, 60000);
-    const next = () => {
-      while (queue.length) {
-        const m = queue.shift();
-        child.stdin.write(typeof m === 'string' ? m + '\n' : JSON.stringify(m) + '\n');
-        if (typeof m === 'string' || 'id' in m) return;
-      }
-      child.stdin.end();
-    };
-    child.stdout.on('data', d => {
-      stdout += d;
-      buf += d;
-      let nl;
-      while ((nl = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, nl);
-        buf = buf.slice(nl + 1);
-        lines.push(line);
-        let msg;
-        try { msg = JSON.parse(line); } catch { msg = undefined; }
-        if (msg) replies.set(msg.id, msg);
-        next();
-      }
-    });
-    child.stderr.on('data', d => { stderr += d; });
-    child.on('close', code => { clearTimeout(t); resolve({ code, stdout, stderr, replies, lines, trailing: buf }); });
-    next();
+  const next = child => {
+    while (queue.length) {
+      const m = queue.shift();
+      child.stdin.write(typeof m === 'string' ? m + '\n' : JSON.stringify(m) + '\n');
+      if (typeof m === 'string' || 'id' in m) return;
+    }
+    child.stdin.end();
+  };
+  let answered = 0;
+  const r = await cli(['mcp'], {
+    timeoutMs: 60000,
+    onSpawn: next,
+    onStdout: (stdout, child) => { for (const n = stdout.split('\n').length - 1; answered < n; answered++) next(child); },
   });
+  const lines = r.stdout.split('\n');
+  const trailing = lines.pop();
+  const replies = new Map();
+  for (const line of lines) {
+    try { const msg = JSON.parse(line); replies.set(msg.id, msg); } catch { /* checked by the caller */ }
+  }
+  return { ...r, replies, lines, trailing };
 }
 
 await check('mcp over stdio', async () => {
@@ -331,8 +321,17 @@ await check('deploy', async () => {
   assert.equal(inst[0].restart, 'plugin');
   assert.ok(inst[0].names.includes('my-plugin/dist/index.js') && inst[0].names.includes('my-plugin/main.py'), inst[0].names.join());
   assert.ok(!inst[0].names.some(n => n.includes('/src/')), 'src/ stays behind');
-  assert.match(r.stdout, /Deployed My Plugin 1\.2\.3 to 192\.168\.77\.20/);
-  assert.match(r.stdout, /Decky Loader reloaded My Plugin\n/);
+  assert.match(r.stdout, /Deployed My Plugin 1\.2\.3 to 192\.168\.77\.20 as my-plugin .*reload confirmed/);
+  assert.match(r.stdout, /Reload confirmed: loader imported My Plugin v1\.2\.3 /);
+  // A debug-flagged plugin is left to the file watcher; the fake's never fires, so the deploy asks for a reload after 4 s.
+  writeFileSync(path.join(plugin, 'plugin.json'), JSON.stringify({ name: 'My Plugin', flags: ['debug'] }));
+  const reloads = state().reloads.length;
+  const w = await cli(['deploy', plugin]);
+  assert.equal(w.code, 0, w.stderr);
+  assert.equal(state().installs.at(-1).restart, 'none');
+  assert.deepEqual(state().reloads.slice(reloads), ['my-plugin']);
+  assert.match(w.stdout, /waiting for the loader's file watcher/);
+  assert.match(w.stdout, /asked Decky to reload it\nReload confirmed: loader imported My Plugin v1\.2\.3/);
   const fresh = path.join(scratch, 'fresh-plugin');
   mkdirSync(path.join(fresh, 'dist'), { recursive: true });
   writeFileSync(path.join(fresh, 'plugin.json'), JSON.stringify({ name: 'Fresh' }));
@@ -342,7 +341,7 @@ await check('deploy', async () => {
   assert.equal(n.code, 0, n.stderr);
   const last = state().installs.at(-1);
   assert.deepEqual([last.dir, last.restart], ['fresh-plugin', 'loader']);
-  assert.match(n.stdout, /Waiting for the loader to restart/);
+  assert.match(n.stdout, /this first install restarts the loader\n.*\nInstalled Fresh 0\.1\.0 .*\nWaiting for the loader to restart\nDevice back: decky-toolkit 0\.2\.1\n/s);
   const missing = await cli(['deploy', path.join(scratch, 'nowhere')]);
   assert.equal(missing.code, 1);
   assert.match(missing.stderr, /no readable plugin\.json/);

@@ -3,17 +3,15 @@ import { isIPv6 } from 'net';
 import { hostname } from 'os';
 import * as path from 'path';
 import * as readline from 'readline';
-import { parseArgs } from 'util';
-import type { RestartMode } from '@decky-toolkit/client/api';
+import { ParseArgsConfig, parseArgs } from 'util';
 import { DeckyClient } from '@decky-toolkit/client/client';
 import { DEFAULT_PORT, DiscoveredDevice, scanNetwork } from '@decky-toolkit/client/discovery';
 import * as identityFile from '@decky-toolkit/client/identity';
-import { requestApproval } from '@decky-toolkit/client/pairing';
-import { RESTART_MODES, StatusReport, acceptsPairing, deploy, deviceStatus, explain, pairedClient } from './device';
+import { CLAUDE_MCP_ADD as MCP_ADD } from '@decky-toolkit/client/mcpConfig';
+import { PairOutcome, requestApproval } from '@decky-toolkit/client/pairing';
+import { InvalidOption, StatusReport, deploy, deviceStatus, explain, onDevice, pairedClient, parseRestart } from './device';
 import { McpServer } from './mcp';
 import { VERSION } from './version';
-
-const MCP_ADD = 'claude mcp add decky -- npx -y decky-toolkit mcp';
 
 const HELP = `decky-toolkit ${VERSION}: pair with a Steam Deck running the Decky Toolkit plugin and use it from the shell or a coding agent.
 
@@ -34,31 +32,12 @@ Options:
   -v, --version                        Show the version
 
 Add it to Claude Code:
-  ${MCP_ADD}
-`;
-
-const OPTIONS = {
-  help: { type: 'boolean', short: 'h' },
-  version: { type: 'boolean', short: 'v' },
-  json: { type: 'boolean' },
-  name: { type: 'string' },
-  restart: { type: 'string' },
-  out: { type: 'string', short: 'o' },
-} as const;
-
-const COMMANDS: Record<string, { options: string[]; maxArgs: number }> = {
-  pair: { options: ['name'], maxArgs: 1 },
-  status: { options: ['json'], maxArgs: 0 },
-  mcp: { options: [], maxArgs: 0 },
-  deploy: { options: ['restart'], maxArgs: 1 },
-  call: { options: ['out'], maxArgs: 2 },
-  forget: { options: [], maxArgs: 0 },
-};
+  ${MCP_ADD}`;
 
 class UsageError extends Error {}
 
-const out = (s: string) => process.stdout.write(s.endsWith('\n') ? s : s + '\n');
-const err = (s: string) => process.stderr.write(s.endsWith('\n') ? s : s + '\n');
+const out = (line: string) => process.stdout.write(line + '\n');
+const err = (line: string) => process.stderr.write(line + '\n');
 
 export function parseHostPort(s: string): { host: string; port: number } {
   const m = /^\[([^\]]+)\](?::(\d+))?$/.exec(s) ?? /^([^:\s]+)(?::(\d+))?$/.exec(s);
@@ -112,6 +91,13 @@ async function pickDevice(signal: AbortSignal): Promise<DiscoveredDevice | undef
   return devices[n - 1];
 }
 
+const PAIR_FAILED: Record<Extract<PairOutcome, string>, string> = {
+  cancelled: 'Cancelled; the request was withdrawn.',
+  denied: 'The request was denied on the device.',
+  unsupported: 'The device runs an older Decky Toolkit without this kind of pairing; update it.',
+  mismatch: 'The code the device showed does not match this request; something on the network altered it. Not paired.',
+};
+
 async function pair(target: string | undefined, clientName: string): Promise<number> {
   return cancellable(async signal => {
     let address: { host: string; port: number };
@@ -142,8 +128,7 @@ async function pair(target: string | undefined, clientName: string): Promise<num
     const where = `${name} (${address.host}:${address.port})`;
     const existing = await identityFile.read();
     if (existing && identityFile.sameDevice(existing.device, address)) {
-      const ok = await acceptsPairing(new DeckyClient(address, identityFile.toIdentity(existing))).catch(() => false);
-      if (ok) {
+      if (await new DeckyClient(address, identityFile.toIdentity(existing)).acceptsIdentity() === 'accepted') {
         out(`Already paired with ${where}.`);
         return 0;
       }
@@ -162,10 +147,7 @@ async function pair(target: string | undefined, clientName: string): Promise<num
         lost = true;
       },
     });
-    if (outcome === 'cancelled') { err('Cancelled; the request was withdrawn.'); return 1; }
-    if (outcome === 'denied') { err('The request was denied on the device.'); return 1; }
-    if (outcome === 'unsupported') { err('The device runs an older Decky Toolkit without this kind of pairing; update it.'); return 1; }
-    if (outcome === 'mismatch') { err('The code the device showed does not match this request; something on the network altered it. Not paired.'); return 1; }
+    if (typeof outcome === 'string') { err(PAIR_FAILED[outcome]); return 1; }
     if ('error' in outcome) { err(`Pairing failed: ${outcome.error}`); return 1; }
     await identityFile.write({
       version: 1,
@@ -201,14 +183,12 @@ async function call(tool: string, rawArgs: string | undefined, outFile: string |
     }
     if (!args || typeof args !== 'object' || Array.isArray(args)) throw new UsageError('json-args must be a JSON object');
   }
-  const { client, file } = await pairedClient();
-  let result;
-  try {
-    result = await client.callTool(tool, args, 300000);
-  } catch (e) {
-    err(`${tool}: ${explain(e, file.device)}`);
+  const r = await onDevice(pairedClient, p => p.client.callTool(tool, args, 300000));
+  if ('error' in r) {
+    err(`${tool}: ${r.error}`);
     return 1;
   }
+  const result = r.value;
   const images = result.content.filter(c => c.type === 'image') as { data: string; mimeType: string }[];
   const write = result.isError ? err : out;
   for (const c of result.content) if (c.type === 'text') write(String((c as { text: unknown }).text));
@@ -236,68 +216,76 @@ async function forget(): Promise<number> {
   return 0;
 }
 
-async function runCommand(command: string, positionals: string[], values: Record<string, string | boolean | undefined>): Promise<number> {
-  switch (command) {
-    case 'pair':
-      return pair(positionals[0], typeof values.name === 'string' && values.name.trim() ? values.name.trim() : `CLI on ${hostname()}`);
-    case 'status': {
-      const s = await deviceStatus();
-      if (values.json) out(JSON.stringify(s, null, 2));
-      else printStatus(s);
-      return s.paired ? 0 : 1;
-    }
-    case 'mcp': {
-      // stdout carries only JSON-RPC; anything a dependency prints goes to stderr.
-      console.log = console.info = console.debug = console.error;
-      await new McpServer(s => process.stderr.write(s)).serve(process.stdin, process.stdout);
-      return 0;
-    }
-    case 'deploy': {
-      const restart = values.restart as string | undefined;
-      if (restart !== undefined && !RESTART_MODES.includes(restart as RestartMode)) throw new UsageError(`--restart must be one of ${RESTART_MODES.join(', ')}`);
-      try {
-        const r = await deploy(positionals[0] ?? '.', restart as RestartMode | undefined, s => process.stdout.write(s));
-        out(`Deployed ${r.plugin.name}${r.listed.version ? ` ${r.listed.version}` : ''} to ${r.device.host} in ${(r.totalMs / 1000).toFixed(1)} s `
-          + `(upload ${r.uploadMs} ms, ready ${r.readyMs} ms); the device answers and lists ${r.plugin.dir}.`);
-        return r.reloaded === false ? 1 : 0;
-      } catch (e) {
-        err(`Deploy failed: ${explain(e)}`);
-        return 1;
-      }
-    }
-    case 'call':
-      if (!positionals[0]) throw new UsageError('call needs a tool name');
-      return call(positionals[0], positionals[1], values.out as string | undefined);
-    case 'forget':
-      return forget();
+/** Strict per command: options it does not take and extra arguments are usage errors. */
+function parse<O extends NonNullable<ParseArgsConfig['options']>>(argv: string[], options: O, maxArgs: number) {
+  let parsed;
+  try {
+    parsed = parseArgs({ args: argv, options, allowPositionals: true, strict: true });
+  } catch (e) {
+    throw new UsageError((e as Error).message);
   }
-  throw new UsageError(`unknown command: ${command}`);
+  if (parsed.positionals.length > maxArgs) throw new UsageError('too many arguments');
+  return parsed;
 }
 
-export async function main(argv: string[]): Promise<number> {
-  try {
-    let parsed;
+const COMMANDS: Record<string, (argv: string[]) => Promise<number>> = {
+  pair: argv => {
+    const { values, positionals } = parse(argv, { name: { type: 'string' } }, 1);
+    return pair(positionals[0], values.name?.trim() || `CLI on ${hostname()}`);
+  },
+  status: async argv => {
+    const { values } = parse(argv, { json: { type: 'boolean' } }, 0);
+    const s = await deviceStatus();
+    if (values.json) out(JSON.stringify(s, null, 2));
+    else printStatus(s);
+    return s.paired ? 0 : 1;
+  },
+  mcp: async argv => {
+    parse(argv, {}, 0);
+    // stdout carries only JSON-RPC; anything a dependency prints goes to stderr.
+    console.log = console.info = console.debug = console.error;
+    await new McpServer(err).serve(process.stdin, process.stdout);
+    return 0;
+  },
+  deploy: async argv => {
+    const { values, positionals } = parse(argv, { restart: { type: 'string' } }, 1);
+    const restart = parseRestart(values.restart);
     try {
-      parsed = parseArgs({ args: argv, options: OPTIONS, allowPositionals: true, strict: true });
+      const r = await deploy(positionals[0] ?? '.', restart, out);
+      const how = r.reloaded === null ? '' : r.reloaded ? ', reload confirmed' : ', reload NOT confirmed';
+      out(`Deployed ${r.plugin.name}${r.plugin.version ? ` ${r.plugin.version}` : ''} to ${r.device.host} as ${r.plugin.dir} in ${(r.totalMs / 1000).toFixed(1)} s `
+        + `(upload ${r.uploadMs} ms, restart ${r.restarted}${how}).`);
+      return r.reloaded === false ? 1 : 0;
     } catch (e) {
-      throw new UsageError((e as Error).message);
+      err(`Deploy failed: ${explain(e)}`);
+      return 1;
     }
-    const { values, positionals } = parsed;
-    if (values.version) { out(VERSION); return 0; }
-    const [command, ...rest] = positionals;
-    if (values.help || !command) {
-      (command || values.help ? out : err)(HELP);
-      return values.help ? 0 : 2;
+  },
+  call: argv => {
+    const { values, positionals } = parse(argv, { out: { type: 'string', short: 'o' } }, 2);
+    if (!positionals[0]) throw new UsageError('call needs a tool name');
+    return call(positionals[0], positionals[1], values.out);
+  },
+  forget: argv => {
+    parse(argv, {}, 0);
+    return forget();
+  },
+};
+
+export async function main(argv: string[]): Promise<number> {
+  const [command, ...rest] = argv;
+  try {
+    if (command === '-v' || command === '--version') { out(VERSION); return 0; }
+    if (!command || command === '-h' || command === '--help' || rest.includes('-h') || rest.includes('--help')) {
+      (command ? out : err)(HELP);
+      return command ? 0 : 2;
     }
-    const spec = COMMANDS[command];
-    if (!spec) throw new UsageError(`unknown command: ${command}`);
-    const extra = Object.keys(values).filter(k => values[k as keyof typeof values] !== undefined && !spec.options.includes(k));
-    if (extra.length) throw new UsageError(`${command} does not take --${extra[0]}`);
-    if (rest.length > spec.maxArgs) throw new UsageError(`too many arguments for ${command}`);
-    return await runCommand(command, rest, values);
+    const run = Object.hasOwn(COMMANDS, command) ? COMMANDS[command] : undefined;
+    if (!run) throw new UsageError(`unknown command: ${command}`);
+    return await run(rest);
   } catch (e) {
-    if (e instanceof UsageError) {
-      err(`decky-toolkit: ${e.message}\nRun \`decky-toolkit --help\` for usage.`);
+    if (e instanceof UsageError || e instanceof InvalidOption) {
+      err(`decky-toolkit: ${command ? `${command}: ` : ''}${e.message}\nRun \`decky-toolkit --help\` for usage.`);
       return 2;
     }
     err(`decky-toolkit: ${explain(e)}`);

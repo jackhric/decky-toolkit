@@ -88,6 +88,14 @@ async function deviceFetch(url, init = {}) {
     if (restart === 'plugin') s.journal.push(`[loader][INFO]: Loaded ${s.installMeta.name} (v${s.installMeta.version}) #${s.installs.length}`);
     return done(json({ installed: { dir, name: s.installMeta.name, version: s.installMeta.version }, restarted: restart }));
   }
+  const reload = /^\/plugins\/([^/]+)\/reload$/.exec(u.pathname);
+  if (reload && init.method === 'POST') {
+    const dir = decodeURIComponent(reload[1]);
+    const p = s.plugins.find(x => x.dir === dir);
+    s.reloads.push(dir);
+    s.journal.push(`[loader][INFO]: Loaded ${p?.name ?? dir} (v${p?.version}) reload`);
+    return done(json({ reloaded: dir }));
+  }
   if (u.pathname === '/logs/tail' && u.searchParams.get('source') === 'loader') return done(json({ lines: s.journal.slice(-Number(u.searchParams.get('tail'))) }));
   if (u.pathname === '/mcp' && init.method === 'POST') {
     const { id, method, params } = JSON.parse(init.body);
