@@ -275,7 +275,7 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     if (!(await c.client())) return;
     const url = await c.proxy.mcpUrl();
     await vscode.env.clipboard.writeText(url);
-    void vscode.window.showInformationMessage(`Decky Toolkit: copied ${url}. It works while VS Code is open and reaches the connected device.`);
+    void vscode.window.showInformationMessage(`Decky Toolkit: copied ${url}. It works only while VS Code is open; "Write MCP config" is preferred, it runs the decky-toolkit CLI with this machine's pairing and needs no open editor.`);
   });
   // MCP clients reach the device only through this window's proxy, so it runs from the start.
   void c.proxy.start().then(() => refreshMcpConfig(c), () => undefined);
@@ -396,6 +396,9 @@ async function evaluate(c: Connection, out: vscode.OutputChannel, ctx: vscode.Ex
   }
 }
 
+// The CLI reads the same per-machine identity file, so the entry needs no URL or headers and survives editor restarts.
+const MCP_ENTRY = { command: 'npx', args: ['-y', 'decky-toolkit', 'mcp'] };
+
 type McpConfig = { mcpServers?: Record<string, unknown>; [k: string]: unknown };
 
 function mcpConfigUri(): vscode.Uri | undefined {
@@ -428,7 +431,7 @@ async function writeMcpConfig(c: Connection): Promise<void> {
   const uri = mcpConfigUri();
   if (!uri) throw new Error('open a workspace folder first.');
   if (!(await c.client())) return;
-  await writeMcpEntry(uri, (await readMcpConfig(uri)) ?? {}, { type: 'http', url: await c.proxy.mcpUrl() });
+  await writeMcpEntry(uri, (await readMcpConfig(uri)) ?? {}, MCP_ENTRY);
   void vscode.window.showInformationMessage('Decky Toolkit: wrote mcpServers.decky to .mcp.json.');
 }
 

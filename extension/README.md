@@ -151,7 +151,7 @@ you expand or collapse.
   The status bar briefly shows the page the Steam UI ended up on. A device whose plugin predates
   navigation answers 404; the commands then say *update Decky Toolkit on the device*.
 - **MCP**
-  - **Write MCP config for this workspace**, **Copy MCP URL** (a local
+  - **Write MCP config for this workspace** (runs the `decky-toolkit` CLI), **Copy MCP URL** (a local
     `http://127.0.0.1:<port>/<secret>/mcp` that stays the same across restarts; the port is
     `decky-toolkit.mcpPort`).
 
@@ -500,8 +500,8 @@ All of these are also in the command palette under the `Decky:` category.
 | Decky: Show plugin logs | Streams a plugin's log from `~/homebrew/logs/<dir>/` |
 | Decky: Evaluate JS in Steam UI | Runs an expression with the `cef_evaluate` tool; result in an info message or the "Decky Toolkit Console" output |
 | Decky: Toast on device | Shows a Decky toast |
-| Decky: Write MCP config for this workspace | Adds `mcpServers.decky` to `.mcp.json` in the first workspace folder, pointing at the local MCP URL |
-| Decky: Copy MCP URL | Copies the local MCP URL (`http://127.0.0.1:<port>/<secret>/mcp`) |
+| Decky: Write MCP config for this workspace | Adds `mcpServers.decky` to `.mcp.json` in the first workspace folder: `npx -y decky-toolkit mcp`, the CLI, which uses this machine's pairing |
+| Decky: Copy MCP URL | Copies the local MCP URL (`http://127.0.0.1:<port>/<secret>/mcp`), which works while VS Code is open; the MCP config above is preferred |
 | Decky: Refresh / Refresh plugins | Re-reads `/health`, checks which devices answer, reloads the plugin list |
 
 ## Settings
@@ -531,8 +531,8 @@ Windows), one device per machine, and shared with the upcoming CLI.
   preview only know the proxy URL, and their CSP allows only that origin (plus its `ws:` form for
   the screen panel) and `blob:` (images, and the screen panel's inline AudioWorklet module, which
   Chromium checks against `script-src`). MCP clients use the same proxy under
-  `/<secret>/mcp`; **Write MCP config** puts that URL into `.mcp.json`, and the extension
-  refreshes the port there when it changes.
+  `/<secret>/mcp` (**Copy MCP URL**); the extension refreshes the port in a `.mcp.json` entry that
+  holds that URL. **Write MCP config** writes the `decky-toolkit` CLI instead, which needs no open editor.
 - **Theme.** The screen panel and preview use only VS Code theme colours (`--vscode-*` variables);
   only the video area itself is black.
 - **Deploy** zips the staged files (see [Deploy](#deploy)) under a single `<dirname>/` folder with

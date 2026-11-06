@@ -1389,7 +1389,9 @@ await check('Screen and MCP leaves: snapshot, MCP URL', async () => {
   assert.ok(Number(new URL(calls.clipboard.at(-1)).port) >= 8766, 'decky-toolkit.mcpPort or the next free port');
   const mcpUrl = calls.clipboard.at(-1);
 
-  // Write MCP config: the proxy URL with no headers; other servers and stale fields of ours are replaced.
+  assert.match(lastMessage('info').m, /"Write MCP config" is preferred/);
+
+  // Write MCP config: the CLI over stdio (it reads the shared identity file), no URL or headers; other servers are kept.
   const mcpJson = 'file:///ws/.mcp.json';
   vscode.workspace.workspaceFolders = [{ uri: Uri.file('/ws'), name: 'ws', index: 0 }];
   try {
@@ -1397,7 +1399,7 @@ await check('Screen and MCP leaves: snapshot, MCP URL', async () => {
     await run('decky-toolkit.writeMcpConfig');
     const written = JSON.parse(Buffer.from(calls.written.at(-1).data).toString());
     assert.equal(calls.written.at(-1).uri, mcpJson);
-    assert.deepEqual(written.mcpServers, { other: { command: 'x' }, decky: { type: 'http', url: mcpUrl } });
+    assert.deepEqual(written.mcpServers, { other: { command: 'x' }, decky: { command: 'npx', args: ['-y', 'decky-toolkit', 'mcp'] } });
     assert.equal(lastMessage('info').m, 'Decky Toolkit: wrote mcpServers.decky to .mcp.json.');
 
     // Activation: an entry on another port with our prefix is moved to this window's port; anything else is left alone.
@@ -1415,7 +1417,7 @@ await check('Screen and MCP leaves: snapshot, MCP URL', async () => {
     files.delete(mcpJson);
     vscode.workspace.workspaceFolders = undefined;
   }
-  return `snapshot → ${dlg.defaultUri.path.split('/').pop()} (${w.data.length} B); MCP URL ${mcpUrl.replace(secret, '<secret>')}; .mcp.json written and re-pointed`;
+  return `snapshot → ${dlg.defaultUri.path.split('/').pop()} (${w.data.length} B); MCP URL ${mcpUrl.replace(secret, '<secret>')}; .mcp.json runs the CLI; old URL entries re-pointed`;
 });
 
 // The real media/screen.js in a minimal DOM: what the webview does with the extension's messages.
