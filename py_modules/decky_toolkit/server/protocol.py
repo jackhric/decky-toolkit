@@ -28,6 +28,14 @@ def _plugin_version() -> str:
 
 
 SERVER_INFO = {"name": "decky-toolkit", "version": _plugin_version()}
+# Also served by /health, so the CLI's stdio server passes on the same text.
+INSTRUCTIONS = (
+    "Decky Toolkit controls a SteamOS device running Decky Loader; tools are named <area>_<action>. Call ui_state "
+    "before navigating, sending input, launching anything or judging a screenshot: screenshots show pixels, not "
+    "state, and someone_at_device means leave the UI alone. Move through the Steam UI with input_key (arrows, "
+    "enter, esc) and check the ui field every input tool returns; ui_navigate opens pages and menus. logs_read and "
+    "logs_wait cover every log, device_run runs shell commands, plugin_reload reloads a plugin in place."
+)
 
 PARSE_ERROR = -32700
 INVALID_REQUEST = -32600
@@ -118,13 +126,7 @@ class McpServer:
             "protocolVersion": version,
             "capabilities": {"tools": {"listChanged": False}},
             "serverInfo": SERVER_INFO,
-            "instructions": (
-                "Decky Toolkit runs inside Decky Loader on a Steam Deck / Bazzite device. Tools are named "
-                "<area>_<action>. Check device_activity before moving the UI under a person. ui_state says where the "
-                "Steam UI is; logs_read and logs_wait cover the loader journal, plugin logs, the Steam UI console and "
-                "Proton logs; plugin_reload reloads a plugin in place; device_run runs shell commands; cef_evaluate "
-                "runs JS in the Steam UI; screen_capture shows the whole display."
-            ),
+            "instructions": INSTRUCTIONS,
         }
 
     async def _ping(self, _params: dict[str, Any]) -> dict[str, Any]:

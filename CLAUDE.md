@@ -348,6 +348,18 @@ See README.md for setup and docs/reference.md for the tool list and architecture
   took ~2.5 s (128 parallel, 1.2 s timeout). The dev box (10.0.0.30/24) does not see the Deck (10.0.70.18/24)
   automatically; that is accepted, it is added by address.
 
+## Keyboard navigation and dialogs (verified 2026-11-06, Steam client 1792618285)
+- libei keys drive the Steam UI without a controller: arrows move gamepad focus (the first press into an unfocused Quick
+  Access lands on its tab column), Enter selects and edits a text field, Esc goes back or closes a dialog/main menu,
+  Shift+Tab opens the main menu. In Quick Access Esc only returns to the tab column; close it with `ui_navigate`.
+  Ctrl+1/Ctrl+2 did nothing. After keyboard input Steam shows keyboard hints and opens no on-screen keyboard.
+- Steam dialogs (Decky's `showModal` too) render in the main window: `.ModalOverlayContent.active [role=dialog]` with
+  `.DialogHeader` and `.DialogFooter` buttons. SharedJSContext reaches that document through
+  `SteamUIStore.WindowStore.GamepadUIMainWindowInstance.m_BrowserWindow.document`. The on-screen keyboard state is
+  `GamepadUIMainWindowInstance.m_VirtualKeyboardManager.m_bIsVirtualKeyboardShowing.m_currentValue`.
+- The library home can show a game's footage full screen as its background (seen: Chained Together) while nothing runs;
+  `screen_capture` alone looks like a running game, hence the `ui_state` line in its result.
+
 ## Pairing
 The server is TLS-only (TLS 1.3, no setting to turn it off) and authenticates clients by certificate;
 there is no bearer token. `tls.py` mints the device's EC P-256 identity (self-signed, also the CA) under
@@ -422,9 +434,11 @@ SharedJSContext via the `cef_evaluate` tool, or use `plugin_call` (`plugin: "Dec
   durations end in `_ms`; `grep` substring, `match` regex. A settings tool reads without arguments and writes what it
   is given. Logs of every kind go through `logs_read`/`logs_wait` sources. No aliases for old names.
 - Agents on the device: use `device_run` (root only when needed), `logs_read` / `logs_wait`
-  and `ui_state` instead of ssh, sleeps and screenshots. The owner also uses the device by hand: call
-  `device_activity` before navigating, injecting input or launching anything, and leave the UI alone while
-  `someone_at_device` is true.
+  and `ui_state` instead of ssh, sleeps and screenshots. Call `ui_state` before navigating, injecting input,
+  launching anything or judging a screenshot (the library home background can look like a running game), and leave
+  the UI alone while `someone_at_device` is true. Agent guidance lives in one place, `server/protocol.py`
+  `INSTRUCTIONS` (also in `/health`, passed on by the CLI); keep it to a few sentences and put the rest in tool
+  descriptions and results.
 - Tools return str/dict (serialised to text) or a list of MCP content blocks. Raise `ValueError`
   for bad input; other exceptions become `isError` results with a traceback. Arguments are checked against
   the tool's schema before the call (unknown names are refused with the argument list), so every schema

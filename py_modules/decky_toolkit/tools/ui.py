@@ -6,14 +6,53 @@ from typing import Any
 
 from ..media.capture import CaptureUnavailable, ScreenCapturer
 from ..steam import cdp
-from ..steam.ui import ACTIONS, QUERY_TARGET, QUICK_ACCESS_TABS, UiInspector, UiNavigator
+from ..input.activity import InputActivity
+from ..steam.ui import ACTIONS, QUERY_TARGET, QUICK_ACCESS_TABS, UiInspector
 from . import ToolRegistry
 
 CAPTURE_SETTLE_SECONDS = 0.7
+AT_DEVICE_SECONDS = 60
 
 
-def register(reg: ToolRegistry, navigator: UiNavigator | None, capturer: ScreenCapturer | None) -> None:
-    nav = navigator or UiNavigator()
+class Orientation:
+    """Where the device is: the Steam UI state plus whether someone is using it by hand."""
+
+    def __init__(self, inspector: UiInspector, activity: InputActivity | None):
+        self.inspector, self.activity = inspector, activity
+
+    async def __call__(self) -> dict[str, Any]:
+        state = await self.inspector.snapshot()
+        last = self.activity.snapshot()["last"] if self.activity else None
+        state["someone_at_device"] = bool(last and last["seconds_ago"] <= AT_DEVICE_SECONDS)
+        return state
+
+    @staticmethod
+    def line(state: dict[str, Any]) -> str:
+        """One line for results that are easy to misread without it (screenshots)."""
+        if "error" in state:
+            return state["error"]
+        app = state.get("running_app")
+        parts = [f"route {state.get('current')}", f"menu {state.get('side_menu')}",
+                 f"game {app['name'] or app['appid']}" if app else "no game running"]
+        if state.get("dialog"):
+            parts.append(f"dialog {state['dialog'].get('title') or 'open'}")
+        if state.get("keyboard"):
+            parts.append("on-screen keyboard open")
+        if state.get("focus"):
+            parts.append(f"focus {state['focus']['text']!r}")
+        if state.get("someone_at_device"):
+            parts.append("someone is using the device")
+        return " · ".join(parts)
+
+    async def safe(self) -> dict[str, Any]:
+        try:
+            return await self()
+        except (cdp.CdpError, OSError, asyncio.TimeoutError, ValueError) as e:
+            return {"error": f"Steam UI state unavailable: {e}"}
+
+
+def register(reg: ToolRegistry, inspector: UiInspector, capturer: ScreenCapturer | None, orient: Orientation) -> None:
+    nav = inspector.nav
 
     @reg.add(
         "ui_routes",
@@ -27,20 +66,15 @@ def register(reg: ToolRegistry, navigator: UiNavigator | None, capturer: ScreenC
 
     @reg.add(
         "ui_state",
-        "Where the Steam UI is, in one small answer: {current (route), side_menu (none|main|quick_access), "
-        "quick_access_tab, active_plugin (Decky panel), running_app ({appid, name} of the game in front, or null), "
-        "focus ({text, target} of the gamepad-focused element, or null)}. Cheaper than ui_routes, ui_focus or a "
-        "screenshot when you only need to know where you are.",
+        "Call first, before navigating, sending input, launching anything or judging a screenshot: screenshots "
+        "show pixels, not state. Returns {current (route), side_menu (none|main|quick_access), quick_access_tab, "
+        "active_plugin (Decky panel), running_app ({appid, name} of the game in front, or null: then keys and "
+        "buttons go to the game), focus ({text, tag, target} of the focused element; tag input = a text field), "
+        "dialog ({title, text, buttons} of an open Steam dialog, or null), keyboard (on-screen keyboard showing), "
+        f"someone_at_device (physical input in the last {AT_DEVICE_SECONDS} s: leave the UI alone)}}.",
     )
     async def ui_state() -> dict[str, Any]:
-        state = await nav.state()
-        try:
-            f = await inspector.focus()
-        except (cdp.CdpError, OSError, asyncio.TimeoutError):
-            f = None
-        el = (f or {}).get("element")
-        state["focus"] = {"text": (el.get("text") or "")[:80], "target": f["target"]} if el else None
-        return state
+        return await orient()
 
     @reg.add(
         "ui_navigate",
@@ -70,7 +104,6 @@ def register(reg: ToolRegistry, navigator: UiNavigator | None, capturer: ScreenC
         return [{"type": "text", "text": json.dumps(result, indent=2)},
                 {"type": "image", "data": base64.b64encode(frame).decode(), "mimeType": "image/jpeg"}]
 
-    inspector = UiInspector(nav)
     element_doc = ("Elements are {tag, id, classes, text, label?, rect (CSS px in the tab), norm {x, y} (centre, 0..1 "
                    "across the display: pass to input_mouse x/y), px {x, y} (centre in display pixels), visible, focused "
                    "(Steam's gamepad focus class gpfocus, or document.activeElement)}.")

@@ -8,6 +8,8 @@ export interface Health {
   tools: number;
   /** Changes with any tool, description or schema; absent on older builds. */
   tools_hash?: string;
+  /** What agents should know first; the stdio MCP server passes it on. */
+  instructions?: string;
   /** Identification for network discovery; absent on older builds. */
   hostname?: string;
   device_id?: string | null;

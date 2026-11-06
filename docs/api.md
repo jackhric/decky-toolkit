@@ -32,7 +32,7 @@ Status key: **live** = implemented and deployed, **planned** = agreed design, no
 
 | Route | Auth | Status | Notes |
 | --- | --- | --- | --- |
-| `GET /health` | none | live | `{ok, name, version, api_version, tools, tools_hash, hostname, device_id, os}`. `tools_hash` (16 hex digits) changes whenever a tool, its description or its schema changes; the CLI's stdio MCP server compares it to send `notifications/tools/list_changed`. The last three identify the device to network discovery and hold nothing secret: `hostname` is the system hostname, `device_id` a 16-hex-digit SHA-256 of a namespace plus `/etc/machine-id` (stable per install, not reversible to the machine-id; `null` if unreadable), `os` the `PRETTY_NAME` from `/etc/os-release` (`null` if missing). Older builds omit them, and builds from before the rename report `name` `decky-mcp`. |
+| `GET /health` | none | live | `{ok, name, version, api_version, tools, tools_hash, instructions, hostname, device_id, os}`. `tools_hash` (16 hex digits) changes whenever a tool, its description or its schema changes; the CLI's stdio MCP server compares it to send `notifications/tools/list_changed`. `instructions` is the MCP server's `initialize` instructions, which the CLI's stdio server passes on. The last three identify the device to network discovery and hold nothing secret: `hostname` is the system hostname, `device_id` a 16-hex-digit SHA-256 of a namespace plus `/etc/machine-id` (stable per install, not reversible to the machine-id; `null` if unreadable), `os` the `PRETTY_NAME` from `/etc/os-release` (`null` if missing). Older builds omit them, and builds from before the rename report `name` `decky-mcp`. |
 | mDNS `_decky-toolkit._tcp` | none | live | While the server listens on a non-loopback address, the plugin advertises it through the device's avahi-daemon (`avahi-publish`): instance name = short host name, SRV port = the server port, TXT `api=<api_version>`, `version=<version>`, `id=<device_id>`. Nothing is advertised if `avahi-publish` is missing. |
 | `GET /` | none | live | one line of plain text saying the server runs and to connect with the VS Code extension |
 
@@ -365,9 +365,12 @@ of another source is refused). `logs_wait` (`pattern`, `source` `loader`/`plugin
 `PUT /stream/settings`). `input_settings` (`enabled`), `input_key` (`keys` combo string such as `"ctrl+shift+a"` or a
 list of combos, `hold_ms`), `input_text` (`text`, `delay_ms`), `input_mouse` (`action` move/click/double/down/up/scroll,
 `x`/`y` 0..1 or pixels with `pixels: true`, `dx`/`dy`, `button`, `amount`), `input_gamepad` (`buttons`, `axes`, `hat`,
-`hold_ms`, `sequence`, `pad`: a virtual pad id, default the implicit `auto` pad). Every input tool takes
-`capture: true` to append a fresh screen frame, and refuses with an error while input is disabled. `controller_list`,
-`controller_add` (`name`), `controller_remove` (`id`): as `/controllers`. `ui_state`, `ui_routes`, `ui_navigate`
+`hold_ms`, `sequence`, `pad`: a virtual pad id, default the implicit `auto` pad). Every input tool returns
+`{done, ui}` (`ui`: `ui_state` 0.1 s after the input), takes `capture: true` to append a fresh screen frame, and refuses
+with an error while input is disabled. `controller_list`,
+`controller_add` (`name`), `controller_remove` (`id`): as `/controllers`. `ui_state`: `{current, side_menu,
+quick_access_tab, active_plugin, running_app, focus {text, tag, target}, dialog {title, text, buttons}, keyboard,
+someone_at_device}`; `dialog` is the open Steam dialog, `keyboard` whether the on-screen keyboard shows. `ui_routes`, `ui_navigate`
 (`path` or `action` plus `tab`/`plugin`/`appid`, and `capture: true` for a frame 0.7 s later): as `/ui/...`.
 `ui_query`, `ui_focus`, `ui_wait`: see [UI query](#ui-query). `plugin_methods`, `plugin_call`, `plugin_frontend_check`:
 see [Plugin calls](#plugin-calls). `loader_restart` and `plugin_install` with `restart: "loader"` need
@@ -382,7 +385,8 @@ entry, `userdata/<account>/<appid>/...` or the plugin runtime dir). `screen_reco
 required): see Recordings. `perf_overlay` (`level` 0-4, `show_over_steam`): Steam's MangoHud overlay level as on the
 Quick Access performance tab (`SteamClient.System.Perf.UpdateSettings`); gamescope does not paint this external overlay
 into its PipeWire stream, so captures and recordings never show it. `device_run`: as `POST /exec`. `device_info`,
-`device_activity`, `toolkit_stacks`, `ui_toast`, `cef_targets`, `cef_evaluate`, `cef_screenshot`, `screen_capture`.
+`device_activity`, `toolkit_stacks`, `ui_toast`, `cef_targets`, `cef_evaluate`, `cef_screenshot`. `screen_capture`: the
+frame plus a text line with the `ui_state` summary (route, menu, game, dialog, focus).
 
 ## Events (backend → Decky frontend)
 
