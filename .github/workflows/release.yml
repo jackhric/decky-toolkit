@@ -158,4 +158,5 @@ jobs:
         with:
           node-version: 26
       # Trusted publishing needs npm 11.5.1 or newer; pinned rather than whatever Node bundles.
-      - run: npx --yes npm@12.2.2 publish release/*.tgz
+      # A bare `release/x.tgz` is read as the GitHub shorthand `owner/repo`; the `./` makes it a file.
+      - run: npx --yes npm@12.2.2 publish ./release/*.tgz
