@@ -1,4 +1,8 @@
-import { deflateRawSync } from 'zlib';
+import { promisify } from 'util';
+import { deflateRaw } from 'zlib';
+
+const deflate = promisify(deflateRaw);
+const DEFLATE_CONCURRENCY = 4;
 
 export interface ZipEntry {
   /** Forward-slash path inside the archive; directories end with `/`. */
@@ -32,26 +36,34 @@ function dosDateTime(d: Date): { time: number; date: number } {
   };
 }
 
+/** Deflated when that is smaller; zlib runs on the thread pool, a few entries at a time. */
+async function compress(entries: ZipEntry[]): Promise<{ raw: Uint8Array; body: Uint8Array; method: number }[]> {
+  const out: { raw: Uint8Array; body: Uint8Array; method: number }[] = new Array(entries.length);
+  let next = 0;
+  const worker = async () => {
+    for (let i = next++; i < entries.length; i = next++) {
+      const e = entries[i];
+      const raw = e.name.endsWith('/') ? new Uint8Array(0) : e.data ?? new Uint8Array(0);
+      const deflated = raw.length > 64 ? await deflate(raw) : undefined;
+      out[i] = deflated && deflated.length < raw.length ? { raw, body: deflated, method: 8 } : { raw, body: raw, method: 0 };
+    }
+  };
+  await Promise.all(Array.from({ length: DEFLATE_CONCURRENCY }, worker));
+  return out;
+}
+
 /** Minimal ZIP writer (stored or deflate, no ZIP64), enough for plugin bundles. */
-export function createZip(entries: ZipEntry[]): Buffer {
+export async function createZip(entries: ZipEntry[]): Promise<Buffer> {
   const locals: Buffer[] = [];
   const centrals: Buffer[] = [];
   let offset = 0;
+  const bodies = await compress(entries);
 
-  for (const e of entries) {
+  for (const [i, e] of entries.entries()) {
     const name = Buffer.from(e.name, 'utf8');
     const isDir = e.name.endsWith('/');
-    const raw = isDir ? new Uint8Array(0) : e.data ?? new Uint8Array(0);
+    const { raw, body, method } = bodies[i];
     const crc = crc32(raw);
-    let method = 0;
-    let body: Uint8Array = raw;
-    if (raw.length > 64) {
-      const deflated = deflateRawSync(raw, { level: 9 });
-      if (deflated.length < raw.length) {
-        method = 8;
-        body = deflated;
-      }
-    }
     const { time, date } = dosDateTime(e.mtime ?? new Date());
     // Bit 11: names are UTF-8.
     const flags = 0x0800;

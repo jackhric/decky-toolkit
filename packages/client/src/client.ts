@@ -157,6 +157,23 @@ export class DeckyClient {
   }
 
   /**
+   * Whether the device still accepts this client's pairing. `/health` needs none, so this asks a paired route
+   * (`/stream/stats` 404s on devices without capture, which still counts). Only a 401 or a device that is not the
+   * one we paired with is `rejected`; a plain-HTTP device is `unsupported`; any other failure says nothing either way.
+   */
+  async acceptsIdentity(): Promise<'accepted' | 'rejected' | 'unsupported' | { unknown: unknown }> {
+    try {
+      const res = await this.fetch('/stream/stats', { timeoutMs: 5000 });
+      await res.text();
+      return res.status === 401 ? 'rejected' : 'accepted';
+    } catch (e) {
+      if (isRejection(e)) return 'rejected';
+      if (isPlainHttpDevice(e)) return 'unsupported';
+      return { unknown: e };
+    }
+  }
+
+  /**
    * `unsupported` when the device predates this kind of pairing. `serverCert` is the certificate the
    * device presented while answering, which the pairing code is derived from.
    */
@@ -236,14 +253,21 @@ export class DeckyClient {
     return new Uint8Array(await res.arrayBuffer());
   }
 
-  async rpc<T>(method: string, params?: Record<string, unknown>, timeoutMs = 30000): Promise<T> {
-    const id = ++this.rpcId;
-    const reply = await this.json<JsonRpcResponse<T>>('/mcp', {
+  /** The device's JSON-RPC reply body as received, so a relay can pass it on without re-encoding it. */
+  async rpcText(method: string, params: Record<string, unknown> | undefined, timeoutMs: number, id: string | number | null): Promise<string> {
+    const res = await this.fetch('/mcp', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
       body: JSON.stringify({ jsonrpc: '2.0', id, method, params }),
       timeoutMs,
     });
+    const text = await res.text();
+    if (!res.ok) throw new HttpError(res.status, text, '/mcp');
+    return text;
+  }
+
+  async rpc<T>(method: string, params?: Record<string, unknown>, timeoutMs = 30000): Promise<T> {
+    const reply = JSON.parse(await this.rpcText(method, params, timeoutMs, ++this.rpcId)) as JsonRpcResponse<T>;
     if (reply.error) throw new Error(`${method}: ${reply.error.message}`);
     return reply.result as T;
   }
@@ -277,7 +301,8 @@ export class DeckyClient {
 
   installPlugin(zip: Uint8Array, filename: string, restart: RestartMode = 'loader'): Promise<InstallResult> {
     const form = new FormData();
-    form.append('file', new Blob([new Uint8Array(zip)], { type: 'application/zip' }), filename);
+    // Never backed by a SharedArrayBuffer here, which is all the cast rules out.
+    form.append('file', new Blob([zip as Uint8Array<ArrayBuffer>], { type: 'application/zip' }), filename);
     return this.json<InstallResult>(`/plugins/install?restart=${restart}`, { method: 'POST', body: form, timeoutMs: 120000 });
   }
 
