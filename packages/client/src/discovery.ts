@@ -43,7 +43,8 @@ export interface DiscoveredDevice {
   deviceId?: string;
   os?: string;
   version: string;
-  apiVersion: number;
+  /** Client API versions it serves (`Health.api`); empty for a plugin too old for this client. */
+  api: string[];
   /** Answers as `decky-mcp`, the name before the rename. */
   legacy: boolean;
   via: 'mdns' | 'sweep';
@@ -101,7 +102,7 @@ export function sweepTargets(ifaces: LocalInterface[]): { subnets: string[]; hos
 
 export function isToolkitHealth(h: unknown): h is Health {
   const x = h as Partial<Health> | null;
-  return !!x && x.ok === true && (x.name === 'decky-toolkit' || x.name === 'decky-mcp') && typeof x.api_version === 'number';
+  return !!x && x.ok === true && (x.name === 'decky-toolkit' || x.name === 'decky-mcp');
 }
 
 async function probe(host: string, port: number, signal: AbortSignal): Promise<Health | undefined> {
@@ -300,7 +301,7 @@ function toDevice(host: string, port: number, h: Health, via: DiscoveredDevice['
   return {
     key: `${host}:${port}`, host, port, name: short || instance || host,
     hostname: h.hostname, deviceId: h.device_id ?? undefined, os: h.os ?? undefined,
-    version: h.version, apiVersion: h.api_version, legacy: h.name === 'decky-mcp', via,
+    version: h.version, api: h.api ?? [], legacy: h.name === 'decky-mcp', via,
   };
 }
 

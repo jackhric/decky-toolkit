@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import type { NavigateRequest, PluginInfo, UiRoutes } from '@decky-toolkit/client/api';
-import { DeckyClient, isOldDevice, serverError } from '@decky-toolkit/client/client';
+import { DeckyClient, serverError } from '@decky-toolkit/client/client';
 import type { Connection } from './connection';
 
 export interface NavItem extends vscode.QuickPickItem {
@@ -11,11 +11,7 @@ export interface NavItem extends vscode.QuickPickItem {
 
 const placeholders = (path: string) => [...path.matchAll(/\{([^}]+)\}/g)].map(m => m[1]);
 
-function oldDevice(conn: Connection): void {
-  void vscode.window.showWarningMessage(`Decky Toolkit: Steam UI navigation needs a newer Decky Toolkit; update Decky Toolkit on the device (${conn.label}).`);
-}
-
-/** QuickPick entries for `GET /ui/routes`: Official, Plugins, then Menus (main menu and Quick Access tabs). */
+/** QuickPick entries for `ui_routes`: Official, Plugins, then Menus (main menu and Quick Access tabs). */
 export function routeItems(routes: UiRoutes): NavItem[] {
   const items: NavItem[] = [];
   const section = (label: string) => items.push({ label, kind: vscode.QuickPickItemKind.Separator });
@@ -50,12 +46,11 @@ async function fillTemplate(template: string): Promise<string | undefined> {
   return path;
 }
 
-async function send(conn: Connection, client: DeckyClient, request: NavigateRequest): Promise<void> {
+async function send(client: DeckyClient, request: NavigateRequest): Promise<void> {
   try {
     const res = await client.navigate(request);
     vscode.window.setStatusBarMessage(`Decky Toolkit: Steam UI at ${res.current}`, 4000);
   } catch (e) {
-    if (isOldDevice(e)) return oldDevice(conn);
     throw new Error(`Steam UI navigation: ${serverError(e)}`);
   }
 }
@@ -63,13 +58,7 @@ async function send(conn: Connection, client: DeckyClient, request: NavigateRequ
 export async function navigate(conn: Connection): Promise<void> {
   const client = await conn.client();
   if (!client) return;
-  let routes: UiRoutes;
-  try {
-    routes = await client.uiRoutes();
-  } catch (e) {
-    if (isOldDevice(e)) return oldDevice(conn);
-    throw e;
-  }
+  const routes = await client.uiRoutes();
   const pick = await vscode.window.showQuickPick(routeItems(routes), {
     title: `Navigate ${conn.label}`,
     placeHolder: `Current: ${routes.current}`,
@@ -77,7 +66,7 @@ export async function navigate(conn: Connection): Promise<void> {
   });
   if (!pick) return;
   const request = pick.request ?? (pick.template ? await fillTemplate(pick.template).then(path => path && { path }) : undefined);
-  if (request) await send(conn, client, request);
+  if (request) await send(client, request);
 }
 
 export async function openPluginPanel(conn: Connection, arg?: unknown): Promise<void> {
@@ -94,10 +83,10 @@ export async function openPluginPanel(conn: Connection, arg?: unknown): Promise<
     if (!pick) return;
     plugin = pick.label;
   }
-  await send(conn, client, { action: 'plugin', plugin });
+  await send(client, { action: 'plugin', plugin });
 }
 
 export async function simpleNavigate(conn: Connection, request: NavigateRequest): Promise<void> {
   const client = await conn.client();
-  if (client) await send(conn, client, request);
+  if (client) await send(client, request);
 }

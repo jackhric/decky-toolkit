@@ -1,15 +1,14 @@
-// Mirrors docs/api.md in the repo root. Routes marked planned there may 404 on older devices.
+// Mirrors docs/api.md in the repo root: `/health` and the client API under `/api/v1` (see `API_BASE` in client.ts).
 
 export interface Health {
   ok: boolean;
   name: string;
   version: string;
-  api_version: number;
+  /** Client API versions the device serves, e.g. `["v1"]`; absent on devices from before the versioned API. */
+  api?: string[];
   tools: number;
   /** Changes with any tool, description or schema; absent on older builds. */
   tools_hash?: string;
-  /** What agents should know first; the stdio MCP server passes it on. */
-  instructions?: string;
   /** Identification for network discovery; absent on older builds. */
   hostname?: string;
   device_id?: string | null;
@@ -24,18 +23,16 @@ export interface PairRequestCreated {
   poll_after_ms: number;
 }
 
-/** `client_cert`, `server_cert` (PEM) and `api_version` are present only on the first poll that sees the approval. */
+/** `client_cert` and `server_cert` (PEM) are present only on the first poll that sees the approval. */
 export interface PairPoll {
   status: 'pending' | 'approved' | 'denied';
   client_cert?: string;
   server_cert?: string;
-  api_version?: number;
 }
 
 export interface PairGrant {
   client_cert: string;
   server_cert: string;
-  api_version: number;
 }
 
 export interface StreamStats {
@@ -72,6 +69,13 @@ export interface StreamSettings {
   /** Absent on devices without audio streaming. */
   audio?: boolean;
   limits: { fps: [number, number]; quality: [number, number]; widths: number[]; audio?: [boolean, boolean] };
+}
+
+export interface StreamSettingsPatch {
+  fps?: number;
+  quality?: number;
+  width?: number;
+  audio?: boolean;
 }
 
 export interface InputSettings {
@@ -185,7 +189,7 @@ export type NavigateRequest =
   | { action: 'back' | 'main_menu' | 'close_menus' }
   | { action: 'quick_access'; tab?: string }
   | { action: 'plugin'; plugin: string }
-  | { action: 'app'; appid: number | string };
+  | { action: 'app'; appid: number };
 
 export interface NavigateResult {
   ok: boolean;
@@ -213,6 +217,24 @@ export interface AppSummary {
 export interface AppsList {
   count: number;
   apps: AppSummary[];
+}
+
+/** `POST /apps/{appid}/launch` and `/terminate`. */
+export interface AppActionResult {
+  appid: number;
+  name?: string;
+  launched?: boolean;
+  running?: boolean;
+  terminated?: boolean;
+  /** Why it did not start or stop, e.g. a Steam dialog. */
+  note?: string;
+}
+
+/** `GET /apps/{appid}/proton-log`: `~/steam-<appid>.log` and the lines of Steam's logs that mention the app. */
+export interface ProtonLog {
+  appid: number;
+  proton_log: { path: string; exists?: boolean; lines?: string[]; mtime?: string; hint?: string };
+  steam_logs: { file: string; mtime: string; lines: string[] }[];
 }
 
 export interface DirEntry {

@@ -27,6 +27,9 @@ function deviceCode(serverDer, publicKeyPem, id) {
 async function deviceFetch(url, init = {}) {
   const s = load();
   const u = new URL(url);
+  // The client API lives under /api/v1; only /health and /mcp stay at the top level.
+  const route = u.pathname.startsWith('/api/v1/') ? u.pathname.slice('/api/v1'.length)
+    : ['/health', '/mcp'].includes(u.pathname) ? u.pathname : '/not-found';
   if (!s.hosts.includes(u.hostname)) throw refused();
   if (s.downFor > 0 && u.pathname === '/health') {
     s.downFor--;
@@ -41,15 +44,15 @@ async function deviceFetch(url, init = {}) {
   s.requests.push(`${init.method ?? 'GET'} ${u.pathname}`);
   const done = res => { save(s); return res; };
 
-  if (u.pathname === '/health') return done(json(s.health));
-  if (u.pathname === '/pair/request' && init.method === 'POST') {
+  if (route === '/health') return done(json(s.health));
+  if (route === '/pair/request' && init.method === 'POST') {
     const body = JSON.parse(init.body);
     const id = `req${s.pairRequests.length}`;
     const code = deviceCode(server.der, body.public_key, id);
     s.pairRequests.push({ id, code, client_name: body.client_name, client_kind: body.client_kind });
     return done(Object.assign(json({ id, code, poll_after_ms: 1000 }, 201), { peerCert: server }));
   }
-  const pairReq = /^\/pair\/request\/([^/]+)$/.exec(u.pathname);
+  const pairReq = /^\/pair\/request\/([^/]+)$/.exec(route);
   if (pairReq && init.method === 'DELETE') {
     s.pairCancelled.push(pairReq[1]);
     return done(json({ cancelled: true }));
@@ -57,7 +60,7 @@ async function deviceFetch(url, init = {}) {
   if (pairReq) {
     const next = s.pairQueue.shift() ?? 'pending';
     save(s);
-    if (next === 'approved') return json({ status: 'approved', client_cert: s.clientCert, server_cert: s.serverCert, api_version: 2 });
+    if (next === 'approved') return json({ status: 'approved', client_cert: s.clientCert, server_cert: s.serverCert });
     // A long poll that holds until the CLI gives up (Ctrl-C aborts the signal).
     if (next === 'pending' && !s.pairQueue.length) {
       await new Promise((resolve, reject) => {
@@ -68,9 +71,9 @@ async function deviceFetch(url, init = {}) {
     return json({ status: next });
   }
   if (!authed) return done(new Response('unauthorized', { status: 401 }));
-  if (u.pathname === '/stream/stats') return done(json({ available: true, running: false, subscribers: 0, fps: 0 }));
-  if (u.pathname === '/plugins') return done(json(s.plugins));
-  if (u.pathname === '/plugins/install' && init.method === 'POST') {
+  if (route === '/stream/stats') return done(json({ available: true, running: false, subscribers: 0, fps: 0 }));
+  if (route === '/plugins') return done(json(s.plugins));
+  if (route === '/plugins/install' && init.method === 'POST') {
     const file = init.body.get('file');
     const bytes = Buffer.from(await file.arrayBuffer());
     const dir = file.name.replace(/\.zip$/, '');
@@ -88,31 +91,31 @@ async function deviceFetch(url, init = {}) {
     if (restart === 'plugin') s.journal.push(`[loader][INFO]: Loaded ${s.installMeta.name} (v${s.installMeta.version}) #${s.installs.length}`);
     return done(json({ installed: { dir, name: s.installMeta.name, version: s.installMeta.version }, restarted: restart }));
   }
-  const files = /^\/plugins\/([^/]+)\/files$/.exec(u.pathname);
+  const files = /^\/plugins\/([^/]+)\/files$/.exec(route);
   if (files && init.method === 'PUT') {
     const dir = decodeURIComponent(files[1]), rel = u.searchParams.get('path');
     s.filePuts = [...(s.filePuts ?? []), { dir, path: rel, text: Buffer.from(init.body).toString() }];
     return done(json({ dir, path: rel, bytes: init.body.length }));
   }
-  const reload = /^\/plugins\/([^/]+)\/reload$/.exec(u.pathname);
-  if (reload && init.method === 'POST' && u.searchParams.get('mode')) {
-    const dir = decodeURIComponent(reload[1]), mode = u.searchParams.get('mode');
+  const reload = /^\/plugins\/([^/]+)\/reload$/.exec(route);
+  if (reload && init.method === 'POST') {
+    const dir = decodeURIComponent(reload[1]), mode = u.searchParams.get('mode') ?? 'backend';
     s.liveReloads = [...(s.liveReloads ?? []), { dir, mode }];
+    if (mode === 'backend') {
+      const p = s.plugins.find(x => x.dir === dir);
+      s.reloads.push(dir);
+      s.journal.push(`[loader][INFO]: Loaded ${p?.name ?? dir} (v${p?.version}) reload`);
+    }
     return done(json({ dir, name: s.installMeta.name, mode, load_ms: 9, reloaded: true, restored: ['panel'], routes: [],
       errors: mode === 'frontend' ? ['Error: boom\n    at http://127.0.0.1:1337/plugins/My%20Plugin/dist/index.js?t=1:1:1'] : [] }));
   }
-  if (reload && init.method === 'POST') {
-    const dir = decodeURIComponent(reload[1]);
-    const p = s.plugins.find(x => x.dir === dir);
-    s.reloads.push(dir);
-    s.journal.push(`[loader][INFO]: Loaded ${p?.name ?? dir} (v${p?.version}) reload`);
-    return done(json({ reloaded: dir }));
-  }
-  if (u.pathname === '/logs/tail' && u.searchParams.get('source') === 'loader') return done(json({ lines: s.journal.slice(-Number(u.searchParams.get('tail'))) }));
-  if (u.pathname === '/mcp' && init.method === 'POST') {
+  if (route === '/logs/tail' && u.searchParams.get('source') === 'loader') return done(json({ lines: s.journal.slice(-Number(u.searchParams.get('tail'))) }));
+  if (route === '/mcp' && init.method === 'POST') {
     const { id, method, params } = JSON.parse(init.body);
     s.rpc.push(method === 'tools/call' ? `tools/call ${params.name}` : method);
+    if (method === 'initialize') return done(json({ jsonrpc: '2.0', id, result: { protocolVersion: params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'decky-toolkit', version: s.health.version }, instructions: 'Device says hi.' } }));
     if (method === 'tools/list') return done(json({ jsonrpc: '2.0', id, result: { tools: s.tools } }));
+    if (params.name === 'big') return done(json({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: 'x'.repeat(4 << 20) }], isError: false } }));
     if (method !== 'tools/call') return done(json({ jsonrpc: '2.0', id, error: { code: -32601, message: `Method not found: ${method}` } }));
     if (params.name === 'device_info') return done(json({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: JSON.stringify({ loader: 'v3.3.1', args: params.arguments }) }], isError: false } }));
     if (params.name === 'screen_capture') {

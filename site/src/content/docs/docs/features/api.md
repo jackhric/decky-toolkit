@@ -25,7 +25,8 @@ Tools are named `<area>_<action>`: `device_info`, `device_run`, `device_activity
 
 ## HTTP
 
-Your own scripts can use the HTTP API too. A script pairs the way the editor does: it asks the device for
+Your own scripts can use the HTTP API too: the versioned client API under `/api/v1`, the same one the editor and the
+CLI use (the MCP tools are for agents and change more freely). A script pairs the way the editor does: it asks the device for
 access and you approve it in Quick Access → **Decky Toolkit**. The request flow and the full route list are in
 [docs/api.md](https://github.com/jackhric/decky-toolkit/blob/main/docs/api.md).
 

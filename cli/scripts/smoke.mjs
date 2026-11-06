@@ -56,7 +56,7 @@ const identityPath = path.join(configDir, 'identity.json');
 const fakeDir = path.join(scratch, 'device');
 mkdirSync(fakeDir);
 const frame = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 0xff, 0xd9]);
-const health = { ok: true, name: 'decky-toolkit', version: '0.2.1', api_version: 2, tools: 2, hostname: 'steamdeck.local', device_id: 'dev-1', os: 'SteamOS' };
+const health = { ok: true, name: 'decky-toolkit', version: '0.2.1', api: ['v1'], tools: 2, hostname: 'steamdeck.local', device_id: 'dev-1', os: 'SteamOS' };
 const stateFile = path.join(fakeDir, 'state.json');
 const state = () => JSON.parse(readFileSync(stateFile, 'utf8'));
 const setState = patch => writeFileSync(stateFile, JSON.stringify({ ...state(), ...patch }, null, 2));
@@ -183,12 +183,12 @@ await check('status', async () => {
   const r = await cli(['status']);
   assert.equal(r.code, 0, r.stderr);
   assert.match(r.stdout, /Device\s+steamdeck \(192\.168\.77\.20:8765\)/);
-  assert.match(r.stdout, /Plugin\s+decky-toolkit 0\.2\.1, api 2, 2 tools/);
+  assert.match(r.stdout, /Plugin\s+decky-toolkit 0\.2\.1, api v1, 2 tools/);
   assert.match(r.stdout, /Paired\s+yes/);
   const j = JSON.parse((await cli(['status', '--json'])).stdout);
   assert.equal(j.paired, true);
   assert.equal(j.reachable, true);
-  assert.equal(j.plugin.apiVersion, 2);
+  assert.deepEqual(j.plugin.api, ['v1']);
 });
 
 await check('call', async () => {
@@ -207,6 +207,9 @@ await check('call', async () => {
   const bad = await cli(['call', 'nope']);
   assert.equal(bad.code, 1);
   assert.match(bad.stderr, /Unknown tool: nope/);
+  // `| head`: the reader goes away before the output is written.
+  const cut = await cli(['call', 'big'], { onSpawn: child => child.stdout.destroy() });
+  assert.deepEqual([cut.code, cut.stderr], [0, ''], 'EPIPE on stdout ends the command quietly');
 });
 
 const plugin = path.join(scratch, 'checkout-of-my-plugin');
@@ -245,10 +248,17 @@ async function mcp(messages) {
 }
 
 await check('dev: deploy, then push changed files and reload in place until Ctrl-C', async () => {
+  const { api: _api, ...oldHealth } = health;
+  setState({ health: oldHealth });
   const old = await cli(['dev', '--no-build', plugin]);
   assert.equal(old.code, 1);
-  assert.match(old.stderr, /has no live sync yet; update it on the device/);
-  setState({ health: { ...health, api_version: 3 }, filePuts: [], liveReloads: [], installMeta: { name: 'My Plugin', version: '1.2.3' } });
+  assert.match(old.stderr, /The Decky Toolkit plugin on the device \(0\.2\.1\) is too old for this client; update it with Decky's Install Plugin from URL, then run dev again/);
+  const installsBefore = state().installs.length;
+  const oldDeploy = await cli(['deploy', plugin]);
+  assert.equal(oldDeploy.code, 1);
+  assert.match(oldDeploy.stderr, /Deploy failed: the Decky Toolkit plugin on the device \(0\.2\.1\) is too old for this client/);
+  assert.equal(state().installs.length, installsBefore, 'nothing is uploaded to a device without the client API');
+  setState({ health, filePuts: [], liveReloads: [], installMeta: { name: 'My Plugin', version: '1.2.3' } });
   writeFileSync(path.join(plugin, 'dist', 'index.js.map'), JSON.stringify({ version: 3, sources: ['../src/index.tsx'], mappings: 'AAAA' }));
   const installs = state().installs.length;
   let edited = false, stopped = false;
@@ -307,7 +317,7 @@ await check('mcp over stdio', async () => {
   assert.equal(init.protocolVersion, '2025-06-18');
   assert.deepEqual(init.serverInfo, { name: 'decky-toolkit', version: pkg.version });
   assert.deepEqual(init.capabilities, { tools: { listChanged: true } });
-  assert.equal(typeof init.instructions, 'string');
+  assert.match(init.instructions, /plugin_deploy .* Device says hi\.$/, 'the device\'s own instructions, from its initialize');
   assert.deepEqual(r.replies.get(2).result.tools.map(t => t.name), ['device_info', 'screen_capture', 'plugin_deploy', 'device_status']);
   assert.equal(r.replies.get(3).result.isError, false);
   assert.deepEqual(JSON.parse(r.replies.get(3).result.content[0].text).args, { a: 1 });

@@ -1,4 +1,4 @@
-"""REST routes: /pair/request, /viewer, /logs, /plugins, /stream/settings. Run with: ./scripts/test.sh"""
+"""The client API under /api/v1: pairing, logs, plugins, stream settings, removed and old paths. Run with: ./scripts/test.sh"""
 import asyncio
 import io
 import json
@@ -63,44 +63,38 @@ def test_pair_request_approve_delivers_credentials_once():
     pairing = PairingRequests("")
 
     async def run(s, base):
-        async with s.get(f"{base}/pair") as r:
-            assert r.status == 404, "the timed pairing window is gone"
-        async with s.post(f"{base}/pair/request", json=VS, headers={"Origin": "http://evil.example"}) as r:
+        async with s.post(f"{base}/api/v1/pair/request", json=VS, headers={"Origin": "http://evil.example"}) as r:
             assert r.status == 403
-        async with s.post(f"{base}/pair/request", json=VS) as r:
+        async with s.post(f"{base}/api/v1/pair/request", json=VS) as r:
             assert r.status == 201
             body = await r.json()
         assert set(body) == {"id", "code", "poll_after_ms"} and len(body["code"]) == 4
         rid = body["id"]
-        async with s.get(f"{base}/pair/request/{rid}") as r:
+        async with s.get(f"{base}/api/v1/pair/request/{rid}") as r:
             assert await r.json() == {"status": "pending"}
-        async with s.get(f"{base}/pair/requests") as r:
-            assert r.status == 401
-        async with s.get(f"{base}/pair/requests", headers=H) as r:
-            [listed] = await r.json()
+        [listed] = pairing.list()
         assert (listed["client_name"], listed["code"], listed["remote"]) == ("VS Code on box", body["code"], "127.0.0.1")
 
-        poll = asyncio.ensure_future(s.get(f"{base}/pair/request/{rid}?wait=5"))
+        poll = asyncio.ensure_future(s.get(f"{base}/api/v1/pair/request/{rid}?wait=5"))
         await asyncio.sleep(0.2)
         assert not poll.done(), "a long poll waits for the decision"
         pairing.approve(rid, "CLIENT CERT")
         async with await asyncio.wait_for(poll, 2) as r:
-            assert await r.json() == {"status": "approved", "client_cert": "CLIENT CERT", "server_cert": "",
-                                      "api_version": 3}
-        async with s.get(f"{base}/pair/request/{rid}") as r:
+            assert await r.json() == {"status": "approved", "client_cert": "CLIENT CERT", "server_cert": ""}
+        async with s.get(f"{base}/api/v1/pair/request/{rid}") as r:
             assert await r.json() == {"status": "approved"}
-        async with s.get(f"{base}/pair/request/nope") as r:
+        async with s.get(f"{base}/api/v1/pair/request/nope") as r:
             assert r.status == 404
-        async with s.post(f"{base}/pair/request", json={"client_name": "", "client_kind": "vscode"}) as r:
+        async with s.post(f"{base}/api/v1/pair/request", json={"client_name": "", "client_kind": "vscode"}) as r:
             assert r.status == 400
-        async with s.post(f"{base}/pair/request", json={**VS, "client_kind": "toaster"}) as r:
+        async with s.post(f"{base}/api/v1/pair/request", json={**VS, "client_kind": "toaster"}) as r:
             assert r.status == 400
         for key in (None, "", "nope", PUBLIC_KEY.replace("PUBLIC KEY", "CERTIFICATE"), PUBLIC_KEY[:60] + "A" + PUBLIC_KEY[61:]):
-            async with s.post(f"{base}/pair/request", json={**VS, "public_key": key}) as r:
+            async with s.post(f"{base}/api/v1/pair/request", json={**VS, "public_key": key}) as r:
                 assert r.status == 400, key
-        async with s.post(f"{base}/pair/request", data=b"nope") as r:
+        async with s.post(f"{base}/api/v1/pair/request", data=b"nope") as r:
             assert r.status == 400
-        async with s.get(f"{base}/pair/request/{rid}?wait=soon") as r:
+        async with s.get(f"{base}/api/v1/pair/request/{rid}?wait=soon") as r:
             assert r.status == 400
     asyncio.run(with_server(run, pairing=pairing))
 
@@ -109,44 +103,73 @@ def test_pair_request_deny_cancel_and_limits():
     pairing = PairingRequests("")
 
     async def run(s, base):
-        async with s.post(f"{base}/pair/request", json=VS) as r:
+        async with s.post(f"{base}/api/v1/pair/request", json=VS) as r:
             rid = (await r.json())["id"]
-        poll = asyncio.ensure_future(s.get(f"{base}/pair/request/{rid}?wait=5"))
+        poll = asyncio.ensure_future(s.get(f"{base}/api/v1/pair/request/{rid}?wait=5"))
         await asyncio.sleep(0.1)
         pairing.deny(rid)
         async with await asyncio.wait_for(poll, 2) as r:
             assert await r.json() == {"status": "denied"}
 
-        async with s.post(f"{base}/pair/request", json=VS) as r:
+        async with s.post(f"{base}/api/v1/pair/request", json=VS) as r:
             rid = (await r.json())["id"]
-        poll = asyncio.ensure_future(s.get(f"{base}/pair/request/{rid}?wait=5"))
+        poll = asyncio.ensure_future(s.get(f"{base}/api/v1/pair/request/{rid}?wait=5"))
         await asyncio.sleep(0.1)
-        async with s.delete(f"{base}/pair/request/{rid}") as r:
+        async with s.delete(f"{base}/api/v1/pair/request/{rid}") as r:
             assert r.status == 200
         async with await asyncio.wait_for(poll, 2) as r:
             assert r.status == 404, "cancelling wakes the long poll"
-        async with s.delete(f"{base}/pair/request/{rid}") as r:
+        async with s.delete(f"{base}/api/v1/pair/request/{rid}") as r:
             assert r.status == 404
 
-        async with s.post(f"{base}/pair/request", json={**VS, "client_name": "a"}) as r:
+        async with s.post(f"{base}/api/v1/pair/request", json={**VS, "client_name": "a"}) as r:
             assert r.status == 201
-        async with s.post(f"{base}/pair/request", json={**VS, "client_name": "b"}) as r:
+        async with s.post(f"{base}/api/v1/pair/request", json={**VS, "client_name": "b"}) as r:
             assert r.status == 201
-        async with s.post(f"{base}/pair/request", json={**VS, "client_name": "c"}) as r:
+        async with s.post(f"{base}/api/v1/pair/request", json={**VS, "client_name": "c"}) as r:
             assert r.status == 429
-        async with s.post(f"{base}/pair/request", json={**VS, "client_name": "b"}) as r:
+        async with s.post(f"{base}/api/v1/pair/request", json={**VS, "client_name": "b"}) as r:
             assert r.status == 201, "the same client replaces its own request"
         assert sorted(r.client_name for r in pairing.pending()) == ["a", "b"]
     asyncio.run(with_server(run, pairing=pairing))
 
 
-def test_root_is_plain_text_and_viewer_is_gone():
+def test_root_and_health_are_public():
     async def run(s, base):
         async with s.get(base + "/") as r:
             assert r.status == 200 and "VS Code" in await r.text()
-        for path in ("/viewer", "/viewer?token=test-token"):
-            async with s.get(base + path, allow_redirects=False) as r:
-                assert r.status == 404 and "Set-Cookie" not in r.headers, path
+        async with s.get(base + "/health") as r:
+            body = await r.json()
+        assert body["ok"] is True and body["api"] == ["v1"] and "api_version" not in body
+        assert "instructions" not in body, "agent instructions need a paired client (initialize over /mcp)"
+    asyncio.run(with_server(run))
+
+
+# Old top-level paths of the client API, and the twins API v1 dropped (they live on as MCP tools only).
+OLD_TOP_LEVEL = [("POST", "/pair/request"), ("GET", "/pair/request/x"), ("GET", "/stream.mjpeg"), ("GET", "/frame.jpg"),
+                 ("GET", "/stream/stats"), ("GET", "/stream/settings"), ("GET", "/audio"), ("GET", "/input"),
+                 ("GET", "/input/settings"), ("GET", "/controllers"), ("GET", "/controllers/events"), ("GET", "/ui/routes"),
+                 ("GET", "/plugins"), ("POST", "/plugins/install"), ("POST", "/plugins/x/reload"), ("GET", "/logs/tail"),
+                 ("GET", "/logs/stream"), ("GET", "/apps"), ("GET", "/fs?path=/tmp"), ("GET", "/fs/read?path=/tmp/x"),
+                 ("GET", "/pair"), ("GET", "/viewer")]
+DROPPED = [("GET", "/api/v1/pair/requests"), ("GET", "/api/v1/audio/stats"), ("GET", "/api/v1/cef/console"),
+           ("GET", "/api/v1/cef/console/stream"), ("GET", "/api/v1/recordings"), ("GET", "/api/v1/recordings/clip"),
+           ("POST", "/api/v1/exec"), ("GET", "/api/v1/stream.mjpeg"), ("GET", "/api/v1/frame.jpg")]
+
+
+def test_old_and_dropped_paths_are_gone_and_mcp_is_post_only():
+    async def run(s, base):
+        for method, path in OLD_TOP_LEVEL:
+            async with s.request(method, base + path) as r:
+                assert r.status == 401, ("unauthenticated", method, path, r.status)
+        for method, path in OLD_TOP_LEVEL + DROPPED:
+            async with s.request(method, base + path, headers=H) as r:
+                assert r.status in (404, 405), (method, path, r.status)
+                if r.status == 405:
+                    assert method not in r.headers["Allow"], (method, path)
+        for method in ("GET", "DELETE"):
+            async with s.request(method, f"{base}/mcp", headers=H) as r:
+                assert (r.status, r.headers["Allow"]) == (405, "POST"), method
     asyncio.run(with_server(run))
 
 
@@ -156,19 +179,19 @@ def test_logs_tail_plugin(decky_home):
     write_log(decky_home, "foo", "new.log", [f"line {i}" for i in range(10)], mtime=now)
 
     async def run(s, base):
-        async with s.get(f"{base}/logs/tail?source=plugin&plugin=foo&tail=3") as r:
+        async with s.get(f"{base}/api/v1/logs/tail?source=plugin&plugin=foo&tail=3") as r:
             assert r.status == 401
-        async with s.get(f"{base}/logs/tail?source=plugin&plugin=foo&tail=3", headers=H) as r:
+        async with s.get(f"{base}/api/v1/logs/tail?source=plugin&plugin=foo&tail=3", headers=H) as r:
             assert await r.json() == {"lines": ["line 7", "line 8", "line 9"]}
-        async with s.get(f"{base}/logs/tail?plugin=foo&tail=1", headers=H) as r:
+        async with s.get(f"{base}/api/v1/logs/tail?plugin=foo&tail=1", headers=H) as r:
             assert await r.json() == {"lines": ["line 9"]}
-        async with s.get(f"{base}/logs/tail?source=plugin&plugin=nope", headers=H) as r:
+        async with s.get(f"{base}/api/v1/logs/tail?source=plugin&plugin=nope", headers=H) as r:
             assert r.status == 404
-        async with s.get(f"{base}/logs/tail?source=plugin&plugin=../etc", headers=H) as r:
+        async with s.get(f"{base}/api/v1/logs/tail?source=plugin&plugin=../etc", headers=H) as r:
             assert r.status == 400
-        async with s.get(f"{base}/logs/tail?source=plugin", headers=H) as r:
+        async with s.get(f"{base}/api/v1/logs/tail?source=plugin", headers=H) as r:
             assert r.status == 400
-        async with s.get(f"{base}/logs/tail?source=bogus", headers=H) as r:
+        async with s.get(f"{base}/api/v1/logs/tail?source=bogus", headers=H) as r:
             assert r.status == 400
     asyncio.run(with_server(run))
 
@@ -177,7 +200,7 @@ def test_logs_stream_plugin(decky_home):
     path = write_log(decky_home, "foo", "a.log", ["one", "two", "three"], mtime=time.time() - 10)
 
     async def run(s, base):
-        async with s.get(f"{base}/logs/stream?plugin=foo&tail=2", headers=H) as r:
+        async with s.get(f"{base}/api/v1/logs/stream?plugin=foo&tail=2", headers=H) as r:
             assert r.status == 200
             assert r.headers["Content-Type"].startswith("text/event-stream")
             assert r.headers["Cache-Control"] == "no-store" and r.headers["X-Accel-Buffering"] == "no"
@@ -214,7 +237,7 @@ def test_logs_stream_stops_follower_on_disconnect(monkeypatch):
     monkeypatch.setattr(logs, "follow", fake_follow)
 
     async def run(s, base):
-        async with s.get(f"{base}/logs/stream", headers=H) as r:
+        async with s.get(f"{base}/api/v1/logs/stream", headers=H) as r:
             assert (await r.content.readline()) == b"data: hello\n"
         await asyncio.wait_for(closed.wait(), 3)
     asyncio.run(with_server(run, log_keepalive=60))
@@ -233,22 +256,24 @@ def test_plugins_install_list_and_bearer_only(decky_home):
         return f
 
     async def run(s, base):
-        async with s.post(f"{base}/plugins/install?restart=none", data=form(), cookies={"decky_toolkit_token": "test-token"}) as r:
+        async with s.post(f"{base}/api/v1/plugins/install?restart=none", data=form(), cookies={"decky_toolkit_token": "test-token"}) as r:
             assert r.status == 401
-        async with s.post(f"{base}/plugins/install?restart=bogus", data=form(), headers=H) as r:
+        async with s.post(f"{base}/api/v1/plugins/install?restart=bogus", data=form(), headers=H) as r:
             assert r.status == 400
-        async with s.post(f"{base}/plugins/install?restart=none", data=form(), headers=H) as r:
+        async with s.post(f"{base}/api/v1/plugins/install?restart=none", data=form(), headers=H) as r:
             assert r.status == 200, await r.text()
             assert await r.json() == {"installed": {"dir": "thing", "name": "Thing", "version": "0.1.0"}, "restarted": "none"}
-        async with s.get(f"{base}/plugins", headers=H) as r:
+        async with s.get(f"{base}/api/v1/plugins", headers=H) as r:
             listed = await r.json()
             assert [(p["dir"], p["name"], p["version"]) for p in listed] == [("thing", "Thing", "0.1.0")]
         bad = FormData()
         bad.add_field("file", b"not a zip", filename="x.zip")
-        async with s.post(f"{base}/plugins/install?restart=none", data=bad, headers=H) as r:
+        async with s.post(f"{base}/api/v1/plugins/install?restart=none", data=bad, headers=H) as r:
             assert r.status == 400 and "zip" in (await r.json())["error"]
-        async with s.post(f"{base}/plugins/missing/reload", headers=H) as r:
+        async with s.post(f"{base}/api/v1/plugins/missing/reload", headers=H) as r:
             assert r.status == 404
+        async with s.post(f"{base}/api/v1/plugins/thing/reload?mode=bogus", headers=H) as r:
+            assert r.status == 400 and "mode" in (await r.json())["error"]
     asyncio.run(with_server(run))
 
 
@@ -278,29 +303,29 @@ def test_stream_settings_get_put_and_clamp():
     cap = FakeCapturer(running=True)
 
     async def run(s, base):
-        async with s.get(f"{base}/stream/settings") as r:
+        async with s.get(f"{base}/api/v1/stream/settings") as r:
             assert r.status == 401
-        async with s.get(f"{base}/stream/settings", headers=H) as r:
+        async with s.get(f"{base}/api/v1/stream/settings", headers=H) as r:
             assert await r.json() == {"fps": 30, "quality": 70, "width": 0, "audio": True, "limits": LIMITS}
-        async with s.put(f"{base}/stream/settings", json={"fps": 60}, headers=H) as r:
+        async with s.put(f"{base}/api/v1/stream/settings", json={"fps": 60}, headers=H) as r:
             assert r.status == 200 and (await r.json())["fps"] == 60
         assert (cap.saved, cap.restarts) == (1, 1)
-        async with s.put(f"{base}/stream/settings", json={"fps": 500, "quality": 3, "width": -5}, headers=H) as r:
+        async with s.put(f"{base}/api/v1/stream/settings", json={"fps": 500, "quality": 3, "width": -5}, headers=H) as r:
             assert await r.json() == {"fps": 60, "quality": 10, "width": 0, "audio": True, "limits": LIMITS}
-        async with s.put(f"{base}/stream/settings", json={"fps": 0, "quality": "95", "width": 1280}, headers=H) as r:
+        async with s.put(f"{base}/api/v1/stream/settings", json={"fps": 0, "quality": "95", "width": 1280}, headers=H) as r:
             assert await r.json() == {"fps": 1, "quality": 95, "width": 1280, "audio": True, "limits": LIMITS}
         assert cap.settings.stream_settings() == {"fps": 1, "quality": 95, "width": 1280, "audio": True}
         restarts = cap.restarts
-        async with s.put(f"{base}/stream/settings", json={"fps": 1}, headers=H) as r:
+        async with s.put(f"{base}/api/v1/stream/settings", json={"fps": 1}, headers=H) as r:
             assert r.status == 200
         assert cap.restarts == restarts, "unchanged settings must not restart the pipeline"
         for bad in ({"fps": "fast"}, {"fps": True}, {"audio": 1}, {"audio": "false"}, {"quality": None, "width": [1]}, {"bitrate": 5}, [1], "x"):
-            async with s.put(f"{base}/stream/settings", json=bad, headers=H) as r:
+            async with s.put(f"{base}/api/v1/stream/settings", json=bad, headers=H) as r:
                 assert r.status == 400, bad
-        async with s.put(f"{base}/stream/settings", data=b"{nope", headers=H) as r:
+        async with s.put(f"{base}/api/v1/stream/settings", data=b"{nope", headers=H) as r:
             assert r.status == 400
         # A rejected field must not half-apply the valid ones next to it.
-        async with s.put(f"{base}/stream/settings", json={"fps": 24, "quality": "high"}, headers=H) as r:
+        async with s.put(f"{base}/api/v1/stream/settings", json={"fps": 24, "quality": "high"}, headers=H) as r:
             assert r.status == 400
         assert cap.settings.stream_fps == 1
     asyncio.run(with_server(run, capturer=cap))
@@ -310,13 +335,13 @@ def test_stream_settings_bearer_only_and_origin():
     cap = FakeCapturer(running=False)
 
     async def run(s, base):
-        async with s.get(f"{base}/stream/settings", cookies={"decky_toolkit_token": "test-token"}) as r:
+        async with s.get(f"{base}/api/v1/stream/settings", cookies={"decky_toolkit_token": "test-token"}) as r:
             assert r.status == 401, "the old viewer cookie authorises nothing"
-        async with s.get(f"{base}/stream/settings", headers=H) as r:
+        async with s.get(f"{base}/api/v1/stream/settings", headers=H) as r:
             assert r.status == 200
-        async with s.put(f"{base}/stream/settings", json={"fps": 15}, headers=H) as r:
+        async with s.put(f"{base}/api/v1/stream/settings", json={"fps": 15}, headers=H) as r:
             assert r.status == 200 and (await r.json())["fps"] == 15
-        async with s.put(f"{base}/stream/settings", json={"fps": 20},
+        async with s.put(f"{base}/api/v1/stream/settings", json={"fps": 20},
                          headers={**H, "Origin": "http://evil.example"}) as r:
             assert r.status == 403
         assert cap.settings.stream_fps == 15
@@ -334,9 +359,9 @@ def test_stream_settings_restart_only_when_running():
 
 def test_stream_settings_404_without_capturer():
     async def run(s, base):
-        async with s.get(f"{base}/stream/settings", headers=H) as r:
+        async with s.get(f"{base}/api/v1/stream/settings", headers=H) as r:
             assert r.status == 404
-        async with s.put(f"{base}/stream/settings", json={"fps": 60}, headers=H) as r:
+        async with s.put(f"{base}/api/v1/stream/settings", json={"fps": 60}, headers=H) as r:
             assert r.status == 404
     asyncio.run(with_server(run))
 

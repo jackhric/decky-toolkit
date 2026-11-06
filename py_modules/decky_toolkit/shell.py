@@ -1,4 +1,4 @@
-"""Shell commands on the device (device_run, POST /exec) for paired clients, as the desktop user or (on request) root.
+"""Shell commands on the device (device_run) for paired clients, as the desktop user or (on request) root.
 
 A paired client can already run anything as root by installing a plugin, so this adds no access; it replaces ssh
 for development. Every command is logged in full (the one place arguments are), with the user and caller.

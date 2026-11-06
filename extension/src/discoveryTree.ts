@@ -33,7 +33,7 @@ export function foundRow(d: DiscoveredDevice): DiscoveryNode {
   n.description = `${address} · v${d.version}`;
   const md = new vscode.MarkdownString();
   md.appendMarkdown(`**${d.hostname ?? d.name}** · ${d.key}\n\n`);
-  md.appendMarkdown(`${d.legacy ? 'decky-mcp' : 'Decky Toolkit'} ${d.version}, API v${d.apiVersion}${d.os ? ` · ${d.os}` : ''}\n\n`);
+  md.appendMarkdown(`${d.legacy ? 'decky-mcp' : 'Decky Toolkit'} ${d.version}, API ${d.api.join(', ') || 'none'}${d.os ? ` · ${d.os}` : ''}\n\n`);
   md.appendMarkdown('Not paired · click to add it and pair\n\n');
   n.tooltip = md;
   n.command = { command: 'decky-toolkit.connectFound', title: 'Connect', arguments: [d.key] };

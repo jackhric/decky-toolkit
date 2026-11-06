@@ -198,11 +198,11 @@ def test_mutual_tls_end_to_end(tmp_path):
         try:
             anon = client_context()
             assert await get(base, "/health", anon) == 200
-            assert await get(base, "/stream/stats", anon) == 401
+            assert await get(base, "/api/v1/stream/stats", anon) == 401
 
             async with ClientSession(connector=TCPConnector(ssl=anon), timeout=ClientTimeout(total=5)) as s:
                 body = {"client_name": "VS Code on box", "client_kind": "vscode", "public_key": pub}
-                async with s.post(f"{base}/pair/request", json=body) as r:
+                async with s.post(f"{base}/api/v1/pair/request", json=body) as r:
                     assert r.status == 201
                     created = await r.json()
                 seen = await asyncio.to_thread(ssl.get_server_certificate, ("127.0.0.1", runner.addresses[0][1]))
@@ -212,24 +212,24 @@ def test_mutual_tls_end_to_end(tmp_path):
                 cert = await ident.sign_client(req.public_key, req.client_name)
                 pairing.approve(req.id, cert)
                 clients.add(tls.fingerprint(cert), req.client_name, req.client_kind)
-                async with s.get(f"{base}/pair/request/{req.id}") as r:
+                async with s.get(f"{base}/api/v1/pair/request/{req.id}") as r:
                     approved = await r.json()
-                async with s.get(f"{base}/pair/request/{req.id}") as r:
+                async with s.get(f"{base}/api/v1/pair/request/{req.id}") as r:
                     assert await r.json() == {"status": "approved"}, "credentials go out once"
-            assert approved == {"status": "approved", "client_cert": cert, "server_cert": ident.cert_pem, "api_version": 3}
+            assert approved == {"status": "approved", "client_cert": cert, "server_cert": ident.cert_pem}
 
             (tmp_path / "client.crt").write_text(approved["client_cert"])
             paired = client_context(approved["server_cert"], (tmp_path / "client.crt", key))
-            assert await get(base, "/stream/stats", paired) == 200
+            assert await get(base, "/api/v1/stream/stats", paired) == 200
             assert clients.touch(tls.fingerprint(cert))["last_seen"] is not None
 
             # Same key, signed by another device: refused during the handshake, not by a status code.
             (tmp_path / "foreign.crt").write_text(await other.sign_client(pub, "x"))
             with pytest.raises((ClientError, ssl.SSLError)):
-                await get(base, "/stream/stats", client_context(cert=(tmp_path / "foreign.crt", key)))
+                await get(base, "/api/v1/stream/stats", client_context(cert=(tmp_path / "foreign.crt", key)))
 
             assert clients.remove(tls.fingerprint(cert))
-            assert await get(base, "/stream/stats", paired) == 401
+            assert await get(base, "/api/v1/stream/stats", paired) == 401
             assert await get(base, "/health", paired) == 200
         finally:
             await runner.cleanup()

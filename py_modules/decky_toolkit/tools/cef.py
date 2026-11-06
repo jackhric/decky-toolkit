@@ -6,6 +6,12 @@ from ..steam import cdp
 from . import ToolRegistry
 
 
+async def toast(title: str, body: str, duration_ms: int = 5000) -> Any:
+    js = ("(async () => { const t = window.DeckyPluginLoader?.toaster; if (!t) throw new Error('DeckyPluginLoader.toaster missing');"
+          f" t.toast({{ title: {json.dumps(title)}, body: {json.dumps(body)}, duration: {int(duration_ms)} }}); return 'ok'; }})()")
+    return await cdp.evaluate_in(None, js)
+
+
 def register(reg: ToolRegistry) -> None:
     @reg.add("cef_targets", "List Steam CEF DevTools targets (tabs) exposed on localhost:8080.")
     async def cef_targets() -> list[dict[str, Any]]:
@@ -60,6 +66,4 @@ def register(reg: ToolRegistry) -> None:
          "required": ["title", "body"]},
     )
     async def ui_toast(title: str, body: str, duration_ms: int = 5000) -> str:
-        js = ("(async () => { const t = window.DeckyPluginLoader?.toaster; if (!t) throw new Error('DeckyPluginLoader.toaster missing');"
-              f" t.toast({{ title: {json.dumps(title)}, body: {json.dumps(body)}, duration: {int(duration_ms)} }}); return 'ok'; }})()")
-        return await cdp.evaluate_in(None, js)
+        return await toast(title, body, duration_ms)

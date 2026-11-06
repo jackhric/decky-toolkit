@@ -191,11 +191,9 @@ def test_start_without_cef_does_not_block(monkeypatch):
     asyncio.run(run())
 
 
-
-
 async def with_api(fn, console):
     api = Api(auth=stub_auth(), mcp=McpServer(build_registry(console=console), LOG), capturer=None,
-              logger=LOG, console=console)
+              logger=LOG)
     runner = web.AppRunner(api.build_app())
     await runner.setup()
     await web.TCPSite(runner, "127.0.0.1", 0).start()
@@ -206,39 +204,22 @@ async def with_api(fn, console):
         await runner.cleanup()
 
 
-def test_console_routes_and_tools():
+def test_console_through_mcp():
     c = ConsoleCollector(LOG)
     c.handle_message("SharedJSContext", console_msg("warning", s("decky-toolkit test")))
+    c.handle_message("SharedJSContext", console_msg("error", s("live one"), ts=TS + 5))
 
     async def run(session, base):
-        async with session.get(f"{base}/cef/console", headers=H) as r:
-            body = await r.json()
-        assert [e["text"] for e in body["entries"]] == ["decky-toolkit test"]
-        async with session.get(f"{base}/cef/console?level=nope", headers=H) as r:
-            assert r.status == 400
-        async with session.get(f"{base}/cef/console/stream?target=bogus", headers=H) as r:
-            assert r.status == 400
-        async with session.get(f"{base}/cef/console") as r:
-            assert r.status == 401
+        async def logs_read(**args):
+            rpc = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                   "params": {"name": "logs_read", "arguments": {"source": "steam_console", **args}}}
+            async with session.post(f"{base}/mcp", json=rpc, headers=H) as r:
+                return (await r.json())["result"]
 
-        async with session.get(f"{base}/cef/console/stream?tail=5", headers=H) as r:
-            assert r.headers["Content-Type"].startswith("text/event-stream")
-            first = await asyncio.wait_for(r.content.readline(), 2)
-            assert json.loads(first.decode()[len("data: "):])["text"] == "decky-toolkit test"
-            await r.content.readline()
-            c.handle_message("SharedJSContext", console_msg("error", s("live one"), ts=TS + 5))
-            live = await asyncio.wait_for(r.content.readline(), 2)
-            assert json.loads(live.decode()[len("data: "):])["text"] == "live one"
-        for _ in range(40):  # the server notices the disconnect within ~1 s
-            if not c._subs:
-                break
-            await asyncio.sleep(0.05)
-        assert not c._subs
-
-        rpc = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-               "params": {"name": "logs_read", "arguments": {"source": "steam_console", "level": "error"}}}
-        async with session.post(f"{base}/mcp", json=rpc, headers=H) as r:
-            result = (await r.json())["result"]
+        result = await logs_read()
+        assert [e["text"] for e in json.loads(result["content"][0]["text"])["entries"]] == ["decky-toolkit test", "live one"]
+        result = await logs_read(level="error")
         assert [e["text"] for e in json.loads(result["content"][0]["text"])["entries"]] == ["live one"]
+        assert (await logs_read(level="nope"))["isError"]
 
     asyncio.run(with_api(run, c))

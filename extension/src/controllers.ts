@@ -1,16 +1,14 @@
 import * as vscode from 'vscode';
 import type { ControllerInfo, ControllersList, VirtualPad } from '@decky-toolkit/client/api';
-import { describeError, isMissingRoute, isOldDevice, parseSse, serverError } from '@decky-toolkit/client/client';
+import { describeError, parseSse, serverError } from '@decky-toolkit/client/client';
 import type { Connection, ConnectionState } from './connection';
 
 /** Mutable so tests can shorten it. */
 export const controllerTimings = { pollMs: 5000 };
 
 export const MAX_VIRTUAL_PADS = 4;
-export const CONTROLLERS_UNSUPPORTED = 'update Decky Toolkit on the device';
 
-/** `unsupported`: the device answers 404 to `/controllers`. */
-export type ControllersState = ControllersList | 'unsupported' | { error: string };
+export type ControllersState = ControllersList | { error: string };
 
 export function isList(s: ControllersState | undefined): s is ControllersList {
   return typeof s === 'object' && 'controllers' in s;
@@ -28,7 +26,6 @@ export class ControllerWatcher implements vscode.Disposable {
   // Bumped on stop and on target changes so late replies are dropped.
   private gen = 0;
   private events?: AbortController;
-  private eventsMissing = false;
   private timer?: NodeJS.Timeout;
   private readonly sub: vscode.Disposable;
   private readonly linkSub: vscode.Disposable;
@@ -38,7 +35,6 @@ export class ControllerWatcher implements vscode.Disposable {
       this.gen++;
       this.events?.abort();
       this.events = undefined;
-      this.eventsMissing = false;
       this.set(undefined);
       if (this.leases > 0) void this.tick();
     });
@@ -84,7 +80,7 @@ export class ControllerWatcher implements vscode.Disposable {
   private async tick(): Promise<void> {
     if (this.events || !this.connected) return;
     await this.refresh();
-    if (this.leases > 0 && isList(this.state) && !this.eventsMissing) void this.follow();
+    if (this.leases > 0 && isList(this.state)) void this.follow();
   }
 
   async refresh(): Promise<ControllersState | undefined> {
@@ -95,7 +91,7 @@ export class ControllerWatcher implements vscode.Disposable {
     try {
       next = await client.controllers();
     } catch (e) {
-      next = isOldDevice(e) ? 'unsupported' : { error: describeError(e) };
+      next = { error: describeError(e) };
     }
     if (gen === this.gen) this.set(next);
     return next;
@@ -110,7 +106,6 @@ export class ControllerWatcher implements vscode.Disposable {
       const base = await this.proxyBase();
       const res = await fetch(`${base}/controllers/events`, { headers: { Accept: 'text/event-stream' }, signal: ac.signal });
       if (!res.ok || !res.body) {
-        if (res.status === 404) this.eventsMissing = true;
         await res.body?.cancel();
         return;
       }
@@ -193,14 +188,6 @@ function controllerRow(c: ControllerInfo, pad: VirtualPad | undefined, order?: n
 /** One row per controller, plus pads the server made that the device list does not show yet. */
 export function controllerItems(state: ControllersState | undefined): vscode.TreeItem[] {
   if (state === undefined) return [];
-  if (state === 'unsupported') {
-    const n = new ControllerNode('Controllers');
-    n.description = CONTROLLERS_UNSUPPORTED;
-    n.tooltip = 'The Decky Toolkit plugin on this device predates controller management (GET /controllers answers 404).';
-    n.iconPath = new vscode.ThemeIcon('game', new vscode.ThemeColor('disabledForeground'));
-    n.contextValue = 'controller.unsupported';
-    return [n];
-  }
   if (!isList(state)) {
     const n = new ControllerNode(`Could not load controllers: ${state.error}`);
     n.iconPath = new vscode.ThemeIcon('warning');
@@ -267,10 +254,6 @@ export async function addVirtualController(conn: Connection, watcher: Controller
   const client = await conn.client();
   if (!client) return undefined;
   const state = watcher.state ?? await watcher.refresh();
-  if (state === 'unsupported') {
-    void vscode.window.showWarningMessage(`Decky Toolkit: controller management needs a newer Decky Toolkit; ${CONTROLLERS_UNSUPPORTED} (${conn.label}).`);
-    return undefined;
-  }
   const fallback = nextPadName(state);
   const name = await vscode.window.showInputBox({
     title: 'Add virtual controller',
@@ -286,11 +269,7 @@ export async function addVirtualController(conn: Connection, watcher: Controller
     void vscode.window.showInformationMessage(`Decky Toolkit: Virtual controller added and recognised by Steam Input (${pad.name}).`);
     return pad.id;
   } catch (e) {
-    if (isOldDevice(e)) {
-      void vscode.window.showWarningMessage(`Decky Toolkit: controller management needs a newer Decky Toolkit; ${CONTROLLERS_UNSUPPORTED} (${conn.label}).`);
-      return undefined;
-    }
-    // 409 (all slots taken) and pads Steam Input did not pick up: the server's text says why.
+    // All slots taken and pads Steam Input did not pick up: the device's text says why.
     void vscode.window.showWarningMessage(`Decky Toolkit: ${serverError(e)}`);
     return undefined;
   }
@@ -303,10 +282,6 @@ export async function removeVirtualController(conn: Connection, watcher: Control
   let label = arg instanceof ControllerNode ? String(arg.label) : id;
   if (!id) {
     const state = await watcher.refresh();
-    if (state === 'unsupported') {
-      void vscode.window.showWarningMessage(`Decky Toolkit: controller management needs a newer Decky Toolkit; ${CONTROLLERS_UNSUPPORTED} (${conn.label}).`);
-      return;
-    }
     const pads = isList(state) ? state.virtual : [];
     if (pads.length === 0) {
       void vscode.window.showInformationMessage(`Decky Toolkit: ${conn.label} has no virtual controllers.`);
@@ -322,10 +297,6 @@ export async function removeVirtualController(conn: Connection, watcher: Control
   try {
     await client.removeVirtualController(id);
   } catch (e) {
-    if (isMissingRoute(e)) {
-      void vscode.window.showWarningMessage(`Decky Toolkit: controller management needs a newer Decky Toolkit; ${CONTROLLERS_UNSUPPORTED} (${conn.label}).`);
-      return;
-    }
     throw new Error(serverError(e));
   }
   vscode.window.setStatusBarMessage(`Decky Toolkit: removed ${label}`, 4000);

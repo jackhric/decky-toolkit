@@ -577,7 +577,7 @@ class InputService:
             if releasing:
                 return
             raise InputDisabled("remote input is disabled; enable it in the Decky Toolkit panel, the VS Code "
-                                "screen panel, PUT /input/settings or the input_settings tool")
+                                "screen panel or the input_settings tool")
         if not releasing:
             now = time.monotonic()
             self._tokens = min(float(self.rate), self._tokens + (now - self._tokens_at) * self.rate)

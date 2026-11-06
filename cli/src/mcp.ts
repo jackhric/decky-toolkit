@@ -164,7 +164,7 @@ export class McpServer {
     return this.checking;
   }
 
-  /** The reply line, if the message gets one. `ping` never touches the device; `initialize` asks it briefly for its instructions. */
+  /** The reply line, if the message gets one. `ping` never touches the device; `initialize` asks it briefly for its own instructions. */
   async handle(msg: Message): Promise<string | undefined> {
     // JSON-RPC batches went away in MCP 2025-06-18.
     if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return failure(null, -32600, 'Invalid Request');
@@ -178,9 +178,14 @@ export class McpServer {
       switch (msg.method) {
         case 'initialize': {
           const requested = params.protocolVersion;
-          const device = await this.current().then(p => p.client.health(INSTRUCTIONS_TIMEOUT_MS)).catch(() => undefined);
+          const protocolVersion = typeof requested === 'string' && PROTOCOL_VERSIONS.includes(requested) ? requested : PROTOCOL_VERSIONS[0];
+          const device = await this.current()
+            .then(p => p.client.rpc<{ instructions?: string }>('initialize', {
+              protocolVersion, capabilities: {}, clientInfo: { name: 'decky-toolkit', version: VERSION },
+            }, INSTRUCTIONS_TIMEOUT_MS))
+            .catch(() => undefined);
           return result(id, {
-            protocolVersion: typeof requested === 'string' && PROTOCOL_VERSIONS.includes(requested) ? requested : PROTOCOL_VERSIONS[0],
+            protocolVersion,
             capabilities: { tools: { listChanged: true } },
             serverInfo: { name: 'decky-toolkit', version: VERSION },
             instructions: 'Tools that inspect and control the paired Steam Deck running Decky Loader (screen, logs, plugins, Steam UI, input) '

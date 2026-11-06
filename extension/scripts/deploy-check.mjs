@@ -84,7 +84,10 @@ function setVersion(v, { debug = true } = {}) {
   writeFileSync(metaFile, JSON.stringify(meta, null, 2) + '\n');
 }
 
-const evaluate = async expression => client.callToolText('cef_evaluate', { expression });
+const evaluate = async expression => {
+  const value = await client.evaluate(expression);
+  return typeof value === 'string' ? value : JSON.stringify(value);
+};
 const FRONTEND = "JSON.stringify({ bundle: window.__deckyToolkitTestVersion ?? null, " +
   "listed: window.DeckyPluginLoader?.plugins?.find(p => p.name === 'Decky Toolkit Test')?.version ?? null })";
 
@@ -110,7 +113,7 @@ async function backendVersion() {
 }
 
 const LOADED = /\[loader\]\[INFO\]: Loaded Decky Toolkit Test /;
-const journal = async () => (await client.logTail({ source: 'loader', tail: 300 })).lines;
+const journal = () => client.logTail({ source: 'loader', tail: 300 });
 const backendProcesses = () =>
   Number(execFileSync('ssh', [sshTarget, "pgrep -fc '^Decky Toolkit Test ' || true"]).toString().trim() || 0);
 
@@ -162,7 +165,7 @@ await check('test plugin is not installed yet', async () => {
   return listed.join(', ');
 });
 if (!(await noViewers())) {
-  console.log('a /stream.mjpeg viewer stayed connected for 5 min; the first install restarts the loader, giving up');
+  console.log('a stream viewer stayed connected for 5 min; the first install restarts the loader, giving up');
   process.exit(1);
 }
 await check('v1: first install (restarts the loader)', () => round('v1 first install', 'v1', 'fast'));
@@ -176,7 +179,7 @@ await check('v4: fast deploy, no debug flag, nothing to build', async () => {
 if (process.env.SKIP_FULL) {
   console.log('SKIP  v5: full restart deploy (SKIP_FULL set)');
 } else if (!(await noViewers())) {
-  console.log('SKIP  v5: full restart deploy: a /stream.mjpeg viewer stayed connected for 5 min');
+  console.log('SKIP  v5: full restart deploy: a stream viewer stayed connected for 5 min');
 } else {
   await check('v5: full restart deploy, debug flag (restart=loader)', () => round('v5 full, debug', 'v5', 'loader'));
 }

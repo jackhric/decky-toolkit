@@ -17,7 +17,8 @@ from decky_toolkit.media.audio import AudioCapturer  # noqa: E402
 from decky_toolkit.server.auth import CertAuth, Connections  # noqa: E402
 from decky_toolkit.media.capture import ScreenCapturer  # noqa: E402
 from decky_toolkit.steam.console import ConsoleCollector  # noqa: E402
-from decky_toolkit.server.http import API_VERSION, Api  # noqa: E402
+from decky_toolkit.server import API_VERSIONS  # noqa: E402
+from decky_toolkit.server.http import Api  # noqa: E402
 from decky_toolkit.server.identity import identity  # noqa: E402
 from decky_toolkit.input.controllers import ControllerService  # noqa: E402
 from decky_toolkit.input.activity import InputActivity  # noqa: E402
@@ -119,7 +120,6 @@ class Plugin:
             audio=self.audio,
             controllers=self.controllers,
             ui=self.ui,
-            console=self.console,
         )
         # The loader SIGKILLs a plugin 5s after SIGTERM, so never wait long for in-flight requests.
         runner = web.AppRunner(api.build_app(), access_log=None, shutdown_timeout=2)
@@ -145,7 +145,7 @@ class Plugin:
         decky.logger.info("MCP server listening on https://%s:%s/mcp", self.settings.bind, self.settings.port)
         if not self.settings.bind.startswith("127."):
             self.advertiser = Advertiser(decky.logger, self.settings.port,
-                                         txt_records(SERVER_INFO["version"], API_VERSION, identity()["device_id"]))
+                                         txt_records(SERVER_INFO["version"], API_VERSIONS, identity()["device_id"]))
             self.advertiser.start()
 
     async def _stop_server(self) -> None:

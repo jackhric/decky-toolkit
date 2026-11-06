@@ -69,6 +69,7 @@ def test_auth_and_origin():
             body = await r.json()
             assert r.status == 200 and body["ok"]
             assert {"hostname", "device_id", "os"} <= body.keys() and body["hostname"]
+            assert "instructions" not in body, "agent instructions need a paired client (initialize over /mcp)"
         async with s.get(f"{base}/mcp", headers=H) as r:
             assert r.status == 405
     asyncio.run(with_server(run))
