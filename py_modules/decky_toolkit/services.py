@@ -16,7 +16,7 @@ from .steam.apps import Apps
 from .steam.console import ConsoleCollector
 from .steam.perf import PerfOverlay
 from .steam.plugin_tools import PluginTools
-from .steam.ui import UiNavigator
+from .steam.ui import UiInspector, UiNavigator
 
 
 @dataclass
@@ -27,6 +27,7 @@ class Services:
     input: InputService
     controllers: ControllerService
     ui: UiNavigator
+    inspector: UiInspector
     apps: Apps
     perf: PerfOverlay
     console: ConsoleCollector
@@ -40,9 +41,10 @@ class Services:
         capturer = ScreenCapturer(get_settings, logger, events, save_settings=save_settings)
         capturer.audio = audio = AudioCapturer(get_settings, logger)
         input_service = InputService(get_settings, save_settings, logger, events)
+        ui = UiNavigator()
         return cls(
             events=events, capturer=capturer, audio=audio, input=input_service,
-            controllers=ControllerService(input_service, logger, events), ui=UiNavigator(), apps=Apps(), perf=PerfOverlay(),
+            controllers=ControllerService(input_service, logger, events), ui=ui, inspector=UiInspector(ui), apps=Apps(), perf=PerfOverlay(),
             console=ConsoleCollector(logger), activity=InputActivity(logger), plugin_tools=PluginTools(logger, events),
             pairing=PairingRequests(events, server_cert),
         )

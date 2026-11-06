@@ -7,7 +7,7 @@ from typing import Any
 from ..media.capture import ScreenCapturer
 from ..steam import cdp
 from ..input.activity import AT_DEVICE_SECONDS, InputActivity, someone_at_device
-from ..steam.ui import ACTIONS, QUERY_TARGET, QUICK_ACCESS_TABS, UiInspector
+from ..steam.ui import ACTIONS, QUERY_TARGET, QUICK_ACCESS_TABS, UiInspector, UiNavigator
 from . import ToolRegistry
 
 CAPTURE_SETTLE_SECONDS = 0.7
@@ -49,8 +49,8 @@ class Orientation:
             return {"error": f"Steam UI state unavailable: {e}"}
 
 
-def register(reg: ToolRegistry, inspector: UiInspector, capturer: ScreenCapturer, orient: Orientation) -> None:
-    nav = inspector.nav
+def register(reg: ToolRegistry, nav: UiNavigator, inspector: UiInspector, capturer: ScreenCapturer,
+             orient: Orientation) -> None:
 
     @reg.add(
         "ui_routes",
