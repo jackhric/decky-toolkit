@@ -1,7 +1,7 @@
 import asyncio
 import os
-import secrets
 import socket
+import ssl
 import sys
 import threading
 import time
@@ -14,7 +14,7 @@ sys.path.append(decky.DECKY_PLUGIN_DIR + "/py_modules")  # the loader does this 
 
 from decky_toolkit.advertise import Advertiser, txt_records  # noqa: E402
 from decky_toolkit.audio import AudioCapturer  # noqa: E402
-from decky_toolkit.auth import TokenAuth  # noqa: E402
+from decky_toolkit.auth import CertAuth  # noqa: E402
 from decky_toolkit.capture import ScreenCapturer  # noqa: E402
 from decky_toolkit.console import ConsoleCollector  # noqa: E402
 from decky_toolkit.http import API_VERSION, Api  # noqa: E402
@@ -24,6 +24,7 @@ from decky_toolkit.input.service import InputService  # noqa: E402
 from decky_toolkit.pairing import PairingRequest, PairingRequests  # noqa: E402
 from decky_toolkit.protocol import SERVER_INFO, McpServer  # noqa: E402
 from decky_toolkit.settings import Settings  # noqa: E402
+from decky_toolkit.tls import Identity, PairedClients, TlsError, fingerprint  # noqa: E402
 from decky_toolkit.tools import build_registry  # noqa: E402
 from decky_toolkit.ui import UiNavigator  # noqa: E402
 
@@ -82,6 +83,8 @@ class Plugin:
     controllers: ControllerService | None = None
     ui: UiNavigator | None = None
     console: ConsoleCollector | None = None
+    identity: Identity
+    clients: PairedClients
     pairing: PairingRequests
     pruner: asyncio.Task | None = None
     advertiser: Advertiser | None = None
@@ -89,16 +92,21 @@ class Plugin:
 
     async def _start_server(self) -> None:
         await self._stop_server()
-        if not self.settings.enabled:
+        if not self.settings.enabled or not self.identity.cert_pem:
+            return
+        try:
+            ssl_context = self.identity.server_context()
+        except (ssl.SSLError, OSError) as e:
+            self.last_error = f"could not load the device identity: {e}"
+            decky.logger.error(self.last_error)
             return
         api = Api(
-            auth=TokenAuth(self.settings.token),
+            auth=CertAuth(self.clients),
             mcp=McpServer(build_registry(self.capturer, self.input, self.controllers, self.ui,
                                         console=self.console), decky.logger),
             capturer=self.capturer,
             logger=decky.logger,
             pairing=self.pairing,
-            base_url=self._base_url,
             input_service=self.input,
             audio=self.audio,
             controllers=self.controllers,
@@ -112,7 +120,8 @@ class Plugin:
         # backends on their way out), so retry for a while before giving up.
         for attempt in range(15):
             try:
-                await web.TCPSite(runner, self.settings.bind, self.settings.port, reuse_address=True).start()
+                await web.TCPSite(runner, self.settings.bind, self.settings.port, reuse_address=True,
+                                  ssl_context=ssl_context).start()
                 break
             except OSError as e:
                 self.last_error = f"bind {self.settings.bind}:{self.settings.port} failed: {e}"
@@ -125,7 +134,7 @@ class Plugin:
             return
         self.runner = runner
         self.last_error = None
-        decky.logger.info("MCP server listening on http://%s:%s/mcp", self.settings.bind, self.settings.port)
+        decky.logger.info("MCP server listening on https://%s:%s/mcp", self.settings.bind, self.settings.port)
         if not self.settings.bind.startswith("127."):
             self.advertiser = Advertiser(decky.logger, self.settings.port,
                                          txt_records(SERVER_INFO["version"], API_VERSION, identity()["device_id"]))
@@ -145,9 +154,6 @@ class Plugin:
             await self.runner.cleanup()
             self.runner = None
 
-    def _base_url(self, ip: str | None = None) -> str:
-        return f"http://{ip or _primary_ip()}:{self.settings.port}"
-
     # ---- pairing ----
 
     def _on_pairing_change(self, event: str, req: PairingRequest | None) -> None:
@@ -161,7 +167,10 @@ class Plugin:
         return self.pairing.list()
 
     async def approve_pair_request(self, request_id: str) -> list[dict[str, Any]]:
-        req = self.pairing.approve(request_id)
+        req = self.pairing.pending_request(request_id)
+        cert = await self.identity.sign_client(req.public_key, req.client_name)
+        self.pairing.approve(request_id, cert)
+        self.clients.add(fingerprint(cert), req.client_name, req.client_kind)
         decky.logger.info("pairing: approved %s (%s) from %s", req.client_name, req.client_kind, req.remote)
         await decky.emit("decky_toolkit_paired", req.remote, req.client_name)
         return self.pairing.list()
@@ -170,6 +179,18 @@ class Plugin:
         req = self.pairing.deny(request_id)
         decky.logger.info("pairing: denied %s (%s) from %s", req.client_name, req.client_kind, req.remote)
         return self.pairing.list()
+
+    def _on_clients_change(self, clients: list[dict[str, Any]]) -> None:
+        asyncio.ensure_future(decky.emit("decky_toolkit_paired_clients", clients))
+
+    async def list_paired_clients(self) -> list[dict[str, Any]]:
+        return self.clients.list()
+
+    async def forget_paired_client(self, fp: str) -> list[dict[str, Any]]:
+        if not self.clients.remove(fp):
+            raise ValueError("unknown paired client")
+        decky.logger.info("pairing: forgot client %s", fp[:16])
+        return self.clients.list()
 
     async def _on_input_session(self, remote: str) -> None:
         decky.logger.info("input session toast: remote input from %s", remote)
@@ -186,15 +207,12 @@ class Plugin:
         return await self.input.set_enabled(bool(enabled))
 
     async def get_status(self) -> dict[str, Any]:
-        ip = _primary_ip()
-        base = self._base_url(ip)
         return {
             "enabled": self.settings.enabled,
             "running": self.runner is not None,
             "bind": self.settings.bind,
             "port": self.settings.port,
-            "ip": ip,
-            "url": f"{base}/mcp",
+            "ip": _primary_ip(),
             "pair_requests": len(self.pairing.pending()),
             "stream": self.capturer.stats() if self.capturer else None,
             "input": self.input.status() if self.input else None,
@@ -222,12 +240,6 @@ class Plugin:
         await self._start_server()
         return await self.get_status()
 
-    async def regenerate_token(self) -> dict[str, Any]:
-        self.settings.token = secrets.token_urlsafe(32)
-        self.settings.save(decky.DECKY_PLUGIN_SETTINGS_DIR)
-        await self._start_server()
-        return await self.get_status()
-
     async def restart_server(self) -> dict[str, Any]:
         await self._start_server()
         return await self.get_status()
@@ -239,7 +251,14 @@ class Plugin:
         decky.logger.info("Decky Toolkit starting (python %s)", sys.version.split()[0])
         threading.Thread(target=_loader_watchdog, name="loader-watchdog", daemon=True).start()
         save = lambda: self.settings.save(decky.DECKY_PLUGIN_SETTINGS_DIR)  # noqa: E731
-        self.pairing = PairingRequests(on_change=self._on_pairing_change)
+        self.identity = Identity(decky.DECKY_PLUGIN_SETTINGS_DIR)
+        try:
+            await self.identity.ensure()
+        except (TlsError, OSError, ValueError) as e:
+            self.last_error = f"could not create the device identity: {e}"
+            decky.logger.error(self.last_error)
+        self.clients = PairedClients(self.identity.clients_path, on_change=self._on_clients_change)
+        self.pairing = PairingRequests(self.identity.cert_pem, on_change=self._on_pairing_change)
         self.pruner = asyncio.create_task(self.pairing.run_pruner())
         self.capturer = ScreenCapturer(lambda: self.settings, decky.logger, save_settings=save)
         self.audio = AudioCapturer(lambda: self.settings, decky.logger)

@@ -9,13 +9,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
 from aiohttp import ClientSession, CookieJar, web  # noqa: E402
 
-from decky_toolkit.auth import TokenAuth  # noqa: E402
+from certauth import H as PEER, stub_auth  # noqa: E402
 from decky_toolkit.http import Api  # noqa: E402
 from decky_toolkit.protocol import McpServer  # noqa: E402
 from decky_toolkit.tools import ToolRegistry  # noqa: E402
 
-TOKEN = "test-token"
-H = {"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"}
+H = {**PEER, "Content-Type": "application/json"}
 
 
 def make_registry() -> ToolRegistry:
@@ -33,7 +32,7 @@ def make_registry() -> ToolRegistry:
 
 
 async def with_server(fn):
-    api = Api(auth=TokenAuth(TOKEN), mcp=McpServer(make_registry(), logging.getLogger("t")), capturer=None,
+    api = Api(auth=stub_auth(), mcp=McpServer(make_registry(), logging.getLogger("t")), capturer=None,
               logger=logging.getLogger("t"))
     runner = web.AppRunner(api.build_app())
     await runner.setup()
