@@ -110,6 +110,16 @@ def register(reg: ToolRegistry) -> None:
     reg.add("list_plugins", "List plugins installed under ~/homebrew/plugins with their plugin.json metadata.")(list_plugins)
 
     @reg.add(
+        "backend_stacks",
+        "Decky Toolkit's own backend: the stack of every thread and asyncio task, and event loop stalls (the loop "
+        "watchdog logs a stack whenever the loop stops answering for 2 s, e.g. a hang during _unload). For finding "
+        "hangs and leaked tasks in this plugin; other plugins' backends are separate processes.",
+    )
+    async def backend_stacks() -> dict[str, Any]:
+        from .. import diagnostics
+        return diagnostics.snapshot()
+
+    @reg.add(
         "read_plugin_log",
         "Tail a plugin's backend log from ~/homebrew/logs/<plugin_dir>/. Omit 'file' to pick the newest log.",
         {

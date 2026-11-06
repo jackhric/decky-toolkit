@@ -7,7 +7,9 @@ See README.md for setup and docs/reference.md for the tool list and architecture
 
 ## Layout
 - `main.py` — Decky `Plugin` class: settings, aiohttp server lifecycle, frontend-callable methods.
-- `py_modules/decky_toolkit/` — grouped by area; `settings.py` at the top.
+- `py_modules/decky_toolkit/` — grouped by area; `settings.py` and `diagnostics.py` (thread/task stacks for the
+  `backend_stacks` tool, a watchdog thread that logs the loop thread's stack when the event loop stops answering
+  for 2 s, SIGUSR1 faulthandler dump to `<runtime dir>/stacks.txt`) at the top.
   - `server/`: `protocol.py` (JSON-RPC + HTTP transport), `http.py` (REST routes, see `docs/api.md`), `auth.py`
     (client-certificate auth), `tls.py` (device identity, client certs, paired-client store), `pairing.py`,
     `audit.py` (request origin context variable, audit middleware), `advertise.py` (DNS-SD via `avahi-publish`),
@@ -414,7 +416,9 @@ SharedJSContext via the `cef_evaluate` tool, or use `call_plugin_method` (`plugi
   choices go in QuickPicks. Don't add an in-page toolbar.
 - Keep the MCP server dependency-free beyond the loader bundle (aiohttp + stdlib).
 - Tools return str/dict (serialised to text) or a list of MCP content blocks. Raise `ValueError`
-  for bad input; other exceptions become `isError` results with a traceback.
+  for bad input; other exceptions become `isError` results with a traceback. Arguments are checked against
+  the tool's schema before the call (unknown names are refused with the argument list), so every schema
+  property must be a parameter of the function (`tests/test_tooling.py` checks this).
 - Comments only for non-obvious *why*; match the sparse style.
 - Any tool or route that reads or writes a caller-supplied device path must call `tools.guard.check_read` /
   `check_write` (Steam credential/session files, library folder lists, SSH keys); the server runs as root.

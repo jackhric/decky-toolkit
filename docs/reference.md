@@ -14,6 +14,7 @@ loopback URL (`Decky: Copy MCP URL`), so any MCP client can use the tools below.
 | `decky_status` | Loader version, OS, Python runtime, uid, installed plugins |
 | `list_plugins` | Plugins under `~/homebrew/plugins` with their `plugin.json` metadata |
 | `read_plugin_log` | Tail a plugin's backend log from `~/homebrew/logs/<plugin>/` |
+| `backend_stacks` | Decky Toolkit's own backend: every thread and asyncio task stack, event loop lag and stalls |
 | `loader_log` | Tail `journalctl -u plugin_loader`, optional substring filter |
 | `restart_loader` | Restart `plugin_loader.service` (scheduled 1 s out so the call returns); needs `confirm: true` |
 | `install_plugin` | Install a plugin zip (device path or base64) atomically, then restart the loader (needs `confirm: true`), reload the plugin, or neither |
