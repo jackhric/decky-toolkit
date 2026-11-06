@@ -165,34 +165,6 @@ def test_run_command_is_audited_in_full(caplog):
     assert line.startswith("audit device_run as=") and line.endswith(": echo secret-free")
 
 
-def test_exec_route():
-    from aiohttp import ClientSession, web
-    from certauth import H, stub_auth
-    from decky_toolkit.server.http import Api
-    from decky_toolkit.server.protocol import McpServer
-
-    async def go():
-        api = Api(auth=stub_auth(), mcp=McpServer(ToolRegistry(), LOG), capturer=None, logger=LOG)
-        runner = web.AppRunner(api.build_app())
-        await runner.setup()
-        await web.TCPSite(runner, "127.0.0.1", 0).start()
-        base = f"http://127.0.0.1:{runner.addresses[0][1]}"
-        try:
-            async with ClientSession() as s:
-                async with s.post(f"{base}/exec", json={"command": "echo hi"}, headers=H) as r:
-                    assert r.status == 200 and (await r.json())["stdout"] == "hi\n"
-                async with s.post(f"{base}/exec", json={"command": "echo hi", "shell": "zsh"}, headers=H) as r:
-                    assert r.status == 400
-                async with s.post(f"{base}/exec", data=b"nope", headers=H) as r:
-                    assert r.status == 400
-                async with s.post(f"{base}/exec", json={"command": "echo hi"}) as r:
-                    assert r.status == 401
-        finally:
-            await runner.cleanup()
-
-    run(go())
-
-
 # ---- physical input activity ----
 
 from decky_toolkit.input import activity  # noqa: E402

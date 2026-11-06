@@ -1,14 +1,13 @@
 import * as vscode from 'vscode';
-import type { Connection, InputState } from './connection';
-
-export const INPUT_UNSUPPORTED = 'not supported by this device version';
+import type { InputSettings } from '@decky-toolkit/client/api';
+import type { Connection } from './connection';
 
 export function inputBackendLabel(backend: string | null): string {
   return backend === 'ei' ? 'libei' : backend ?? '';
 }
 
-export function inputOn(input: InputState | undefined): boolean {
-  return typeof input === 'object' && input.enabled;
+export function inputOn(input: InputSettings | undefined): boolean {
+  return !!input?.enabled;
 }
 
 /** Shared by the Actions leaf, the command palette and the screen panel's Input button. */
@@ -16,10 +15,6 @@ export async function toggleInput(c: Connection, enabled?: boolean): Promise<voi
   const client = await c.client();
   if (!client) return;
   const current = await c.refreshInput() ?? c.input;
-  if (current === 'unsupported') {
-    void vscode.window.showWarningMessage(`Decky Toolkit: remote input is ${INPUT_UNSUPPORTED}; update the Decky Toolkit plugin on ${c.label}.`);
-    return;
-  }
   if (current && !current.available && !current.enabled) {
     void vscode.window.showWarningMessage(`Decky Toolkit: remote input is unavailable on ${c.label}${current.reason ? `: ${current.reason}` : '.'}`);
     return;

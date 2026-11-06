@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import type { LogQuery } from '@decky-toolkit/client/api';
-import { DeckyClient, describeError, isConnectionError, isMissingRoute, sleep } from '@decky-toolkit/client/client';
+import { DeckyClient, describeError, isConnectionError, sleep } from '@decky-toolkit/client/client';
 import { Connection, LinkState, linkMessage } from './connection';
 
 const RETRY_MS = 3000;
@@ -74,11 +74,6 @@ class LogSession {
         } catch (e) {
           if (signal.aborted) return;
           if (attempt.signal.aborted) continue;
-          if (isMissingRoute(e)) {
-            this.note('the Decky Toolkit plugin on this device cannot stream logs; update it on the device.');
-            await this.untilTargetOrLinkChanged(signal);
-            continue;
-          }
           // A dropped connection is reported once through the link state, not on every retry.
           if (isConnectionError(e)) void this.conn.checkHealth();
           else this.channel.appendLine(`[decky-toolkit] ${describeError(e)}; retrying…`);
@@ -100,15 +95,6 @@ class LogSession {
     return new Promise(resolve => {
       const sub = this.conn.onDidChange(() => { if (this.conn.link !== from) { sub.dispose(); resolve(); } });
       signal.addEventListener('abort', () => { sub.dispose(); resolve(); }, { once: true });
-    });
-  }
-
-  private untilTargetOrLinkChanged(signal: AbortSignal): Promise<void> {
-    const from = this.conn.link;
-    return new Promise(resolve => {
-      const done = () => { subs.forEach(s => s.dispose()); resolve(); };
-      const subs = [this.conn.onDidChangeTarget(done), this.conn.onDidChange(() => { if (this.conn.link !== from) done(); })];
-      signal.addEventListener('abort', done, { once: true });
     });
   }
 

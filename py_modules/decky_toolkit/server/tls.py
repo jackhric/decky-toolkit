@@ -16,7 +16,7 @@ from ..tools.system import run
 
 VALID_DAYS = "36500"
 SEEN_EVERY_SECONDS = 60
-# The extension polls /stream/stats every 5 s while it is connected.
+# The extension polls /api/v1/stream/stats every 5 s while it is connected.
 CONNECTED_SECONDS = 15
 _PEM = re.compile(r"-----BEGIN ([A-Z ]+)-----\s*([A-Za-z0-9+/=\s]+?)-----END \1-----")
 # DER prefix of an uncompressed EC P-256 SubjectPublicKeyInfo (id-ecPublicKey, prime256v1), then 0x04 X Y.

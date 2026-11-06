@@ -7,13 +7,11 @@ from urllib.parse import urlparse
 
 from aiohttp import web
 
-from . import audit
+from . import PAIR_REQUEST_PATH, audit
 from .tls import PairedClients, fingerprint_der
 
-# Public routes. The removed timed-window `/pair` and the browser `/viewer` stay listed so old clients
-# get a plain 404 instead of a 401.
-SELF_AUTH_PATHS = frozenset({"/", "/health", "/viewer", "/pair", "/pair/request"})
-PAIR_REQUEST_PREFIX = "/pair/request/"
+SELF_AUTH_PATHS = frozenset({"/", "/health", PAIR_REQUEST_PATH})
+PAIR_REQUEST_PREFIX = PAIR_REQUEST_PATH + "/"
 client_fingerprint: contextvars.ContextVar[str | None] = contextvars.ContextVar("client_fingerprint", default=None)
 
 

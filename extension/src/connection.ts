@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
 import type { Health, InputSettings, StreamStats } from '@decky-toolkit/client/api';
-import { DeckyClient, DeviceAddress, HttpError, describeError, isConnectionError, isRejection } from '@decky-toolkit/client/client';
+import { DeckyClient, DeviceAddress, describeError, isConnectionError, isRejection, outdatedDevice } from '@decky-toolkit/client/client';
 import { DEFAULT_MCP_PORT, DeviceProxy, ProxyTarget } from './proxy';
 import * as identityFile from '@decky-toolkit/client/identity';
 import type { Identity } from '@decky-toolkit/client/transport';
@@ -28,9 +28,6 @@ export interface SavedDevice {
   port: number;
 }
 
-/** `unsupported`: the device answers 404 to `/input/settings` (plugin predates remote input). */
-export type InputState = InputSettings | 'unsupported';
-
 /**
  * What every device-backed surface shows. Undefined until the first connect of this window, so the views
  * appear once and then stay put; `disconnected` is a session the user ended (or the device was replaced).
@@ -53,8 +50,8 @@ export interface ConnectionState {
   readonly health: HealthState;
   readonly stats?: StreamStats;
   readonly statsError?: string;
-  /** Undefined until the first `/input/settings` answer for the connected device. */
-  readonly input?: InputState;
+  /** Undefined until the first `input_settings` answer for the connected device. */
+  readonly input?: InputSettings;
   readonly onDidChange: vscode.Event<void>;
   /** Host, port or pairing changed; unlike `onDidChange` not fired for health/stats updates. */
   readonly onDidChangeTarget: vscode.Event<void>;
@@ -70,7 +67,7 @@ export interface ConnectionState {
   /** Plugin version from the device's last `/health` answer; `/health` needs no pairing, so it is known before pairing. */
   versionOf?(id: string): string | undefined;
   authedClient(): DeckyClient | undefined;
-  /** Polls `/stream/stats` while at least one returned lease is undisposed. */
+  /** Polls `stream_status` while at least one returned lease is undisposed. */
   watchStats(): vscode.Disposable;
 }
 
@@ -89,7 +86,7 @@ export class Connection implements ConnectionState, vscode.Disposable {
   health: HealthState = { kind: 'unknown' };
   stats?: StreamStats;
   statsError?: string;
-  input?: InputState;
+  input?: InputSettings;
   rejected = false;
   private statsLeases = 0;
   private statsTimer?: NodeJS.Timeout;
@@ -99,6 +96,7 @@ export class Connection implements ConnectionState, vscode.Disposable {
   private readonly busy = new Map<string, 'connecting' | 'pairing'>();
   private readonly unreachableIds = new Set<string>();
   private readonly versions = new Map<string, string>();
+  private readonly warnedOutdated = new Set<string>();
   private session?: SavedDevice;
   /** The device of the latest session in this window, kept after it ends. */
   private recent?: SavedDevice;
@@ -305,10 +303,21 @@ export class Connection implements ConnectionState, vscode.Disposable {
       next = { kind: 'unreachable', error: describeError(e) };
     }
     if (gen === this.generation) {
-      if (next.kind === 'ok' && this.session) this.noteVersion(this.session.id, next.health.version);
+      if (next.kind === 'ok' && this.session) {
+        this.noteVersion(this.session.id, next.health.version);
+        this.warnIfOutdated(this.session.id, next.health);
+      }
       this.setHealth(next);
     }
     return next;
+  }
+
+  /** Once per device and window: deploying still works, so this does not block the connection. */
+  private warnIfOutdated(id: string, health: Health): void {
+    const outdated = outdatedDevice(health);
+    if (!outdated || this.warnedOutdated.has(id)) return;
+    this.warnedOutdated.add(id);
+    void vscode.window.showWarningMessage(`Decky Toolkit: ${outdated} (${this.label}).`);
   }
 
   private setHealth(next: HealthState): void {
@@ -505,18 +514,17 @@ export class Connection implements ConnectionState, vscode.Disposable {
     });
   }
 
-  /** Errors other than 404 keep the last known state; health polling reports reachability. */
-  async refreshInput(): Promise<InputState | undefined> {
+  /** Errors keep the last known state; health polling reports reachability. */
+  async refreshInput(): Promise<InputSettings | undefined> {
     const client = this.authedClient();
     if (!client) return undefined;
     const gen = this.generation;
-    let next: InputState;
+    let next: InputSettings;
     try {
       next = await client.getInputSettings();
     } catch (e) {
       if (gen === this.generation && isRejection(e)) this.setRejected(true);
-      if (!(e instanceof HttpError && e.status === 404)) return this.input;
-      next = 'unsupported';
+      return this.input;
     }
     if (gen !== this.generation) return next;
     this.setRejected(false);
@@ -533,7 +541,7 @@ export class Connection implements ConnectionState, vscode.Disposable {
     return next;
   }
 
-  private setInput(next: InputState): void {
+  private setInput(next: InputSettings): void {
     if (JSON.stringify(next) === JSON.stringify(this.input)) return;
     this.input = next;
     this.changed.fire();
@@ -650,7 +658,7 @@ export function newDeviceId(): string {
 
 /** Proxy base URL as the webview must address it (remote/web hosts rewrite loopback URLs). */
 export async function externalProxyBase(conn: Connection): Promise<{ base: string; external: string }> {
-  const base = await conn.proxy.start();
+  const base = await conn.proxy.apiBase();
   const external = (await vscode.env.asExternalUri(vscode.Uri.parse(base))).toString(true).replace(/\/$/, '');
   return { base, external };
 }

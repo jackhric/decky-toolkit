@@ -18,8 +18,8 @@ def register(reg: ToolRegistry, capturer: ScreenCapturer | None) -> None:
         f"Record the screen (plus what the device plays, unless with_audio=false) for up to {MAX_SECONDS} s into "
         "DECKY_PLUGIN_RUNTIME_DIR/recordings/<name>.mkv (Matroska, MJPEG + PCM; plays in mpv/VLC/ffmpeg). Uses the "
         "live stream's frames, so resolution, quality and the maximum fps follow the stream settings and viewers "
-        "are not disturbed. One recording at a time. Returns path, size, duration and the /recordings/<name> download "
-        "route. wait=false returns at once; see recording_list / screen_record_stop.",
+        "are not disturbed. One recording at a time. Returns path, size and duration. "
+        "wait=false returns at once; see recording_list / screen_record_stop.",
         {"properties": {
             "seconds": {"type": "number", "default": 10, "minimum": 1, "maximum": MAX_SECONDS},
             "fps": {"type": "integer", "minimum": 1, "maximum": 60, "description": "Defaults to (and is capped at) the stream fps"},
@@ -36,7 +36,7 @@ def register(reg: ToolRegistry, capturer: ScreenCapturer | None) -> None:
     async def screen_record_stop() -> dict[str, Any]:
         return await rec().stop()
 
-    @reg.add("recording_list", "List saved recordings (name, path, size, modified, download route) and the active one.")
+    @reg.add("recording_list", "List saved recordings (name, path, size, modified) and the active one.")
     async def recording_list() -> dict[str, Any]:
         return await asyncio.to_thread(rec().list)
 

@@ -3,7 +3,7 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import type { Health, InstallResult, RestartMode } from './api';
-import { DeckyClient, isMissingRoute, sleep } from './client';
+import { DeckyClient, outdatedDevice, sleep } from './client';
 import { stagePlugin } from './stage';
 
 export interface WorkspacePlugin {
@@ -83,9 +83,9 @@ export interface ReloadMarkers {
   pluginLog?: string[];
 }
 
-const journalTail = (client: DeckyClient) => client.logTail({ source: 'loader', tail: 5 }).then(r => r.lines, () => [] as string[]);
+const journalTail = (client: DeckyClient) => client.logTail({ source: 'loader', tail: 5 }).catch(() => [] as string[]);
 const pluginLogTail = (client: DeckyClient, p: WorkspacePlugin) =>
-  p.hasBackend ? client.logTail({ source: 'plugin', plugin: p.dir, tail: 5 }).then(r => r.lines, () => [] as string[]) : Promise.resolve(undefined);
+  p.hasBackend ? client.logTail({ source: 'plugin', plugin: p.dir, tail: 5 }).catch(() => [] as string[]) : Promise.resolve(undefined);
 
 export async function reloadMarkers(client: DeckyClient, p: WorkspacePlugin): Promise<ReloadMarkers> {
   const [journal, pluginLog] = await Promise.all([journalTail(client), pluginLogTail(client, p)]);
@@ -132,8 +132,8 @@ export async function confirmReload(
   let loads = 0, lastLoadAt = 0, logLine: string | undefined, version: string | null | undefined, nudged = false;
   while (Date.now() - start < timeoutMs) {
     const [journal, log, listed] = await Promise.all([
-      client.logTail({ source: 'loader', tail: 200 }).then(r => r.lines, () => undefined),
-      !before.pluginLog ? undefined : client.logTail({ source: 'plugin', plugin: p.dir, tail: 5 }).then(r => r.lines, () => undefined),
+      client.logTail({ source: 'loader', tail: 200 }).catch(() => undefined),
+      !before.pluginLog ? undefined : client.logTail({ source: 'plugin', plugin: p.dir, tail: 5 }).catch(() => undefined),
       version === undefined ? client.listPlugins().then(ps => ps.find(x => x.dir === p.dir), () => undefined) : undefined,
     ]);
     if (listed) version = listed.version ?? null;
@@ -197,6 +197,8 @@ export interface DeployOptions {
 export async function deployPlugin(client: DeckyClient, plugin: WorkspacePlugin, o: DeployOptions): Promise<DeployStep> {
   const t0 = Date.now();
   o.onPhase?.('packaging');
+  const outdated = outdatedDevice(await client.health());
+  if (outdated) throw new Error(outdated);
   // The journal marker is taken before anything changes on the device; one taken early only means more lines to scan.
   const [listed, journal] = await Promise.all([client.listPlugins(), journalTail(client)]);
   const existing = listed.find(x => x.name === plugin.name && (o.matchInstalledByName || x.dir === plugin.dir));
@@ -216,16 +218,7 @@ export async function deployPlugin(client: DeckyClient, plugin: WorkspacePlugin,
 
   o.onPhase?.('uploading');
   const u0 = Date.now();
-  let result: InstallResult;
-  try {
-    result = await client.installPlugin(zip, `${p.dir}.zip`, restart);
-  } catch (e) {
-    if (isMissingRoute(e)) {
-      throw new Error('the Decky Toolkit plugin on the device has no POST /plugins/install yet. ' +
-        'Install the current plugin release on the device (Decky → Developer → Install Plugin from URL) and deploy again.');
-    }
-    throw e;
-  }
+  const result = await client.installPlugin(zip, `${p.dir}.zip`, restart);
   const uploadMs = Date.now() - u0;
   o.log(`Installed ${result.installed.name} ${result.installed.version ?? ''} in ${result.installed.dir} (${uploadMs} ms); restart: ${result.restarted}`);
 

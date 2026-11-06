@@ -9,9 +9,10 @@ See README.md for setup and docs/reference.md for the tool list and architecture
 - `main.py` — Decky `Plugin` class: settings, aiohttp server lifecycle, frontend-callable methods.
 - `py_modules/decky_toolkit/` — grouped by area; `settings.py` and `diagnostics.py` (thread/task stacks for the
   `toolkit_stacks` tool, a watchdog thread that logs the loop thread's stack when the event loop stops answering
-  for 2 s, SIGUSR1 faulthandler dump to `<runtime dir>/stacks.txt`) and `shell.py` (`device_run` / `POST /exec`:
+  for 2 s, SIGUSR1 faulthandler dump to `<runtime dir>/stacks.txt`) and `shell.py` (`device_run`:
   bash as the desktop user, or root with `root: true`; every command logged) at the top.
-  - `server/`: `protocol.py` (JSON-RPC + HTTP transport), `http.py` (REST routes, see `docs/api.md`), `auth.py`
+  - `server/`: `protocol.py` (JSON-RPC + HTTP transport), `http.py` (the versioned client API under `/api/v1`, see `docs/api.md`;
+    `server/__init__.py` holds `API_PREFIX`/`API_VERSIONS`), `auth.py`
     (client-certificate auth), `tls.py` (device identity, client certs, paired-client store), `pairing.py`,
     `audit.py` (request origin context variable, audit middleware), `advertise.py` (DNS-SD via `avahi-publish`),
     `identity.py` (non-secret `hostname`/`device_id`/`os` for `/health`), `long_lived.py` (ends streams,
@@ -162,7 +163,7 @@ See README.md for setup and docs/reference.md for the tool list and architecture
 - gamescope's caps say `pixel-aspect-ratio=1/2147483647`; `videoscale` to a width then picks height 1
   (or keeps 1080 with a non-square PAR), so the scaled branch sets PAR 1/1 with `capssetter` first.
 - Stream settings are device-wide (one pipeline). `ScreenCapturer.update_settings` is the single
-  path for the panel method, `PUT /stream/settings` and the `stream_settings` tool; a hot restart
+  path for the panel method, `PUT /api/v1/stream/settings` and the `stream_settings` tool; a hot restart
   keeps subscribers attached (`_restarting`), so viewers see ~0.1 s without frames, no reconnect. Port 8080 (CEF) drops for a few seconds after every loader restart because
   Decky reloads the Steam UI.
 - Stock SteamOS 3.8.14 (Valve recovery image, inspected by a research agent) ships gstreamer 1.26.4,
@@ -377,8 +378,8 @@ See README.md for setup and docs/reference.md for the tool list and architecture
 The server is TLS-only (TLS 1.3, no setting to turn it off) and authenticates clients by certificate;
 there is no bearer token. `tls.py` mints the device's EC P-256 identity (self-signed, also the CA) under
 `<settings dir>/tls/` with `openssl`, and keeps the allow-list `clients.json` of paired fingerprints.
-A client generates its own key pair, files `POST /pair/request` with its public key and long-polls
-`GET /pair/request/{id}?wait=25`; the device owner approves or denies it in the panel, whose landing view
+A client generates its own key pair, files `POST /api/v1/pair/request` with its public key and long-polls
+`GET /api/v1/pair/request/{id}?wait=25`; the device owner approves or denies it in the panel, whose landing view
 shows the address and, while a request is pending, only an "Approve <client>" button with the code and Deny;
 server, input and paired-device settings live on the `/decky-toolkit/settings` page (sidebar categories) behind the header gear
 (frontend methods `list_pair_requests`,
@@ -433,11 +434,17 @@ SharedJSContext via the `cef_evaluate` tool, or use `plugin_call` (`plugin: "Dec
   reads; `pr-title.yml` enforces a conventional title (`feat:`, `fix:`, `feat!:` for breaking, ...).
 
 ## Conventions
+- Clients use the client API, agents use MCP. The extension, the CLI's own commands (`pair`, `status`, `deploy`, `dev`)
+  and `packages/client` call only the versioned REST routes under `/api/v1` (one base-path constant, `API_BASE` in
+  `packages/client/src/client.ts`; `/health` lists the served versions as `api`); agents call the tools on `/mcp`. A
+  route and its tool call the same Python function. Never route the extension or the client library through the
+  tools: tools are agent-facing and change freely, the client API is a contract (a breaking change means `/api/v2`).
+  Top level holds only `/`, `/health` and `/mcp`.
 - Every setting is configurable remotely (approving a pairing request and forgetting a paired client are not settings): through an MCP tool, the HTTP API and the
   extension's UI where it applies. The Decky panel only mirrors state (it polls `get_status` and
   listens for change events); it never holds a setting that cannot be changed remotely.
 - The live screen exists only in the VS Code extension: the device serves no browser viewer, and every route
-  except `/`, `/health` and `/pair/request*` needs a paired client certificate (no cookie auth). The screen panel webview draws only
+  except `/`, `/health` and `/api/v1/pair/request*` needs a paired client certificate (no cookie auth). The screen panel webview draws only
   the picture; its controls are `editor/title` actions with codicons (`when: activeWebviewPanelId ==
   'decky-toolkit.screen'`), toggles are command pairs switched by `decky-toolkit.screen.*` context keys, and
   choices go in QuickPicks. Don't add an in-page toolbar.
@@ -450,7 +457,8 @@ SharedJSContext via the `cef_evaluate` tool, or use `plugin_call` (`plugin: "Dec
   and `ui_state` instead of ssh, sleeps and screenshots. Call `ui_state` before navigating, injecting input,
   launching anything or judging a screenshot (the library home background can look like a running game), and leave
   the UI alone while `someone_at_device` is true. Agent guidance lives in one place, `server/protocol.py`
-  `INSTRUCTIONS` (also in `/health`, passed on by the CLI); keep it to a few sentences and put the rest in tool
+  `INSTRUCTIONS` (sent with `initialize` on `/mcp`; the CLI's stdio server asks the device for them and appends
+  them to its own); keep it to a few sentences and put the rest in tool
   descriptions and results.
 - Tools return str/dict (serialised to text) or a list of MCP content blocks. Raise `ValueError`
   for bad input; other exceptions become `isError` results with a traceback. Arguments are checked against

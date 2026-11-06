@@ -125,25 +125,55 @@ def test_launch_not_running_reports_actions():
 
 def test_apps_routes(monkeypatch, tmp_path):
     monkeypatch.setenv("DECKY_USER_HOME", str(tmp_path))
+    monkeypatch.setattr(apps_mod, "_proc_pids", lambda appid: [{"pid": 42, "cmdline": "reaper", "reaper": True}])
     steam = FakeSteam()
     monkeypatch.setattr(http_mod, "Apps", lambda: Apps(steam))
 
     async def run(s, base):
-        async with s.get(f"{base}/apps") as r:
+        async with s.get(f"{base}/api/v1/apps") as r:
             assert r.status == 401
-        async with s.get(f"{base}/apps?query=v", headers=H) as r:
+        async with s.get(f"{base}/api/v1/apps?query=v", headers=H) as r:
             assert r.status == 200 and (await r.json())["count"] == 2
-        async with s.get(f"{base}/apps/70300", headers=H) as r:
+        async with s.get(f"{base}/api/v1/apps/70300", headers=H) as r:
             body = await r.json()
             assert r.status == 200 and body["developer"] == "Terry Cavanagh" and body["dirs"]["platform"] == "native"
-        async with s.get(f"{base}/apps/70300/dirs", headers=H) as r:
+        async with s.get(f"{base}/api/v1/apps/70300/dirs", headers=H) as r:
             assert r.status == 200 and (await r.json())["appid"] == 70300
-        async with s.get(f"{base}/apps/70300/saves", headers=H) as r:
+        async with s.get(f"{base}/api/v1/apps/70300/saves", headers=H) as r:
             assert r.status == 200 and (await r.json())["candidates"] == []
-        async with s.get(f"{base}/apps/12345", headers=H) as r:
+        async with s.get(f"{base}/api/v1/apps/12345", headers=H) as r:
             assert r.status == 404
-        async with s.get(f"{base}/apps/abc", headers=H) as r:
+        async with s.get(f"{base}/api/v1/apps/abc", headers=H) as r:
             assert r.status == 400
+        async with s.post(f"{base}/api/v1/apps/70300/launch", json={"wait": 1}, headers=H) as r:
+            assert r.status == 200 and (await r.json())["launched"] is True
+        async with s.post(f"{base}/api/v1/apps/70300/terminate", json={"wait": 1}, headers=H) as r:
+            assert r.status == 400 and "confirm" in (await r.json())["error"]
+        async with s.post(f"{base}/api/v1/apps/70300/terminate", json={"confirm": True, "wait": 1}, headers=H) as r:
+            assert r.status == 200 and (await r.json())["terminated"] is True
+        async with s.post(f"{base}/api/v1/apps/70300/launch", json={"wait": 1, "x": 1}, headers=H) as r:
+            assert r.status == 400
+        async with s.get(f"{base}/api/v1/apps/70300/proton-log?lines=5", headers=H) as r:
+            assert r.status == 200 and (await r.json())["appid"] == 70300
+    asyncio.run(with_server(run))
+
+
+def test_cef_evaluate_and_toast_routes(monkeypatch):
+    seen = []
+
+    async def evaluate_in(target, expression, timeout=15):
+        seen.append((target, expression))
+        return {"echo": expression} if target == "QuickAccess" else "ok"
+    monkeypatch.setattr(cdp, "evaluate_in", evaluate_in)
+
+    async def run(s, base):
+        async with s.post(f"{base}/api/v1/cef/evaluate", json={"expression": "1+1", "target": "QuickAccess"}, headers=H) as r:
+            assert await r.json() == {"value": {"echo": "1+1"}}
+        async with s.post(f"{base}/api/v1/cef/evaluate", json={}, headers=H) as r:
+            assert r.status == 400 and "expression" in (await r.json())["error"]
+        async with s.post(f"{base}/api/v1/ui/toast", json={"title": "VS Code", "body": "hi"}, headers=H) as r:
+            assert await r.json() == {"result": "ok"}
+        assert '"VS Code"' in seen[-1][1] and "toaster" in seen[-1][1]
     asyncio.run(with_server(run))
 
 
@@ -153,6 +183,6 @@ def test_apps_route_without_steam(monkeypatch):
     monkeypatch.setattr(http_mod, "Apps", lambda: Apps(down))
 
     async def run(s, base):
-        async with s.get(f"{base}/apps", headers=H) as r:
+        async with s.get(f"{base}/api/v1/apps", headers=H) as r:
             assert r.status == 502
     asyncio.run(with_server(run))

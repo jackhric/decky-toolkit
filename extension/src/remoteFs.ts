@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import type { FsEntry } from '@decky-toolkit/client/api';
-import { DeckyClient, DeviceAddress, HttpError, describeError, isConnectionError, isMissingRoute, isRejection } from '@decky-toolkit/client/client';
+import { DeckyClient, DeviceAddress, HttpError, describeError, isConnectionError, isRejection } from '@decky-toolkit/client/client';
 import type { ConnectionState, SavedDevice } from './connection';
 import type { Identity } from '@decky-toolkit/client/transport';
 
@@ -63,7 +63,6 @@ export function toFsError(e: unknown, uri: vscode.Uri, device: string): Error {
   if (isConnectionError(e)) return vscode.FileSystemError.Unavailable(`Decky device ${device} is not reachable (${describeError(e)})`);
   if (isRejection(e)) return vscode.FileSystemError.NoPermissions(`${device} no longer accepts this editor; re-pair it in the Decky view`);
   if (!(e instanceof HttpError)) return new vscode.FileSystemError(describeError(e));
-  if (isMissingRoute(e)) return vscode.FileSystemError.Unavailable(`the Decky Toolkit plugin on ${device} has no remote file access yet; update it`);
   const code = errorCode(e);
   if (e.status === 403) return vscode.FileSystemError.NoPermissions(serverMessage(e));
   if (e.status === 404) return vscode.FileSystemError.FileNotFound(uri);

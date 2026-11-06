@@ -282,22 +282,22 @@ def test_input_settings_bearer_only(tmp_path):
     svc = make_service(tmp_path, enabled=False)
 
     async def run(s, base):
-        async with s.get(f"{base}/input/settings") as r:
+        async with s.get(f"{base}/api/v1/input/settings") as r:
             assert r.status == 401
-        async with s.get(f"{base}/input/settings", headers=H) as r:
+        async with s.get(f"{base}/api/v1/input/settings", headers=H) as r:
             assert await r.json() == {"enabled": False, "backend": "ei", "available": True, "reason": None}
-        async with s.put(f"{base}/input/settings", json={"enabled": True}, cookies={"decky_toolkit_token": "test-token"}) as r:
+        async with s.put(f"{base}/api/v1/input/settings", json={"enabled": True}, cookies={"decky_toolkit_token": "test-token"}) as r:
             assert r.status == 401, "the old viewer cookie authorises nothing"
-        async with s.put(f"{base}/input/settings", json={"enabled": True}, headers=H) as r:
+        async with s.put(f"{base}/api/v1/input/settings", json={"enabled": True}, headers=H) as r:
             assert r.status == 200 and (await r.json())["enabled"] is True
-        async with s.get(f"{base}/input/settings", headers=H) as r:
+        async with s.get(f"{base}/api/v1/input/settings", headers=H) as r:
             assert (await r.json())["enabled"] is True
-        async with s.put(f"{base}/input/settings", json={"enabled": False}, headers=H) as r:
+        async with s.put(f"{base}/api/v1/input/settings", json={"enabled": False}, headers=H) as r:
             assert (await r.json())["enabled"] is False
         for bad in ({"enabled": "yes"}, {}, {"enabled": True, "x": 1}, [True]):
-            async with s.put(f"{base}/input/settings", json=bad, headers=H) as r:
+            async with s.put(f"{base}/api/v1/input/settings", json=bad, headers=H) as r:
                 assert r.status == 400, bad
-        async with s.put(f"{base}/input/settings", json={"enabled": True},
+        async with s.put(f"{base}/api/v1/input/settings", json={"enabled": True},
                          headers={**H, "Origin": "http://evil.example"}) as r:
             assert r.status == 403
         assert svc.t.settings.input_enabled is False
@@ -309,9 +309,9 @@ def test_input_ws_refused_when_disabled(tmp_path):
 
     async def refused(s, base):
         with pytest.raises(WSServerHandshakeError) as e:
-            await s.ws_connect(f"{base}/input")
+            await s.ws_connect(f"{base}/api/v1/input")
         assert e.value.status == 401
-        async with s.ws_connect(f"{base}/input", headers=H) as ws:
+        async with s.ws_connect(f"{base}/api/v1/input", headers=H) as ws:
             msg = await ws.receive()
             assert msg.type == WSMsgType.CLOSE and msg.data == 4003
     asyncio.run(with_server(refused, svc))
@@ -328,7 +328,7 @@ def test_input_ws_state_events_and_release(tmp_path):
     svc = make_service(tmp_path)
 
     async def run(s, base):
-        async with s.ws_connect(f"{base}/input", headers=H) as ws:
+        async with s.ws_connect(f"{base}/api/v1/input", headers=H) as ws:
             assert await ws.receive_json() == {"type": "state", "enabled": True, "backend": "ei", "focus_size": [1280, 800]}
             await ws.send_json({"type": "key", "key": "ShiftLeft", "down": True})
             await ws.send_json({"type": "bogus"})
@@ -346,7 +346,7 @@ def test_input_ws_state_events_and_release(tmp_path):
         assert svc.t.backends[0].events[-1] == ("key", 42, False)
         assert svc.t.sessions == ["127.0.0.1"]
 
-        async with s.ws_connect(f"{base}/input", headers=H) as ws:
+        async with s.ws_connect(f"{base}/api/v1/input", headers=H) as ws:
             await ws.receive_json()
             await svc.set_enabled(False)
             msg = await ws.receive()
@@ -368,6 +368,8 @@ def test_input_tools_refuse_when_disabled_and_work_when_enabled(tmp_path):
             assert res["isError"] and "disabled" in res["content"][0]["text"], name
         res = await reg.call("input_settings", {"enabled": True})
         assert not res["isError"] and json.loads(res["content"][0]["text"])["enabled"] is True
+        read = json.loads((await reg.call("input_settings", {}))["content"][0]["text"])
+        assert read == {"enabled": True, "backend": "ei", "available": True, "reason": None}, "same shape as the route"
         res = await reg.call("input_key", {"keys": "ctrl+a", "hold_ms": 0})
         assert not res["isError"], res
         b = svc.t.backends[0]

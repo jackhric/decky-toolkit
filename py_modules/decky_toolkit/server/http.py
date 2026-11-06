@@ -1,4 +1,8 @@
-"""The aiohttp application: REST routes plus the mounted MCP endpoint."""
+"""The aiohttp application: the client API under /api/v1 plus the mounted MCP endpoint.
+
+Clients (the extension, the CLI) use these routes; agents use the MCP tools. Both call the same functions, so a
+route returns what the matching tool computes, but the route shapes are the versioned contract.
+"""
 import asyncio
 import json
 import logging
@@ -7,29 +11,26 @@ import tempfile
 
 from aiohttp import web
 
-from . import audit
+from . import API_PREFIX, API_VERSIONS, audit
 from ..steam import cdp
 from ..games import files as games
-from .. import shell
 from ..loader import live, logs
 from .identity import identity
-from ..steam.apps import Apps
 from ..media.audio import FORMAT as AUDIO_FORMAT, AudioCapturer, AudioDisabled, AudioUnavailable
 from .auth import CertAuth
 from ..media.capture import BOUNDARY, CaptureUnavailable, ScreenCapturer
-from ..steam.console import DEFAULT_LEVEL, ConsoleCollector
 from ..input.controllers import ControllerService
 from ..input.ei import EiError
 from ..input.service import InputDisabled, InputService, InputUnavailable
 from .long_lived import LongLivedRequests
 from .pairing import MAX_WAIT_SECONDS, POLL_AFTER_MS, PairingLimit, PairingRequests
-from .protocol import INSTRUCTIONS, SERVER_INFO, McpServer
-from ..media.record import check_name, recorder_for
-from ..tools import plugins
-from ..tools.system import list_plugins, schedule_loader_restart
+from .protocol import SERVER_INFO, McpServer
+from ..steam.apps import Apps
 from ..steam.ui import UiNavigator
+from ..tools import plugins
+from ..tools.cef import toast
+from ..tools.system import list_plugins, schedule_loader_restart
 
-API_VERSION = 3
 LOG_KEEPALIVE_SECONDS = 15.0
 INPUT_REFUSED = 4003
 AUDIO_REFUSED = 4003
@@ -39,11 +40,52 @@ def _error(status: int, message: str) -> web.Response:
     return web.json_response({"error": message}, status=status)
 
 
+# First match wins, so subclasses come before their bases.
+_STATUS = ((games.SensitivePath, 403), (PermissionError, 403), (FileNotFoundError, 404), (ValueError, 400),
+           (cdp.CdpError, 502), (InputUnavailable, 503), (CaptureUnavailable, 503))
+
+
+async def _json(make, status: int = 200) -> web.Response:
+    """Await `make()` and answer with its result, mapping the shared functions' exceptions to status codes."""
+    try:
+        return web.json_response(await make(), status=status)
+    except tuple(t for t, _ in _STATUS) as e:
+        return _error(next(code for t, code in _STATUS if isinstance(e, t)), str(e))
+
+
+async def _body(request: web.Request, allowed: set[str]) -> dict:
+    """The JSON object body (empty when there is none); unknown fields are a ValueError."""
+    if not request.can_read_body:
+        return {}
+    try:
+        body = await request.json()
+    except (ValueError, UnicodeDecodeError):
+        raise ValueError("expected a JSON object") from None
+    if not isinstance(body, dict):
+        raise ValueError("expected a JSON object")
+    if unknown := set(body) - allowed:
+        raise ValueError(f"unknown field(s): {', '.join(sorted(unknown))}")
+    return body
+
+
+async def _with_body(request: web.Request, allowed: set[str], fn, required: tuple[str, ...] = ()):
+    body = await _body(request, allowed)
+    if missing := [k for k in required if k not in body]:
+        raise ValueError(f"missing field(s): {', '.join(missing)}")
+    return await fn(**body)
+
+
+def _appid(request: web.Request) -> int:
+    raw = request.match_info["appid"]
+    if not raw.isdigit() or int(raw) <= 0:
+        raise ValueError("appid must be a positive integer")
+    return int(raw)
+
+
 class Api:
     def __init__(self, *, auth: CertAuth, mcp: McpServer, capturer: ScreenCapturer | None, logger: logging.Logger, pairing: PairingRequests | None = None, log_keepalive: float = LOG_KEEPALIVE_SECONDS,
                  input_service: InputService | None = None, audio: AudioCapturer | None = None,
-                 controllers: ControllerService | None = None, ui: UiNavigator | None = None,
-                 console: ConsoleCollector | None = None):
+                 controllers: ControllerService | None = None, ui: UiNavigator | None = None):
         self.auth = auth
         self.mcp = mcp
         self.capturer = capturer
@@ -54,7 +96,7 @@ class Api:
         self.audio = audio
         self.controllers = controllers
         self.ui = ui
-        self.console = console
+        self._apps: Apps | None = None
         self.long_lived = LongLivedRequests()
 
     def build_app(self) -> web.Application:
@@ -62,20 +104,16 @@ class Api:
                               middlewares=[self.auth.middleware(), audit.middleware(self.log)])
         self.long_lived.install(app)
         live = self.long_lived.track
-        app.add_routes([
-            web.get("/", self.handle_root),
-            web.get("/health", self.handle_health),
+        v1 = [
             web.post("/pair/request", self.handle_pair_request),
             web.get("/pair/request/{id}", live(self.handle_pair_poll)),
             web.delete("/pair/request/{id}", self.handle_pair_cancel),
-            web.get("/pair/requests", self.handle_pair_list),
-            web.get("/stream.mjpeg", live(self.handle_stream)),
-            web.get("/frame.jpg", self.handle_frame),
+            web.get("/stream", live(self.handle_stream)),
+            web.get("/stream/frame", self.handle_frame),
             web.get("/stream/stats", self.handle_stream_stats),
             web.get("/stream/settings", self.handle_stream_settings_get),
             web.put("/stream/settings", self.handle_stream_settings_put),
             web.get("/audio", live(self.handle_audio_ws)),
-            web.get("/audio/stats", self.handle_audio_stats),
             web.get("/input", live(self.handle_input_ws)),
             web.get("/input/settings", self.handle_input_settings_get),
             web.put("/input/settings", self.handle_input_settings_put),
@@ -85,28 +123,33 @@ class Api:
             web.get("/controllers/events", live(self.handle_controller_events)),
             web.get("/ui/routes", self.handle_ui_routes),
             web.post("/ui/navigate", self.handle_ui_navigate),
+            web.post("/ui/toast", self.handle_ui_toast),
+            web.post("/cef/evaluate", self.handle_cef_evaluate),
             web.get("/plugins", self.handle_plugins),
             web.post("/plugins/install", self.handle_plugin_install),
             web.post("/plugins/{dir}/reload", self.handle_plugin_reload),
             web.put("/plugins/{dir}/files", self.handle_plugin_file_put),
             web.post("/loader/restart", self.handle_loader_restart),
-            web.post("/exec", self.handle_exec),
             web.get("/logs/tail", self.handle_logs_tail),
             web.get("/logs/stream", live(self.handle_logs_stream)),
-            web.get("/cef/console", self.handle_console),
-            web.get("/cef/console/stream", live(self.handle_console_stream)),
             web.get("/apps", self.handle_apps),
             web.get("/apps/{appid}", self.handle_app),
             web.get("/apps/{appid}/dirs", self.handle_app_dirs),
             web.get("/apps/{appid}/saves", self.handle_app_saves),
+            web.get("/apps/{appid}/proton-log", self.handle_app_proton_log),
+            web.post("/apps/{appid}/launch", self.handle_app_launch),
+            web.post("/apps/{appid}/terminate", self.handle_app_terminate),
             web.get("/fs", self.handle_fs),
             web.delete("/fs", self.handle_fs_delete),
             web.get("/fs/read", self.handle_fs_read),
             web.put("/fs/write", self.handle_fs_write),
             web.post("/fs/mkdir", self.handle_fs_mkdir),
             web.post("/fs/rename", self.handle_fs_rename),
-            web.get("/recordings", self.handle_recordings),
-            web.get("/recordings/{name}", self.handle_recording_download),
+        ]
+        app.add_routes([
+            web.get("/", self.handle_root),
+            web.get("/health", self.handle_health),
+            *[web.RouteDef(r.method, API_PREFIX + r.path, r.handler, r.kwargs) for r in v1],
             *self.mcp.routes(),
         ])
         return app
@@ -117,9 +160,8 @@ class Api:
         return web.Response(text="Decky Toolkit is running. Connect with the Decky Toolkit extension for VS Code / VSCodium.\n")
 
     async def handle_health(self, _request: web.Request) -> web.Response:
-        return web.json_response({"ok": True, **SERVER_INFO, "api_version": API_VERSION, "tools": len(self.mcp.tools),
-                                  "tools_hash": self.mcp.tools.fingerprint(), "instructions": INSTRUCTIONS,
-                                  **identity()})
+        return web.json_response({"ok": True, **SERVER_INFO, "api": list(API_VERSIONS), "tools": len(self.mcp.tools),
+                                  "tools_hash": self.mcp.tools.fingerprint(), **identity()})
 
     # ---- pairing ----
 
@@ -169,7 +211,7 @@ class Api:
         if self.pairing.claim_credentials(req):
             self.log.info("pairing: delivered credentials to %s (%s)", req.remote, req.client_name)
             return web.json_response({"status": "approved", "client_cert": req.client_cert,
-                                      "server_cert": self.pairing.server_cert, "api_version": API_VERSION},
+                                      "server_cert": self.pairing.server_cert},
                                      headers=no_store)
         return web.json_response({"status": req.status}, headers=no_store)
 
@@ -180,8 +222,6 @@ class Api:
             return _error(404, "no pending pairing request with that id")
         return web.json_response({"cancelled": True})
 
-    async def handle_pair_list(self, _request: web.Request) -> web.Response:
-        return web.json_response(self.pairing.list())
 
     async def handle_stream(self, request: web.Request) -> web.StreamResponse:
         if self.capturer is None:
@@ -207,13 +247,17 @@ class Api:
             pass
         return res
 
+
+
+
+
     async def handle_frame(self, _request: web.Request) -> web.Response:
         if self.capturer is None:
-            return web.Response(status=404, text="capture not available")
+            return _error(404, "capture not available")
         try:
             frame = await self.capturer.grab()
         except CaptureUnavailable as e:
-            return web.Response(status=503, text=str(e))
+            return _error(503, str(e))
         return web.Response(body=frame, content_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
     async def handle_stream_stats(self, _request: web.Request) -> web.Response:
@@ -227,28 +271,12 @@ class Api:
         return web.json_response(self.capturer.stream_settings())
 
     async def handle_stream_settings_put(self, request: web.Request) -> web.Response:
-        if self.capturer is None:
+        if (capturer := self.capturer) is None:
             return _error(404, "capture not available")
-        try:
-            body = await request.json()
-        except ValueError:
-            return _error(400, "expected a JSON object")
-        if not isinstance(body, dict):
-            return _error(400, "expected a JSON object")
-        unknown = set(body) - {"fps", "quality", "width", "audio"}
-        if unknown:
-            return _error(400, f"unknown field(s): {', '.join(sorted(unknown))}")
-        try:
-            return web.json_response(await self.capturer.update_settings(**body))
-        except ValueError as e:
-            return _error(400, str(e))
+        return await _json(lambda: _with_body(request, {"fps", "quality", "width", "audio"}, capturer.update_settings))
 
     # ---- audio ----
 
-    async def handle_audio_stats(self, _request: web.Request) -> web.Response:
-        if self.audio is None:
-            return _error(404, "audio not available")
-        return web.json_response(self.audio.stats())
 
     async def handle_audio_ws(self, request: web.Request) -> web.StreamResponse:
         if self.audio is None:
@@ -296,21 +324,11 @@ class Api:
         return web.json_response(self.input.status())
 
     async def handle_input_settings_put(self, request: web.Request) -> web.Response:
-        if self.input is None:
+        if (svc := self.input) is None:
             return _error(404, "input not available")
-        try:
-            body = await request.json()
-        except ValueError:
-            return _error(400, "expected a JSON object")
-        if not isinstance(body, dict) or "enabled" not in body:
-            return _error(400, 'expected {"enabled": true|false}')
-        unknown = set(body) - {"enabled"}
-        if unknown:
-            return _error(400, f"unknown field(s): {', '.join(sorted(unknown))}")
-        try:
-            return web.json_response(await self.input.set_enabled(body["enabled"]))
-        except ValueError as e:
-            return _error(400, str(e))
+        return await _json(lambda: _with_body(request, {"enabled"}, svc.set_enabled, ("enabled",)))
+
+
 
     async def handle_input_ws(self, request: web.Request) -> web.StreamResponse:
         if self.input is None:
@@ -374,28 +392,12 @@ class Api:
     async def handle_controllers(self, _request: web.Request) -> web.Response:
         if self.controllers is None:
             return _error(404, "controllers not available")
-        return web.json_response(await self.controllers.snapshot())
+        return await _json(self.controllers.snapshot)
 
     async def handle_controller_add(self, request: web.Request) -> web.Response:
-        if self.controllers is None:
+        if (controllers := self.controllers) is None:
             return _error(404, "controllers not available")
-        body: object = {}
-        if request.can_read_body:
-            try:
-                body = await request.json()
-            except ValueError:
-                return _error(400, "expected a JSON object")
-        if not isinstance(body, dict):
-            return _error(400, "expected a JSON object")
-        unknown = set(body) - {"name"}
-        if unknown:
-            return _error(400, f"unknown field(s): {', '.join(sorted(unknown))}")
-        try:
-            return web.json_response(await self.controllers.add_virtual(body.get("name")), status=201)
-        except ValueError as e:
-            return _error(400, str(e))
-        except InputUnavailable as e:
-            return _error(503, str(e))
+        return await _json(lambda: _with_body(request, {"name"}, controllers.add_virtual), status=201)
 
     async def handle_controller_remove(self, request: web.Request) -> web.Response:
         if self.controllers is None:
@@ -420,39 +422,40 @@ class Api:
 
         return await self._sse(request, events())
 
-    # ---- ui navigation ----
+    # ---- steam ui ----
 
     async def handle_ui_routes(self, _request: web.Request) -> web.Response:
         if self.ui is None:
             return _error(404, "ui navigation not available")
-        try:
-            return web.json_response(await self.ui.routes())
-        except cdp.CdpError as e:
-            return _error(502, str(e))
+        return await _json(self.ui.routes)
 
     async def handle_ui_navigate(self, request: web.Request) -> web.Response:
-        if self.ui is None:
+        if (ui := self.ui) is None:
             return _error(404, "ui navigation not available")
-        try:
-            body = await request.json()
-        except ValueError:
-            return _error(400, "expected a JSON object")
-        if not isinstance(body, dict):
-            return _error(400, "expected a JSON object")
-        unknown = set(body) - {"path", "action", "tab", "plugin", "appid"}
-        if unknown:
-            return _error(400, f"unknown field(s): {', '.join(sorted(unknown))}")
-        try:
-            return web.json_response(await self.ui.navigate(**body))
-        except ValueError as e:
-            return _error(400, str(e))
-        except cdp.CdpError as e:
-            return _error(502, str(e))
+        return await _json(lambda: _with_body(request, {"path", "action", "tab", "plugin", "appid"}, ui.navigate))
+
+    async def handle_ui_toast(self, request: web.Request) -> web.Response:
+        async def run(title: str, body: str, duration_ms: int = 5000) -> dict:
+            return {"result": await toast(title, body, duration_ms)}
+        return await _json(lambda: _with_body(request, {"title", "body", "duration_ms"}, run, ("title", "body")))
+
+    async def handle_cef_evaluate(self, request: web.Request) -> web.Response:
+        async def run(expression: str, target: str | None = None, timeout: float = 15) -> dict:
+            return {"value": await cdp.evaluate_in(target, expression, timeout=timeout)}
+        return await _json(lambda: _with_body(request, {"expression", "target", "timeout"}, run, ("expression",)))
 
     # ---- plugins ----
 
     async def handle_plugins(self, _request: web.Request) -> web.Response:
-        return web.json_response(await list_plugins())
+        return await _json(list_plugins)
+
+    async def handle_plugin_reload(self, request: web.Request) -> web.Response:
+        mode = request.query.get("mode", "backend")
+        return await _json(lambda: live.reload(request.match_info["dir"], mode))
+
+    async def handle_loader_restart(self, _request: web.Request) -> web.Response:
+        await schedule_loader_restart()
+        return web.json_response({"restarting": True, "delay_s": 1})
 
     async def handle_plugin_install(self, request: web.Request) -> web.Response:
         restart = request.query.get("restart", "loader")
@@ -481,18 +484,6 @@ class Api:
                 return _error(502, f"installed, but plugin reload failed: {e}")
         return web.json_response(result)
 
-    async def handle_plugin_reload(self, request: web.Request) -> web.Response:
-        mode = request.query.get("mode")
-        try:
-            if mode is None:
-                return web.json_response(await plugins.reload_plugin(request.match_info["dir"]))
-            return web.json_response(await live.reload(request.match_info["dir"], mode))
-        except ValueError as e:
-            return _error(400, str(e))
-        except FileNotFoundError as e:
-            return _error(404, str(e))
-        except cdp.CdpError as e:
-            return _error(502, str(e))
 
     async def handle_plugin_file_put(self, request: web.Request) -> web.Response:
         rel = request.query.get("path", "")
@@ -506,25 +497,7 @@ class Api:
         except FileNotFoundError as e:
             return _error(404, str(e))
 
-    async def handle_exec(self, request: web.Request) -> web.Response:
-        try:
-            body = await request.json()
-        except ValueError:
-            return _error(400, "expected a JSON body {command, cwd?, timeout?, root?, stdin?, max_output?}")
-        if not isinstance(body, dict) or set(body) - {"command", "cwd", "timeout", "root", "stdin", "max_output"}:
-            return _error(400, "expected a JSON object with command, cwd, timeout, root, stdin, max_output")
-        try:
-            return web.json_response(await shell.run_command(**body, logger=self.log))
-        except (ValueError, TypeError) as e:
-            return _error(400, str(e))
-        except PermissionError as e:
-            return _error(403, str(e))
-        except FileNotFoundError as e:
-            return _error(404, str(e))
 
-    async def handle_loader_restart(self, request: web.Request) -> web.Response:
-        await schedule_loader_restart()
-        return web.json_response({"restarting": True, "delay_s": 1})
 
     # ---- logs ----
 
@@ -543,16 +516,10 @@ class Api:
         return source, plugin, max(0, min(n, logs.MAX_TAIL))
 
     async def handle_logs_tail(self, request: web.Request) -> web.Response:
-        try:
+        async def tail() -> dict:
             source, plugin, n = self._log_query(request)
-            lines = await logs.tail_lines(source, plugin, n)
-        except ValueError as e:
-            return _error(400, str(e))
-        except FileNotFoundError as e:
-            return _error(404, str(e))
-        except RuntimeError as e:
-            return _error(500, str(e))
-        return web.json_response({"lines": lines})
+            return {"lines": await logs.tail_lines(source, plugin, n)}
+        return await _json(tail)
 
     async def handle_logs_stream(self, request: web.Request) -> web.StreamResponse:
         try:
@@ -562,41 +529,6 @@ class Api:
         if source == "plugin" and not os.path.isdir(logs.plugin_log_dir(plugin or "")):
             return _error(404, f"no log dir {logs.plugin_log_dir(plugin or '')}")
         return await self._sse(request, logs.follow(source, plugin, n))
-
-    # ---- steam ui console ----
-
-    async def handle_console(self, request: web.Request) -> web.Response:
-        if self.console is None:
-            return _error(404, "console capture not available")
-        q = request.query
-        try:
-            lines = int(q.get("lines", 200))
-            return web.json_response(self.console.query(q.get("target") or None, lines, q.get("level", DEFAULT_LEVEL),
-                                                        q.get("since") or None, q.get("grep") or None))
-        except ValueError as e:
-            return _error(400, str(e))
-
-    async def handle_console_stream(self, request: web.Request) -> web.StreamResponse:
-        if self.console is None:
-            return _error(404, "console capture not available")
-        q = request.query
-        target, level = q.get("target") or None, q.get("level", DEFAULT_LEVEL)
-        try:
-            tail = max(0, min(int(q.get("tail", logs.DEFAULT_TAIL)), logs.MAX_TAIL))
-            self.console.query(target, 1, level)  # validates before the stream starts
-        except ValueError as e:
-            return _error(400, str(e))
-        console = self.console
-
-        async def events():
-            source = console.follow(target, tail, level)
-            try:
-                async for entry in source:
-                    yield json.dumps(entry, ensure_ascii=False)
-            finally:
-                await source.aclose()
-
-        return await self._sse(request, events())
 
     async def _sse(self, request: web.Request, lines) -> web.StreamResponse:
         """Stream an async iterator of strings as `data:` events with keepalive comments."""
@@ -642,45 +574,37 @@ class Api:
             await lines.aclose()
         return res
 
-    # ---- apps, game files, recordings ----
+    # ---- apps and game files ----
 
     @property
     def apps(self) -> Apps:
-        if getattr(self, "_apps", None) is None:
+        if self._apps is None:
             self._apps = Apps()
         return self._apps
-
-    async def _library_call(self, fn, *args) -> web.Response:
-        try:
-            return web.json_response(await fn(*args))
-        except games.SensitivePath as e:
-            return _error(403, str(e))
-        except FileNotFoundError as e:
-            return _error(404, str(e))
-        except ValueError as e:
-            return _error(400, str(e))
-        except cdp.CdpError as e:
-            return _error(502, str(e))
-
-    async def _app_route(self, request: web.Request, fn) -> web.Response:
-        raw = request.match_info["appid"]
-        if not raw.isdigit() or int(raw) <= 0:
-            return _error(400, "appid must be a positive integer")
-        return await self._library_call(fn, int(raw))
 
     async def handle_apps(self, request: web.Request) -> web.Response:
         installed = request.query.get("installed_only", "1") not in ("0", "false")
         tools = request.query.get("include_tools", "0") in ("1", "true")
-        return await self._library_call(self.apps.list, installed, request.query.get("query"), tools)
+        return await _json(lambda: self.apps.list(installed, request.query.get("query"), tools))
 
     async def handle_app(self, request: web.Request) -> web.Response:
-        return await self._app_route(request, self.apps.info)
+        return await _json(lambda: self.apps.info(_appid(request)))
 
     async def handle_app_dirs(self, request: web.Request) -> web.Response:
-        return await self._app_route(request, self.apps.dirs)
+        return await _json(lambda: self.apps.dirs(_appid(request)))
 
     async def handle_app_saves(self, request: web.Request) -> web.Response:
-        return await self._app_route(request, self.apps.saves)
+        return await _json(lambda: self.apps.saves(_appid(request), int(request.query.get("limit", 40))))
+
+    async def handle_app_proton_log(self, request: web.Request) -> web.Response:
+        return await _json(lambda: asyncio.to_thread(games.proton_log, _appid(request), int(request.query.get("lines", 200))))
+
+    async def handle_app_launch(self, request: web.Request) -> web.Response:
+        return await _json(lambda: _with_body(request, {"wait"}, lambda wait=15: self.apps.launch(_appid(request), wait)))
+
+    async def handle_app_terminate(self, request: web.Request) -> web.Response:
+        return await _json(lambda: _with_body(request, {"confirm", "wait"},
+                                              lambda confirm=False, wait=15: self.apps.terminate(_appid(request), confirm, wait)))
 
     async def handle_fs(self, request: web.Request) -> web.Response:
         path = request.query.get("path")
@@ -690,10 +614,8 @@ class Api:
             depth = int(request.query.get("depth", 1))
         except ValueError:
             return _error(400, "depth must be an integer")
-
-        async def listing() -> dict:
-            return await asyncio.to_thread(games.fs_list, path, depth, request.query.get("glob") or None)
-        return await self._library_call(listing)
+        glob = request.query.get("glob") or None
+        return await self._fs_call(request, lambda: games.fs_list(path, depth, glob))
 
     @staticmethod
     def _fs_roots() -> tuple[list[tuple[str, int]], list[tuple[str, int]], list[str]]:
@@ -748,20 +670,9 @@ class Api:
             return games.fs_write(path, data, roots, keys, create=create, overwrite=overwrite)
         return await self._fs_call(request, write)
 
-    async def _fs_body(self, request: web.Request) -> dict:
-        if not request.can_read_body:
-            return {}
-        try:
-            body = await request.json()
-        except (ValueError, UnicodeDecodeError):
-            raise ValueError("expected a JSON object")
-        if not isinstance(body, dict):
-            raise ValueError("expected a JSON object")
-        return body
-
     async def handle_fs_mkdir(self, request: web.Request) -> web.Response:
         try:
-            body = await self._fs_body(request)
+            body = await _body(request, {"path", "parents"})
         except ValueError as e:
             return _error(400, str(e))
         path = body.get("path") or request.query.get("path")
@@ -776,7 +687,7 @@ class Api:
 
     async def handle_fs_rename(self, request: web.Request) -> web.Response:
         try:
-            body = await self._fs_body(request)
+            body = await _body(request, {"from", "to", "overwrite"})
         except ValueError as e:
             return _error(400, str(e))
         src, dst = body.get("from"), body.get("to")
@@ -807,20 +718,3 @@ class Api:
             return games.fs_delete(p, True, roots)
         return await self._fs_call(request, delete)
 
-    async def handle_recordings(self, _request: web.Request) -> web.Response:
-        if self.capturer is None:
-            return _error(404, "capture not available")
-        return web.json_response(await asyncio.to_thread(recorder_for(self.capturer).list))
-
-    async def handle_recording_download(self, request: web.Request) -> web.StreamResponse:
-        if self.capturer is None:
-            return _error(404, "capture not available")
-        try:
-            name = check_name(request.match_info["name"])
-        except ValueError as e:
-            return _error(400, str(e))
-        path = recorder_for(self.capturer).path_for(name)
-        if not os.path.isfile(path):
-            return _error(404, f"no recording named {name}")
-        return web.FileResponse(path, headers={"Content-Type": "video/x-matroska",
-                                               "Content-Disposition": f'attachment; filename="{name}.mkv"'})

@@ -26,11 +26,11 @@ Needs Node.js 20 or newer.
 | Command | What it does |
 | --- | --- |
 | `pair [host[:port]] [--name <name>]` | Pair this computer with a device. Without a host it searches the local network. |
-| `status [--json]` | Show the paired device, whether it answers and whether it still accepts this computer. |
+| `status [--json]` | Show the paired device, whether it answers, whether it still accepts this computer and whether its Decky Toolkit plugin serves the client API this CLI needs (`deploy` and `dev` refuse it otherwise; update the plugin with Decky's Install Plugin from URL). |
 | `mcp` | Run an MCP server over stdio: the device's tools plus `plugin_deploy` and `device_status`. |
 | `deploy [dir] [--restart none\|plugin\|loader]` | Install the Decky plugin in `dir` (default: the current folder) on the device and wait until it is loaded. Run the plugin's build first. |
 | `dev [dir] [--no-build]` | Develop with live reload until Ctrl-C: runs the plugin's `watch` script, deploys once, then pushes each changed file and reloads the plugin in place. A bundle change reloads only the frontend (the backend keeps running), a Python change restarts the backend, a `plugin.json` or `package.json` change deploys again. You stay on the plugin's panel or page, and load errors are shown with `src/` positions. |
-| `call <tool> [json-args] [--out <file>]` | Call one device tool, for example `call screen_capture --out screen.jpg`. Text is printed, images are saved. |
+| `call <tool> [json-args] [--out <file>]` | Call one device tool, for example `call screen_capture --out screen.jpg`. Text is printed, images are saved. Piping into `head` and the like is fine. |
 | `forget` | Forget the pairing on this computer. Remove the client in the device's Decky Toolkit panel too. |
 
 Exit codes: 0 success, 1 failure, 2 wrong usage.

@@ -44,7 +44,7 @@
     if (abort) abort.abort();
     abort = new AbortController();
     try {
-      const res = await fetch(base + '/stream.mjpeg', { signal: abort.signal, cache: 'no-store' });
+      const res = await fetch(base + '/stream', { signal: abort.signal, cache: 'no-store' });
       if (res.status === 401) { show('Unauthorized: the stored token was rejected.\nRe-pair the device from the Devices view (… → Re-pair) or run "Decky: Enter token manually".'); vscode.postMessage({ type: 'lost' }); return; }
       if (!res.ok || !res.body) throw new Error('HTTP ' + res.status + ' ' + (await res.text()).slice(0, 300));
       show(''); armStall();

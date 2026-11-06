@@ -1,10 +1,9 @@
 import * as vscode from 'vscode';
-import type { AppSummary, FsEntry, GameDirs, GameSaves, SaveCandidate } from '@decky-toolkit/client/api';
-import { DeckyClient, describeError, isOldDevice } from '@decky-toolkit/client/client';
+import type { AppSummary, FsEntry, GameDirs, GameSaves, ProtonLog, SaveCandidate } from '@decky-toolkit/client/api';
+import { DeckyClient, describeError } from '@decky-toolkit/client/client';
 import type { Connection, ConnectionState, SavedDevice } from './connection';
 import { deckyUri, deviceAuthority, globEscape } from './remoteFs';
 
-export const GAMES_UNSUPPORTED = 'update Decky Toolkit on the device';
 const MAX_SAVE_LOCATIONS = 8;
 
 /** `Proton 11`, `Proton Experimental`, `Linux runtime` or `native`. */
@@ -213,13 +212,6 @@ export class GamesTreeProvider implements vscode.TreeDataProvider<GameNode>, vsc
     try {
       apps = sortGames((await client.apps()).apps);
     } catch (e) {
-      if (isOldDevice(e)) {
-        const n = info('Games', 'game', GAMES_UNSUPPORTED);
-        n.iconPath = new vscode.ThemeIcon('game', new vscode.ThemeColor('disabledForeground'));
-        n.tooltip = 'The Decky Toolkit plugin on this device predates the library routes (GET /apps answers 404).';
-        n.contextValue = 'game.unsupported';
-        return [n];
-      }
       const n = info(`Could not load games: ${describeError(e)}`, 'warning');
       n.tooltip = 'Click to retry';
       n.command = { command: 'decky-toolkit.refreshGames', title: 'Retry' };
@@ -514,15 +506,13 @@ export async function openDeckyPath(conn: Connection): Promise<void> {
   else await vscode.commands.executeCommand('vscode.open', deckyUri(device, path));
 }
 
-interface LaunchResult { name?: string; launched?: boolean; running?: boolean; terminated?: boolean; note?: string }
-
 export async function gameLaunch(conn: Connection, tree: GamesTreeProvider, arg?: unknown): Promise<void> {
   const client = await conn.client();
   if (!client) return;
   const app = await gameFor(tree, arg, 'Launch which game?');
   if (!app) return;
   const res = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Launching ${gameName(app)}` },
-    async () => JSON.parse(await client.callToolText('app_launch', { appid: app.appid }, 45000)) as LaunchResult);
+    () => client.launchApp(app.appid));
   if (res.running) void vscode.window.showInformationMessage(`Decky Toolkit: ${res.name ?? gameName(app)} is running${res.launched ? '' : ' (it already was)'}.`);
   else void vscode.window.showWarningMessage(`Decky Toolkit: ${res.name ?? gameName(app)} did not start${res.note ? `: ${res.note}` : ''}.`);
   tree.refresh();
@@ -538,18 +528,13 @@ export async function gameTerminate(conn: Connection, tree: GamesTreeProvider, a
     { modal: true, detail: 'The game is closed without saving; unsaved progress is lost.' }, 'Terminate');
   if (ok !== 'Terminate') return;
   const res = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Terminating ${name}` },
-    async () => JSON.parse(await client.callToolText('app_terminate', { appid: app.appid, confirm: true }, 45000)) as LaunchResult);
+    () => client.terminateApp(app.appid));
   if (res.running) void vscode.window.showWarningMessage(`Decky Toolkit: ${name} is still running.`);
   else void vscode.window.showInformationMessage(`Decky Toolkit: ${name} ${res.terminated ? 'terminated' : 'was not running'}.`);
   tree.refresh();
 }
 
-interface ProtonLog {
-  proton_log: { path: string; exists?: boolean; lines?: string[]; mtime?: string; hint?: string };
-  steam_logs: { file: string; mtime: string; lines: string[] }[];
-}
-
-export function protonLogText(app: Pick<AppSummary, 'appid' | 'name'>, device: string, log: ProtonLog): string {
+export function protonLogText(app: Pick<AppSummary, 'appid' | 'name'>, device: string, log: Pick<ProtonLog, 'proton_log' | 'steam_logs'>): string {
   const out = [`# ${gameName(app)} (${app.appid}) on ${device}`, ''];
   const p = log.proton_log;
   if (p.lines) out.push(`## ${p.path} (modified ${p.mtime})`, ...p.lines, '');
@@ -564,7 +549,7 @@ export async function gameProtonLog(conn: Connection, tree: GamesTreeProvider, a
   if (!client) return;
   const app = await gameFor(tree, arg, 'Show the Proton log of which game?');
   if (!app) return;
-  const log = JSON.parse(await client.callToolText('logs_read', { source: 'proton', appid: app.appid, lines: 1000 }, 30000)) as ProtonLog;
+  const log = await client.protonLog(app.appid);
   const doc = await vscode.workspace.openTextDocument({ content: protonLogText(app, conn.label, log), language: 'log' });
   await vscode.window.showTextDocument(doc, { preview: true });
 }

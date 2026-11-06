@@ -112,17 +112,17 @@ def test_routes(plugin):
         base = f"http://127.0.0.1:{runner.addresses[0][1]}"
         try:
             async with ClientSession(timeout=ClientTimeout(total=10)) as s:
-                async with s.put(f"{base}/plugins/demo/files?path=dist/index.js", data=b"fresh", headers=H) as r:
+                async with s.put(f"{base}/api/v1/plugins/demo/files?path=dist/index.js", data=b"fresh", headers=H) as r:
                     assert r.status == 200 and (await r.json())["bytes"] == 5
-                async with s.put(f"{base}/plugins/demo/files?path=../x", data=b"x", headers=H) as r:
+                async with s.put(f"{base}/api/v1/plugins/demo/files?path=../x", data=b"x", headers=H) as r:
                     assert r.status == 400
-                async with s.put(f"{base}/plugins/demo/files?path=config/loginusers.vdf", data=b"x", headers=H) as r:
+                async with s.put(f"{base}/api/v1/plugins/demo/files?path=config/loginusers.vdf", data=b"x", headers=H) as r:
                     assert r.status == 403
-                async with s.put(f"{base}/plugins/missing/files?path=a", data=b"x", headers=H) as r:
+                async with s.put(f"{base}/api/v1/plugins/missing/files?path=a", data=b"x", headers=H) as r:
                     assert r.status == 404
-                async with s.put(f"{base}/plugins/demo/files?path=dist/index.js", data=b"x") as r:
+                async with s.put(f"{base}/api/v1/plugins/demo/files?path=dist/index.js", data=b"x") as r:
                     assert r.status == 401
-                async with s.post(f"{base}/plugins/demo/reload?mode=bogus", headers=H) as r:
+                async with s.post(f"{base}/api/v1/plugins/demo/reload?mode=bogus", headers=H) as r:
                     assert r.status == 400
         finally:
             await runner.cleanup()

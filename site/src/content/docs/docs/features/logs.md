@@ -14,7 +14,7 @@ from a deploy goes to the **Decky** output channel; a failed build fails the dep
 
 ## From scripts
 
-The same logs are available over HTTP (`GET /logs/stream` as SSE, `GET /logs/tail`) to paired clients; see the
+The same logs are available over HTTP (`GET /api/v1/logs/stream` as SSE, `GET /api/v1/logs/tail`) to paired clients; see the
 [API reference](https://github.com/jackhric/decky-toolkit/blob/main/docs/api.md).
 
 MCP clients can use `logs_read` (`source`: `loader`, `plugin`, `steam_console` or `proton`) and `logs_wait`.

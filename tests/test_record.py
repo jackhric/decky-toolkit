@@ -1,4 +1,4 @@
-"""Screen recording: Matroska writer, recorder limits and the /recordings routes. Run with: ./scripts/test.sh"""
+"""Screen recording: Matroska writer, recorder limits and recording_list. Run with: ./scripts/test.sh"""
 import asyncio
 import json
 import logging
@@ -17,7 +17,7 @@ from decky_toolkit.media import record as record_mod  # noqa: E402
 from decky_toolkit.media.capture import CaptureUnavailable  # noqa: E402
 from decky_toolkit.media.record import MkvWriter, Recorder, RecordingBusy, check_name, recorder_for  # noqa: E402
 
-from test_routes import H, with_server  # noqa: E402
+from decky_toolkit.tools import build_registry  # noqa: E402
 
 LOG = logging.getLogger("t")
 JPEG = (Path(__file__).parent / "fixtures" / "tiny.jpg").read_bytes()
@@ -196,7 +196,7 @@ def test_record_with_audio_list_and_delete(runtime):
     assert res["path"] == str(path) and path.is_file() and not (runtime / "recordings" / "clip.mkv.part").exists()
     assert res["audio"] is True and res["audio_chunks"] > 10
     assert 10 <= res["frames"] <= 22 and 0.5 <= res["duration_s"] <= 1.0
-    assert res["size"] == path.stat().st_size and res["download"] == "/recordings/clip"
+    assert res["size"] == path.stat().st_size
     listing = rec.list()
     assert [r["name"] for r in listing["recordings"]] == ["clip"] and listing["active"] is None
     with pytest.raises(ValueError):
@@ -253,25 +253,8 @@ def test_record_no_frames_cleans_up(runtime, monkeypatch):
     assert "error" in rec.list()["last"]
 
 
-def test_recordings_routes(runtime):
+def test_recording_list_tool(runtime):
     cap = FakeCapturer()
     asyncio.run(recorder_for(cap).record(seconds=0.3, name="dl"))
-    data = (runtime / "recordings" / "dl.mkv").read_bytes()
-
-    async def run(s, base):
-        async with s.get(f"{base}/recordings") as r:
-            assert r.status == 401
-        async with s.get(f"{base}/recordings", headers=H) as r:
-            assert r.status == 200
-            assert [x["name"] for x in (await r.json())["recordings"]] == ["dl"]
-        async with s.get(f"{base}/recordings/dl", headers=H) as r:
-            assert r.status == 200 and r.headers["Content-Type"] == "video/x-matroska"
-            assert "attachment" in r.headers["Content-Disposition"]
-            assert await r.read() == data
-        async with s.get(f"{base}/recordings/dl.mkv", headers=H) as r:
-            assert r.status == 200
-        async with s.get(f"{base}/recordings/..%2Fsecret", headers=H) as r:
-            assert r.status in (400, 404)
-        async with s.get(f"{base}/recordings/missing", headers=H) as r:
-            assert r.status == 404
-    asyncio.run(with_server(run, capturer=cap))
+    res = asyncio.run(build_registry(cap).call("recording_list", {}))
+    assert [x["name"] for x in json.loads(res["content"][0]["text"])["recordings"]] == ["dl"]

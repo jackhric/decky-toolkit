@@ -1,6 +1,6 @@
 import * as path from 'path';
 import type { Health, RestartMode } from '@decky-toolkit/client/api';
-import { DeckyClient, DeviceAddress, describeError, isConnectionError, isRejection } from '@decky-toolkit/client/client';
+import { DeckyClient, DeviceAddress, describeError, isConnectionError, isRejection, outdatedDevice } from '@decky-toolkit/client/client';
 import { DeployStep, deployPlugin, readWorkspacePlugin } from '@decky-toolkit/client/deploy';
 import * as identityFile from '@decky-toolkit/client/identity';
 
@@ -65,7 +65,7 @@ export interface StatusReport {
   device: identityFile.IdentityDevice | null;
   reachable: boolean;
   paired: boolean;
-  plugin: { name: string; version: string; apiVersion: number; tools: number } | null;
+  plugin: { name: string; version: string; api: string[]; tools: number } | null;
   error?: string;
 }
 
@@ -83,6 +83,7 @@ export async function deviceStatus(): Promise<StatusReport> {
   else if (check === 'rejected') error = rejected(file.device);
   else if (check === 'unsupported') error = 'the device runs an older Decky Toolkit; update it';
   else if (typeof check === 'object') error = explain(check.unknown, file.device);
+  else error = outdatedDevice(health);
   return {
     identityFile: identityFile.identityPath(),
     identity: !!file,
@@ -90,7 +91,7 @@ export async function deviceStatus(): Promise<StatusReport> {
     // A device that is not the one we paired with fails the pinned handshake, yet it answered.
     reachable: !!health || isRejection(healthError),
     paired,
-    plugin: health ? { name: health.name, version: health.version, apiVersion: health.api_version, tools: health.tools } : null,
+    plugin: health ? { name: health.name, version: health.version, api: health.api ?? [], tools: health.tools } : null,
     ...(error ? { error } : {}),
   };
 }

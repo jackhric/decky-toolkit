@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { homedir } from 'os';
 import * as path from 'path';
 import { ActionsTreeProvider, WORKSPACE_PLUGIN } from './actionsTree';
-import { DeckyClient, describeError, isMissingRoute } from '@decky-toolkit/client/client';
+import { DeckyClient, describeError } from '@decky-toolkit/client/client';
 import * as identityFile from '@decky-toolkit/client/identity';
 import { McpConfig, formatMcpConfig, mergeMcpConfig, parseMcpConfig, rebaseMcpConfig } from '@decky-toolkit/client/mcpConfig';
 import { Connection, LinkState, linkSuffix } from './connection';
@@ -59,7 +59,7 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   const pluginsView = vscode.window.createTreeView('decky-toolkit.plugins', { treeDataProvider: pluginsTree });
   const gamesTree = new GamesTreeProvider(c);
   const gamesView = vscode.window.createTreeView('decky-toolkit.games', { treeDataProvider: gamesTree, showCollapseAll: true });
-  const controllers = new ControllerWatcher(c, () => c.proxy.start());
+  const controllers = new ControllerWatcher(c, () => c.proxy.apiBase());
   const controllersTree = new ControllersTreeProvider(controllers);
   const controllersView = vscode.window.createTreeView('decky-toolkit.controllers', { treeDataProvider: controllersTree });
   ctx.subscriptions.push(
@@ -245,14 +245,7 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     const client = await c.client();
     const dir = client && await resolveDir(client, workspacePlugins, arg, 'Plugin to reload');
     if (!client || !dir) return;
-    try {
-      await client.reloadPlugin(dir);
-    } catch (e) {
-      if (isMissingRoute(e)) {
-        throw new Error('the Decky Toolkit plugin on the device has no POST /plugins/{dir}/reload yet; update it, or use "Decky: Restart loader".');
-      }
-      throw e;
-    }
+    await client.reloadPlugin(dir);
     void vscode.window.showInformationMessage(`Decky Toolkit: reloaded ${dir}.`);
     refreshPlugins();
   });
@@ -270,7 +263,7 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     if (!client) return;
     const body = await vscode.window.showInputBox({ prompt: 'Toast text to show on the device', value: 'Hello from VS Code' });
     if (!body) return;
-    await client.callToolText('ui_toast', { title: 'VS Code', body });
+    await client.toast('VS Code', body);
   });
   command('decky-toolkit.writeMcpConfig', () => writeMcpConfig(c));
   command('decky-toolkit.copyMcpUrl', async () => {
@@ -346,13 +339,7 @@ async function installZip(c: Connection): Promise<void> {
   await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Installing ${filename} on ${c.label}` }, async progress => {
     const data = await vscode.workspace.fs.readFile(uri);
     progress.report({ message: `uploading ${(data.length / 1024).toFixed(0)} KiB…` });
-    let result;
-    try {
-      result = await client.installPlugin(data, filename, 'loader');
-    } catch (e) {
-      if (isMissingRoute(e)) throw new Error('the Decky Toolkit plugin on the device has no POST /plugins/install yet; update it.');
-      throw e;
-    }
+    const result = await client.installPlugin(data, filename, 'loader');
     if (result.restarted === 'loader') {
       progress.report({ message: 'waiting for the loader to restart…' });
       await client.waitForRestart();
@@ -388,7 +375,8 @@ async function evaluate(c: Connection, out: vscode.OutputChannel, ctx: vscode.Ex
   await ctx.workspaceState.update('decky-toolkit.lastExpression', expression);
   out.appendLine(`> ${expression}`);
   try {
-    const result = await client.callToolText('cef_evaluate', { expression });
+    const value = await client.evaluate(expression);
+    const result = value === undefined || value === null ? 'undefined' : typeof value === 'string' ? value : JSON.stringify(value, null, 2);
     out.appendLine(result);
     if (result.length <= 200 && !result.includes('\n')) void vscode.window.showInformationMessage(`Steam: ${result}`);
     else out.show(true);

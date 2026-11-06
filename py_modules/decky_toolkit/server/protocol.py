@@ -1,7 +1,7 @@
 """MCP over Streamable HTTP (stateless): JSON-RPC dispatch for initialize, ping, tools/list, tools/call.
 
 No sessions, no SSE: a POST always gets a plain application/json reply (allowed by every spec
-revision from 2025-03-26 on), GET returns 405. Authentication is applied by the app middleware.
+revision from 2025-03-26 on), GET and DELETE return 405. Authentication is applied by the app middleware.
 """
 import json
 import logging
@@ -69,15 +69,11 @@ class McpServer:
         return [
             web.post("/mcp", self.handle_post),
             web.get("/mcp", self.handle_method_not_allowed),
-            web.delete("/mcp", self.handle_delete),
+            web.delete("/mcp", self.handle_method_not_allowed),
         ]
 
     async def handle_method_not_allowed(self, _request: web.Request) -> web.Response:
-        return web.Response(status=405, headers={"Allow": "POST, DELETE"})
-
-    async def handle_delete(self, _request: web.Request) -> web.Response:
-        # Stateless server: there is no session to terminate.
-        return web.Response(status=200)
+        return web.Response(status=405, headers={"Allow": "POST"})
 
     async def handle_post(self, request: web.Request) -> web.Response:
         version = request.headers.get("MCP-Protocol-Version")

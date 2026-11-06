@@ -6,6 +6,8 @@ from typing import Any, Iterable
 
 from aiohttp import web
 
+from . import PAIR_REQUEST_PATH
+
 # (remote ip, client kind: "mcp" for /mcp, "http" for the REST routes, "local" outside a request,
 # paired client name or "-")
 request_origin: contextvars.ContextVar[tuple[str, str, str]] = contextvars.ContextVar(
@@ -18,7 +20,7 @@ AUDITED_TOOLS = frozenset({
     "input_settings", "controller_remove", "ui_navigate",
 })
 AUDITED_PREFIXES = ("input_",)
-_UNAUDITED_ROUTES = ("/mcp", "/pair/request")
+_UNAUDITED_ROUTES = ("/mcp", PAIR_REQUEST_PATH)
 
 
 def is_audited(tool: str, audited: Iterable[str] = AUDITED_TOOLS) -> bool:

@@ -166,7 +166,7 @@ function printStatus(s: StatusReport): void {
   const rows: [string, string][] = [['Identity', s.identity ? s.identityFile : `none (${s.identityFile})`]];
   if (s.device) rows.push(['Device', `${s.device.name} (${s.device.host}:${s.device.port})`]);
   if (s.identity) rows.push(['Reachable', s.reachable ? 'yes' : 'no']);
-  if (s.plugin) rows.push(['Plugin', `${s.plugin.name} ${s.plugin.version}, api ${s.plugin.apiVersion}, ${s.plugin.tools} tools`]);
+  if (s.plugin) rows.push(['Plugin', `${s.plugin.name} ${s.plugin.version}, api ${s.plugin.api.join(', ') || 'none'}, ${s.plugin.tools} tools`]);
   if (s.reachable) rows.push(['Paired', s.paired ? 'yes' : 'no']);
   for (const [k, v] of rows) out(`${k.padEnd(10)} ${v}`);
   if (s.error) out(`\n${s.error[0].toUpperCase()}${s.error.slice(1)}.`);
@@ -280,6 +280,11 @@ const COMMANDS: Record<string, (argv: string[]) => Promise<number>> = {
 };
 
 export async function main(argv: string[]): Promise<number> {
+  // A reader that stops early (`| head`) closes the pipe: that ends the output, not with a crash.
+  process.stdout.on('error', (e: NodeJS.ErrnoException) => {
+    if (e.code !== 'EPIPE') throw e;
+    process.exit(process.exitCode ?? 0);
+  });
   const [command, ...rest] = argv;
   try {
     if (command === '-v' || command === '--version') { out(VERSION); return 0; }

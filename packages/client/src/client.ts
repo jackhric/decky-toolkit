@@ -18,13 +18,17 @@ import type {
   PairPoll,
   PairRequestCreated,
   PluginInfo,
+  ProtonLog,
   RestartMode,
+  StreamSettings,
+  StreamSettingsPatch,
   StreamStats,
   ToolCallResult,
   ToolDescription,
   ToolsListResult,
   UiRoutes,
   VirtualPadCreated,
+  AppActionResult,
 } from './api';
 import { DeviceResponse, Identity, PeerCert, TrustError, deviceFetch, isPlainHttpDevice } from './transport';
 
@@ -41,7 +45,16 @@ export class HttpError extends Error {
   }
 }
 
-export class ToolError extends Error {}
+/** The client API version this client speaks; every client route lives under `API_BASE`. */
+export const API = 'v1';
+export const API_BASE = `/api/${API}`;
+
+/** Why this client cannot work with the device (it does not serve `API`), or undefined when it can. */
+export function outdatedDevice(health: Health): string | undefined {
+  return health.api?.includes(API)
+    ? undefined
+    : `the Decky Toolkit plugin on the device (${health.version}) is too old for this client; update it with Decky's Install Plugin from URL`;
+}
 
 function summarize(body: string): string {
   try {
@@ -51,24 +64,6 @@ function summarize(body: string): string {
     // not JSON
   }
   return body.length > 200 ? body.slice(0, 200) + '…' : body;
-}
-
-/**
- * True when the device predates a planned route. aiohttp answers unknown paths with a plain-text
- * 404 (or 405 for a known path with another method), while the new routes reply with JSON errors.
- */
-export function isMissingRoute(e: unknown): boolean {
-  if (!(e instanceof HttpError) || (e.status !== 404 && e.status !== 405)) return false;
-  try {
-    return typeof JSON.parse(e.body)?.error !== 'string';
-  } catch {
-    return true;
-  }
-}
-
-/** For GET/POST routes where 404 has no meaning of its own: the device predates the route. */
-export function isOldDevice(e: unknown): boolean {
-  return e instanceof HttpError && (e.status === 404 || e.status === 405);
 }
 
 /** The server's own `{"error"}` text, for messages that must show it as-is. */
@@ -147,25 +142,41 @@ export class DeckyClient {
     });
   }
 
+  /** A client API route: `path` is relative to `API_BASE`. */
+  api(path: string, init: RequestInit & { timeoutMs?: number } = {}): Promise<DeviceResponse> {
+    return this.fetch(API_BASE + path, init);
+  }
+
   private async json<T>(path: string, init: RequestInit & { timeoutMs?: number } = {}): Promise<T> {
-    const res = await this.fetch(path, init);
+    const res = await this.api(path, init);
     const text = await res.text();
     if (!res.ok) throw new HttpError(res.status, text, path);
     return JSON.parse(text) as T;
   }
 
-  health(timeoutMs = 5000): Promise<Health> {
-    return this.json<Health>('/health', { timeoutMs });
+  private post<T>(path: string, body: unknown, timeoutMs = 15000): Promise<T> {
+    return this.json<T>(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), timeoutMs });
+  }
+
+  private put<T>(path: string, body: unknown, timeoutMs = 15000): Promise<T> {
+    return this.json<T>(path, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), timeoutMs });
+  }
+
+  async health(timeoutMs = 5000): Promise<Health> {
+    const res = await this.fetch('/health', { timeoutMs });
+    const text = await res.text();
+    if (!res.ok) throw new HttpError(res.status, text, '/health');
+    return JSON.parse(text) as Health;
   }
 
   /**
-   * Whether the device still accepts this client's pairing. `/health` needs none, so this asks a paired route
-   * (`/stream/stats` 404s on devices without capture, which still counts). Only a 401 or a device that is not the
-   * one we paired with is `rejected`; a plain-HTTP device is `unsupported`; any other failure says nothing either way.
+   * Whether the device still accepts this client's pairing. `/health` needs none, so this asks a paired route.
+   * Only a 401 or a device that is not the one we paired with is `rejected`; a plain-HTTP device is `unsupported`;
+   * any other failure says nothing either way.
    */
   async acceptsIdentity(): Promise<'accepted' | 'rejected' | 'unsupported' | { unknown: unknown }> {
     try {
-      const res = await this.fetch('/stream/stats', { timeoutMs: 5000 });
+      const res = await this.api('/stream/stats', { timeoutMs: 5000 });
       await res.text();
       return res.status === 401 ? 'rejected' : 'accepted';
     } catch (e) {
@@ -183,7 +194,7 @@ export class DeckyClient {
     Promise<{ created: PairRequestCreated; serverCert: PeerCert } | 'unsupported'> {
     let res: DeviceResponse;
     try {
-      res = await this.fetch('/pair/request', {
+      res = await this.api('/pair/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ client_name: clientName, client_kind: clientKind, public_key: publicKey }),
@@ -206,7 +217,7 @@ export class DeckyClient {
   /** Long-polls one request; `gone` once the device forgot it (expired, or the plugin restarted). */
   async pollPairing(id: string, waitS = 25, signal?: AbortSignal): Promise<PairPoll | 'gone'> {
     const path = `/pair/request/${encodeURIComponent(id)}?wait=${waitS}`;
-    const res = await this.fetch(path, { timeoutMs: (waitS + 10) * 1000, signal });
+    const res = await this.api(path, { timeoutMs: (waitS + 10) * 1000, signal });
     const text = await res.text();
     if (res.status === 404) return 'gone';
     if (!res.ok) throw new HttpError(res.status, text, path);
@@ -214,45 +225,7 @@ export class DeckyClient {
   }
 
   async cancelPairing(id: string): Promise<void> {
-    await (await this.fetch(`/pair/request/${encodeURIComponent(id)}`, { method: 'DELETE', timeoutMs: 5000 })).text();
-  }
-
-  streamStats(): Promise<StreamStats> {
-    return this.json<StreamStats>('/stream/stats', { timeoutMs: 5000 });
-  }
-
-  /** Throws HttpError(404) on devices without remote input support. */
-  getInputSettings(): Promise<InputSettings> {
-    return this.json<InputSettings>('/input/settings', { timeoutMs: 5000 });
-  }
-
-  setInputEnabled(enabled: boolean): Promise<InputSettings> {
-    return this.json<InputSettings>('/input/settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ enabled }),
-      timeoutMs: 10000,
-    });
-  }
-
-  /** Throws HttpError(404) on devices without capture. */
-  getStreamSettings(): Promise<import('./api').StreamSettings> {
-    return this.json<import('./api').StreamSettings>('/stream/settings', { timeoutMs: 5000 });
-  }
-
-  setStreamSettings(patch: { fps?: number; quality?: number; width?: number; audio?: boolean }): Promise<import('./api').StreamSettings> {
-    return this.json<import('./api').StreamSettings>('/stream/settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(patch),
-      timeoutMs: 15000,
-    });
-  }
-
-  async frame(): Promise<Uint8Array> {
-    const res = await this.fetch('/frame.jpg', { timeoutMs: 10000 });
-    if (!res.ok) throw new HttpError(res.status, await res.text(), '/frame.jpg');
-    return new Uint8Array(await res.arrayBuffer());
+    await (await this.api(`/pair/request/${encodeURIComponent(id)}`, { method: 'DELETE', timeoutMs: 5000 })).text();
   }
 
   /** The device's JSON-RPC reply body as received, so a relay can pass it on without re-encoding it. */
@@ -282,13 +255,32 @@ export class DeckyClient {
     return this.rpc<ToolCallResult>('tools/call', { name, arguments: args }, timeoutMs);
   }
 
-  async callToolText(name: string, args: Record<string, unknown> = {}, timeoutMs = 30000): Promise<string> {
-    const result = await this.callTool(name, args, timeoutMs);
-    const text = result.content
-      .map(c => (c.type === 'text' ? (c as { text: string }).text : `[${c.type}]`))
-      .join('\n');
-    if (result.isError) throw new ToolError(`${name}: ${text}`);
-    return text;
+  streamStats(): Promise<StreamStats> {
+    return this.json<StreamStats>('/stream/stats', { timeoutMs: 5000 });
+  }
+
+  /** Throws HttpError(404) on devices without capture. */
+  getStreamSettings(): Promise<StreamSettings> {
+    return this.json<StreamSettings>('/stream/settings', { timeoutMs: 5000 });
+  }
+
+  setStreamSettings(patch: StreamSettingsPatch): Promise<StreamSettings> {
+    return this.put<StreamSettings>('/stream/settings', patch);
+  }
+
+  /** One JPEG of the whole display. */
+  async frame(): Promise<Uint8Array> {
+    const res = await this.api('/stream/frame', { timeoutMs: 10000 });
+    if (!res.ok) throw new HttpError(res.status, await res.text(), '/stream/frame');
+    return new Uint8Array(await res.arrayBuffer());
+  }
+
+  getInputSettings(): Promise<InputSettings> {
+    return this.json<InputSettings>('/input/settings', { timeoutMs: 5000 });
+  }
+
+  setInputEnabled(enabled: boolean): Promise<InputSettings> {
+    return this.put<InputSettings>('/input/settings', { enabled }, 10000);
   }
 
   listPlugins(): Promise<PluginInfo[]> {
@@ -302,12 +294,8 @@ export class DeckyClient {
     return this.json<InstallResult>(`/plugins/install?restart=${restart}`, { method: 'POST', body: form, timeoutMs: 120000 });
   }
 
-  async reloadPlugin(dir: string): Promise<unknown> {
-    return this.json<unknown>(`/plugins/${encodeURIComponent(dir)}/reload`, { method: 'POST', timeoutMs: 30000 });
-  }
-
-  /** Reload in place and restore the UI around it (`mode` needs a device with live sync). */
-  liveReload(dir: string, mode: LiveReloadMode): Promise<LiveReloadResult> {
+  /** Reload one plugin in place and restore the UI around it. Reloading Decky Toolkit's own backend only schedules it. */
+  reloadPlugin(dir: string, mode: LiveReloadMode = 'backend'): Promise<LiveReloadResult> {
     return this.json<LiveReloadResult>(`/plugins/${encodeURIComponent(dir)}/reload?mode=${mode}`, { method: 'POST', timeoutMs: 30000 });
   }
 
@@ -321,40 +309,38 @@ export class DeckyClient {
     });
   }
 
-  async restartLoader(): Promise<string> {
-    const res = await this.json<unknown>('/loader/restart', { method: 'POST' });
-    return typeof res === 'string' ? res : JSON.stringify(res);
+  restartLoader(): Promise<{ restarting: boolean; delay_s: number }> {
+    return this.post('/loader/restart', {});
   }
 
   controllers(): Promise<ControllersList> {
     return this.json<ControllersList>('/controllers', { timeoutMs: 5000 });
   }
 
-  /** 409 when every explicit slot is taken; the server also refuses pads Steam Input does not pick up. */
+  /** The device refuses a fifth pad and pads Steam Input does not pick up. */
   addVirtualController(name?: string): Promise<VirtualPadCreated> {
-    return this.json<VirtualPadCreated>('/controllers/virtual', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(name ? { name } : {}),
-      timeoutMs: 20000,
-    });
+    return this.post<VirtualPadCreated>('/controllers/virtual', name ? { name } : {}, 20000);
   }
 
-  removeVirtualController(id: string): Promise<{ removed: unknown }> {
-    return this.json<{ removed: unknown }>(`/controllers/virtual/${encodeURIComponent(id)}`, { method: 'DELETE', timeoutMs: 10000 });
+  removeVirtualController(id: string): Promise<{ removed: string }> {
+    return this.json(`/controllers/virtual/${encodeURIComponent(id)}`, { method: 'DELETE', timeoutMs: 10000 });
   }
 
   uiRoutes(): Promise<UiRoutes> {
     return this.json<UiRoutes>('/ui/routes', { timeoutMs: 10000 });
   }
 
-  navigate(body: NavigateRequest): Promise<NavigateResult> {
-    return this.json<NavigateResult>('/ui/navigate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      timeoutMs: 15000,
-    });
+  navigate(request: NavigateRequest): Promise<NavigateResult> {
+    return this.post<NavigateResult>('/ui/navigate', request);
+  }
+
+  toast(title: string, body: string): Promise<unknown> {
+    return this.post('/ui/toast', { title, body });
+  }
+
+  /** Runs `expression` in a Steam UI tab (default SharedJSContext) and returns its JSON value; promises are awaited. */
+  async evaluate(expression: string): Promise<unknown> {
+    return (await this.post<{ value: unknown }>('/cef/evaluate', { expression }, 30000)).value;
   }
 
   apps(): Promise<AppsList> {
@@ -369,6 +355,19 @@ export class DeckyClient {
     return this.json<GameSaves>(`/apps/${appid}/saves`, { timeoutMs: 30000 });
   }
 
+  protonLog(appid: number, lines = 1000): Promise<ProtonLog> {
+    return this.json<ProtonLog>(`/apps/${appid}/proton-log?lines=${lines}`, { timeoutMs: 30000 });
+  }
+
+  launchApp(appid: number): Promise<AppActionResult> {
+    return this.post<AppActionResult>(`/apps/${appid}/launch`, {}, 45000);
+  }
+
+  /** Force-quits the app; unsaved progress is lost, so callers confirm first. */
+  terminateApp(appid: number): Promise<AppActionResult> {
+    return this.post<AppActionResult>(`/apps/${appid}/terminate`, { confirm: true }, 45000);
+  }
+
   fsList(path: string, glob?: string): Promise<FsListing> {
     const q = new URLSearchParams({ path });
     if (glob) q.set('glob', glob);
@@ -377,7 +376,7 @@ export class DeckyClient {
 
   async fsRead(path: string): Promise<Uint8Array> {
     const route = `/fs/read?${new URLSearchParams({ path })}`;
-    const res = await this.fetch(route, { timeoutMs: 120000 });
+    const res = await this.api(route, { timeoutMs: 120000 });
     if (!res.ok) throw new HttpError(res.status, await res.text(), route);
     return new Uint8Array(await res.arrayBuffer());
   }
@@ -404,14 +403,15 @@ export class DeckyClient {
     return this.json(`/fs?${new URLSearchParams({ path, confirm: '1' })}`, { method: 'DELETE', timeoutMs: 60000 });
   }
 
-  logTail(q: LogQuery): Promise<LogTail> {
-    return this.json<LogTail>(`/logs/tail${logQueryString(q)}`);
+  /** The last `tail` lines of the loader journal or of a plugin's newest log. */
+  async logTail(q: LogQuery): Promise<string[]> {
+    return (await this.json<LogTail>(`/logs/tail${logQueryString(q)}`)).lines;
   }
 
   /** Resolves when the stream ends; throws HttpError(404) on devices without `/logs/stream`. */
   async streamLogs(q: LogQuery, onLine: (line: string) => void, signal: AbortSignal): Promise<void> {
     const path = `/logs/stream${logQueryString(q)}`;
-    const res = await this.fetch(path, { headers: { Accept: 'text/event-stream' }, signal, timeoutMs: 0 });
+    const res = await this.api(path, { headers: { Accept: 'text/event-stream' }, signal, timeoutMs: 0 });
     if (!res.ok || !res.body) throw new HttpError(res.status, await res.text(), path);
     await parseSse(res.body, data => data.split('\n').forEach(onLine));
   }

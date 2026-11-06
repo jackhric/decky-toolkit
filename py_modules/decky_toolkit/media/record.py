@@ -315,7 +315,6 @@ class Recorder:
             "duration_s": round(duration / 1000, 2), "frames": writer.video_frames,
             "fps": round(writer.video_frames / (duration / 1000), 1) if duration > 0 else 0,
             "audio": writer.audio, "format": "Matroska (MJPEG + PCM s16le 48 kHz stereo)",
-            "download": f"/recordings/{os.path.basename(path)[:-len(EXT)]}",
         }
         if writer.audio:
             result["audio_chunks"] = writer.audio_chunks
@@ -337,8 +336,7 @@ class Recorder:
             if e.is_file() and e.name.endswith(EXT):
                 st = e.stat()
                 out.append({"name": e.name[:-len(EXT)], "path": e.path, "size": st.st_size,
-                            "modified": datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds"),
-                            "download": f"/recordings/{e.name[:-len(EXT)]}"})
+                            "modified": datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds")})
         return {"dir": self.dir, "recordings": out, "active": self.active, "last": self.last}
 
     def delete(self, name: str, confirm: bool = False) -> dict[str, Any]:
