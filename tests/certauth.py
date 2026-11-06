@@ -6,8 +6,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
-from decky_toolkit.auth import CertAuth  # noqa: E402
-from decky_toolkit.tls import PairedClients  # noqa: E402
+from decky_toolkit.server.auth import CertAuth  # noqa: E402
+from decky_toolkit.server.tls import PairedClients  # noqa: E402
 
 FINGERPRINT = "ab" * 32
 PEER_HEADER = "X-Test-Peer"

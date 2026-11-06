@@ -2,8 +2,8 @@
 import json
 from typing import Any
 
-from .. import cdp
-from ..console import DEFAULT_LEVEL, DEFAULT_TARGETS, LEVELS, ConsoleCollector
+from ..steam import cdp
+from ..steam.console import DEFAULT_LEVEL, DEFAULT_TARGETS, LEVELS, ConsoleCollector
 from . import ToolRegistry
 
 

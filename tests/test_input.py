@@ -12,10 +12,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 from aiohttp import ClientSession, ClientTimeout, WSMsgType, WSServerHandshakeError, web  # noqa: E402
 
 from certauth import H, stub_auth  # noqa: E402
-from decky_toolkit.http import Api  # noqa: E402
+from decky_toolkit.server.http import Api  # noqa: E402
 from decky_toolkit.input import keymap, uinput  # noqa: E402
 from decky_toolkit.input.service import InputDisabled, InputService, InputUnavailable, pad_values  # noqa: E402
-from decky_toolkit.protocol import McpServer  # noqa: E402
+from decky_toolkit.server.protocol import McpServer  # noqa: E402
 from decky_toolkit.settings import Settings  # noqa: E402
 from decky_toolkit.tools import ToolRegistry, build_registry  # noqa: E402
 

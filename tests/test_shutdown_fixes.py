@@ -9,8 +9,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
 from aiohttp import ClientSession, web  # noqa: E402
 
-from decky_toolkit import loader_fixes  # noqa: E402
-from decky_toolkit.long_lived import LongLivedRequests  # noqa: E402
+from decky_toolkit.loader import fixes as loader_fixes  # noqa: E402
+from decky_toolkit.server.long_lived import LongLivedRequests  # noqa: E402
 
 LOG = logging.getLogger("t")
 

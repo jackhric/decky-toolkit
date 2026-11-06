@@ -8,8 +8,8 @@ import os
 import shlex
 from typing import Any
 
-from .. import cdp
-from ..install import install_plugin_zip
+from ..steam import cdp
+from ..loader.install import install_plugin_zip
 from . import ToolRegistry
 from .system import plugins_dir, require_confirm, run
 

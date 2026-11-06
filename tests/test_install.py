@@ -12,7 +12,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
-from decky_toolkit.install import install_plugin_zip  # noqa: E402
+from decky_toolkit.loader.install import install_plugin_zip  # noqa: E402
 
 LOG = logging.getLogger("t")
 META = {"name": "My Plugin", "author": "me", "flags": [], "api_version": 1}

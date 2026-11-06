@@ -10,8 +10,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
-from decky_toolkit import apps as apps_mod, cdp, http as http_mod  # noqa: E402
-from decky_toolkit.apps import Apps  # noqa: E402
+from decky_toolkit.steam import apps as apps_mod, cdp  # noqa: E402
+from decky_toolkit.server import http as http_mod  # noqa: E402
+from decky_toolkit.steam.apps import Apps  # noqa: E402
 
 from test_routes import H, with_server  # noqa: E402
 

@@ -1,7 +1,7 @@
 """Steam library tools: list, inspect, launch and terminate apps."""
 from typing import Any
 
-from ..apps import Apps
+from ..steam.apps import Apps
 from . import ToolRegistry
 
 APPID = {"type": "integer", "description": "Steam appid (or a non-Steam shortcut's appid from apps_list)"}

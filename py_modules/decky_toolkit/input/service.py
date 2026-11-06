@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Protocol
 
 from . import ei, keymap, uinput
-from ..capture import _user_runtime_dir
+from ..media.capture import _user_runtime_dir
 
 PAD_IDLE_SECONDS = 60.0
 MAX_PADS = 4

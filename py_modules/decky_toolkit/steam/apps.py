@@ -11,7 +11,8 @@ import json
 import os
 from typing import Any, Awaitable, Callable
 
-from . import cdp, games
+from . import cdp
+from ..games import files as games
 
 Evaluate = Callable[[str], Awaitable[Any]]
 SHORTCUT_TYPE = 1073741824

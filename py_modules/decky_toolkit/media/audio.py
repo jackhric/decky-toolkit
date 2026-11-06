@@ -15,7 +15,7 @@ import time
 from typing import AsyncIterator, Callable
 
 from .capture import IDLE_STOP_SECONDS, _user_runtime_dir
-from .settings import Settings
+from ..settings import Settings
 
 RATE = 48000
 CHANNELS = 2

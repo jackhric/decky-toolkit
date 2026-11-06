@@ -7,20 +7,27 @@ See README.md for setup and docs/reference.md for the tool list and architecture
 
 ## Layout
 - `main.py` — Decky `Plugin` class: settings, aiohttp server lifecycle, frontend-callable methods.
-- `py_modules/decky_toolkit/` — `protocol.py` (JSON-RPC + HTTP transport), `http.py` (REST routes, see
-  `docs/api.md`), `auth.py` (client-certificate auth), `tls.py` (device identity, client certs, paired-client store), `tools/` (tool registry and tools), `install.py` (plugin zip
-  validation + atomic install), `logs.py` (journal / plugin log tail and follow), `cdp.py` (Chrome
-  DevTools client for Steam CEF on 127.0.0.1:8080), `settings.py`, `input/` (remote input: `ei.py`
-  libei over ctypes, `uinput.py`, `keymap.py`, `service.py` owning state and the virtual pad registry; tools
-  in `tools/input.py`), `controllers.py` (Steam Input controller list + evdev merge, virtual pad
-  creation confirmed by Steam; tools in `tools/controllers.py`), `ui.py` (Steam UI navigation and
-  element queries; tools in `tools/ui.py`), `console.py` (background Steam UI console capture; tools in
-  `tools/cef.py`), `audit.py` (request origin context variable, audit middleware), `tools/guard.py`
-  (sensitive-path deny list), `tools/plugin_api.py` (plugin backend methods, calls, frontend call check), `apps.py` (Steam library/launch via the client JS; tools in `tools/apps.py`), `games.py`
-  (game/prefix/save paths, `fs_*` file browser with its sensitive-path and delete guards, `fs_read`/`fs_write`/`fs_mkdir`/`fs_rename` behind `writable` for the `/fs/*` routes, Proton logs; `vdf.py`
-  parses KeyValues; tools in `tools/games.py`), `record.py` (screen recording to MKV; tools in `tools/record.py`),
-  `tools/perf.py` (Steam performance overlay), `advertise.py` (DNS-SD advertisement via `avahi-publish`) and
-  `identity.py` (non-secret `hostname`/`device_id`/`os` for `/health`).
+- `py_modules/decky_toolkit/` — grouped by area; `settings.py` at the top.
+  - `server/`: `protocol.py` (JSON-RPC + HTTP transport), `http.py` (REST routes, see `docs/api.md`), `auth.py`
+    (client-certificate auth), `tls.py` (device identity, client certs, paired-client store), `pairing.py`,
+    `audit.py` (request origin context variable, audit middleware), `advertise.py` (DNS-SD via `avahi-publish`),
+    `identity.py` (non-secret `hostname`/`device_id`/`os` for `/health`), `long_lived.py` (ends streams,
+    websockets and long polls on shutdown).
+  - `loader/`: `install.py` (plugin zip validation + atomic install), `logs.py` (journal / plugin log tail and
+    follow), `fixes.py` (workarounds for Decky Loader bugs, applied in our own process).
+  - `steam/`: `cdp.py` (Chrome DevTools client for Steam CEF on 127.0.0.1:8080), `ui.py` (Steam UI navigation and
+    element queries), `console.py` (background Steam UI console capture), `apps.py` (Steam library/launch via the
+    client JS).
+  - `media/`: `capture.py` (gamescope screen stream), `audio.py` (audio stream), `record.py` (recording to MKV).
+  - `input/`: remote input (`ei.py` libei over ctypes, `uinput.py`, `keymap.py`, `service.py` owning state and the
+    virtual pad registry) and `controllers.py` (Steam Input controller list + evdev merge, virtual pad creation
+    confirmed by Steam).
+  - `games/`: `files.py` (game/prefix/save paths, `fs_*` file browser with its sensitive-path and delete guards,
+    `fs_read`/`fs_write`/`fs_mkdir`/`fs_rename` behind `writable` for the `/fs/*` routes, Proton logs), `vdf.py`
+    (KeyValues parser).
+  - `tools/`: the MCP tool registry and one module of tools per area (`input.py`, `controllers.py`, `ui.py`,
+    `cef.py`, `apps.py`, `games.py`, `record.py`, `perf.py` for the Steam performance overlay, ...), plus `guard.py`
+    (sensitive-path deny list) and `plugin_api.py` (plugin backend methods, calls, frontend call check).
 - `packages/client/` — device client source shared by bundling (transport, API types, discovery, pairing,
   identity file, plugin staging; no `vscode`); the extension and the CLI import it as `@decky-toolkit/client/*`.
 - `cli/` — the `decky-toolkit` npm package: `pair`, `status`, `mcp` (hand-written stdio MCP server that answers
@@ -322,7 +329,7 @@ server, input and paired-device settings live on the `/decky-toolkit/settings` p
 (frontend methods `list_pair_requests`,
 `approve_pair_request`, `deny_pair_request`). The code is derived from the server cert, the client key and
 the request id, so the client can check it. No time limit. Requests live in memory
-(`py_modules/decky_toolkit/pairing.py`): a pending one expires 60 s after its last poll, a decided one 5 min
+(`py_modules/decky_toolkit/server/pairing.py`): a pending one expires 60 s after its last poll, a decided one 5 min
 after the decision, and a plugin restart forgets them all, so clients re-request (new code) on a 404.
 The signed client certificate goes out once per approval. Paired clients are listed and forgotten on the
 device (`list_paired_clients`, `forget_paired_client`); a forgotten client gets a plain 401. A device keeps

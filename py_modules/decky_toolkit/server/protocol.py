@@ -12,7 +12,7 @@ from typing import Any, Awaitable, Callable
 
 from aiohttp import web
 
-from .tools import ToolRegistry
+from ..tools import ToolRegistry
 
 SUPPORTED_PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26")
 

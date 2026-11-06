@@ -3,7 +3,7 @@ import asyncio
 import os
 from typing import AsyncIterator
 
-from .tools.system import clean_env, run, tail
+from ..tools.system import clean_env, run, tail
 
 DEFAULT_TAIL = 100
 MAX_TAIL = 5000
