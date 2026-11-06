@@ -44,12 +44,33 @@ export function deviceFrom(conn: Connection, arg: unknown): SavedDevice | undefi
   return id ? conn.devices.find(d => d.id === id) : conn.activeDevice;
 }
 
-function duplicateOf(conn: Connection, host: string, port: number, exceptId?: string): SavedDevice | undefined {
-  return conn.devices.find(d => d.id !== exceptId && d.host === host && d.port === port);
+function duplicateOf(conn: Connection, host: string, port: number): SavedDevice | undefined {
+  return conn.devices.find(d => d.host === host && d.port === port);
 }
 
-/** Asks for the host (`host:port` also works) and an optional name; the port only on request. */
+/** The editor keeps one device at a time; true when nothing is saved or the user agreed to replace it. */
+export async function confirmReplace(conn: Connection): Promise<boolean> {
+  const old = conn.devices[0];
+  if (!old) return true;
+  const ok = await vscode.window.showWarningMessage(`Replace ${old.name}?`,
+    { modal: true, detail: 'Its pairing is deleted. This editor connects to one device at a time.' }, 'Replace');
+  return ok === 'Replace';
+}
+
+/** Forgets every saved device (and its pairing, unless it is the same address) and saves `device` alone. */
+export async function replaceWith(conn: Connection, device: SavedDevice): Promise<void> {
+  for (const old of conn.devices) {
+    if (old.host !== device.host || old.port !== device.port) await conn.deleteIdentityFor(old);
+  }
+  await conn.saveDevices([device], device.id);
+}
+
+/**
+ * Asks for the host (`host:port` also works) and an optional name; the port only on request. A device
+ * that is already saved is replaced after a confirmation.
+ */
 export async function addDevice(conn: Connection): Promise<void> {
+  if (!(await confirmReplace(conn))) return;
   const title = 'Add Decky device';
   const raw = (await vscode.window.showInputBox({
     title, prompt: 'IP address or hostname of the device (any machine running Decky Loader)', placeHolder: 'e.g. 192.168.1.40 or steamdeck.local',
@@ -65,7 +86,7 @@ export async function addDevice(conn: Connection): Promise<void> {
   });
   if (name === undefined) return;
   const device: SavedDevice = { id: newDeviceId(), name: name.trim() || host, host, port };
-  await conn.saveDevices([...conn.devices, device]);
+  await replaceWith(conn, device);
   for (;;) {
     const items = [
       { label: `$(plug) Connect to ${device.name}`, id: 'connect' },
@@ -82,8 +103,6 @@ export async function addDevice(conn: Connection): Promise<void> {
       title, prompt: 'Decky Toolkit port', value: String(port), ignoreFocusOut: true, validateInput: validatePort,
     }))?.trim();
     if (!p) continue;
-    const other = duplicateOf(conn, host, Number(p), device.id);
-    if (other) throw new Error(`${host}:${p} is already saved as "${other.name}".`);
     port = Number(p);
     await conn.saveDevices(conn.devices.map(x => (x.id === device.id ? { ...x, port } : x)));
   }
@@ -134,42 +153,34 @@ export function statusLabel(status: DeviceStatus): string {
   }
 }
 
-/** The status bar / "Switch device" picker: connect to (or switch to) a saved device. */
-export async function switchDevice(conn: Connection): Promise<void> {
-  const connected = conn.connectedDevice;
-  const items: PickItem[] = [];
-  for (const d of conn.devices) {
-    const status = conn.statusOf(d);
-    const isConnected = d.id === connected?.id;
-    items.push({
-      label: `$(${STATUS_ICON[status]}) ${d.name}`,
-      description: `${d.host}:${d.port}`,
-      detail: isConnected ? statusLabel(status) : `${statusLabel(status)} · select to ${connected ? 'switch to it' : 'connect'}`,
-      run: isConnected ? undefined : () => vscode.commands.executeCommand('decky-toolkit.connect', d.id),
-    });
-  }
-  items.push({ label: '', kind: vscode.QuickPickItemKind.Separator });
-  if (connected) {
-    items.push(
-      { label: `$(debug-disconnect) Disconnect from ${connected.name}`, run: () => vscode.commands.executeCommand('decky-toolkit.disconnectDevice') },
-      { label: '$(device-desktop) Open screen', run: () => vscode.commands.executeCommand('decky-toolkit.openScreen') },
-    );
-  }
-  items.push({ label: '$(add) Add device…', run: () => addDevice(conn) });
-  const pick = await vscode.window.showQuickPick(items, { placeHolder: connected ? `Connected to ${connected.name}` : 'Connect to a device' });
-  await pick?.run?.();
-}
-
-/** The `…` overflow of a device row: everything except the row's primary action. */
+/**
+ * The `…` overflow of a device row: everything except the row's primary action. From the status bar (no
+ * argument) it leads with connect or disconnect, and adds a device when none is saved.
+ */
 export async function deviceActions(conn: Connection, arg?: unknown): Promise<void> {
   const d = deviceFrom(conn, arg);
-  if (!d) return;
+  if (!d) {
+    if (arg === undefined) await addDevice(conn);
+    return;
+  }
   const status = conn.statusOf(d);
   const run = (cmd: string) => () => vscode.commands.executeCommand(cmd, d.id);
-  const items: PickItem[] = [
+  const items: PickItem[] = [];
+  if (arg === undefined) {
+    if (conn.connectedDevice?.id === d.id) {
+      items.push(
+        { label: `$(debug-disconnect) Disconnect from ${d.name}`, run: () => vscode.commands.executeCommand('decky-toolkit.disconnectDevice') },
+        { label: '$(device-desktop) Open screen', run: () => vscode.commands.executeCommand('decky-toolkit.openScreen') },
+      );
+    } else if (status !== 'connecting' && status !== 'pairing') {
+      items.push({ label: `$(plug) Connect to ${d.name}`, run: run('decky-toolkit.connect') });
+    }
+    if (items.length) items.push({ label: '', kind: vscode.QuickPickItemKind.Separator });
+  }
+  items.push(
     { label: '$(pencil) Rename…', run: run('decky-toolkit.renameDevice') },
     { label: '$(trash) Forget device', run: run('decky-toolkit.removeDevice') },
-  ];
+  );
   const pick = await vscode.window.showQuickPick(items, { placeHolder: `${d.name} · ${statusLabel(status)}` });
   await pick?.run?.();
 }
