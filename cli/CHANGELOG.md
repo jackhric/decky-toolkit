@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.0](https://github.com/jackhric/decky-toolkit/compare/cli-v0.4.0...cli-v0.5.0) (2026-11-06)
+
+
+### ⚠ BREAKING CHANGES
+
+* versioned client API under /api/v1, trimmed routes ([#89](https://github.com/jackhric/decky-toolkit/issues/89))
+
+### Features
+
+* push device changes to clients over /api/v1/events ([#90](https://github.com/jackhric/decky-toolkit/issues/90)) ([9578ea8](https://github.com/jackhric/decky-toolkit/commit/9578ea8d0c25a735bc6ab47868660b989acaa3c3))
+* tell agents where the Steam UI is before and after they act ([dee2b51](https://github.com/jackhric/decky-toolkit/commit/dee2b51d1bc4393c64ecdad97c909078eef0a3a8))
+* versioned client API under /api/v1, trimmed routes ([#89](https://github.com/jackhric/decky-toolkit/issues/89)) ([4da45cb](https://github.com/jackhric/decky-toolkit/commit/4da45cb898d516e13f87c2e95ed6ac65095f8ce0))
+
 ## [0.4.0](https://github.com/jackhric/decky-toolkit/compare/cli-v0.3.0...cli-v0.4.0) (2026-11-06)
 
 
