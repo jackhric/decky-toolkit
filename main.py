@@ -29,6 +29,7 @@ from decky_toolkit.server.protocol import SERVER_INFO, McpServer  # noqa: E402
 from decky_toolkit.settings import Settings  # noqa: E402
 from decky_toolkit.server.tls import Identity, PairedClients, TlsError, fingerprint  # noqa: E402
 from decky_toolkit.tools import build_registry  # noqa: E402
+from decky_toolkit.tools.plugin_tools import PluginTools  # noqa: E402
 from decky_toolkit.steam.ui import UiNavigator  # noqa: E402
 
 
@@ -87,6 +88,7 @@ class Plugin:
     ui: UiNavigator | None = None
     console: ConsoleCollector | None = None
     activity: InputActivity | None = None
+    plugin_tools: PluginTools | None = None
     identity: Identity
     clients: PairedClients
     pairing: PairingRequests
@@ -108,7 +110,8 @@ class Plugin:
         api = Api(
             auth=CertAuth(self.clients, connections=self.connections),
             mcp=McpServer(build_registry(self.capturer, self.input, self.controllers, self.ui,
-                                        console=self.console, activity=self.activity), decky.logger),
+                                        console=self.console, activity=self.activity, plugin_tools=self.plugin_tools),
+                           decky.logger),
             capturer=self.capturer,
             logger=decky.logger,
             pairing=self.pairing,
@@ -289,6 +292,8 @@ class Plugin:
         self.console.start()
         self.activity = InputActivity(decky.logger)
         self.activity.start()
+        self.plugin_tools = PluginTools(decky.logger)
+        self.plugin_tools.start()
         await self._start_server()
 
     async def _unload(self) -> None:
@@ -298,6 +303,8 @@ class Plugin:
             await self.console.stop()
         if self.activity is not None:
             await self.activity.stop()
+        if self.plugin_tools is not None:
+            await self.plugin_tools.stop()
         await self._stop_server()
         decky.logger.info("Decky Toolkit stopped")
 

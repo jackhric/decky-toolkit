@@ -1,7 +1,7 @@
 """Minimal Chrome DevTools Protocol client for Steam's CEF debugger (localhost:8080)."""
 import asyncio
 import json
-from typing import Any
+from typing import Any, Callable
 
 import aiohttp
 
@@ -45,10 +45,12 @@ async def find_target(title: str | None = None) -> dict[str, Any]:
 class Tab:
     """One short-lived DevTools websocket session. Use as an async context manager.
 
-    The only long-lived sessions are console.ConsoleCollector's (one per watched target)."""
+    The long-lived sessions are console.ConsoleCollector's (one per watched target) and
+    tools.plugin_tools.PluginTools' (SharedJSContext), which passes `on_event` for CDP events."""
 
-    def __init__(self, target: dict[str, Any]):
+    def __init__(self, target: dict[str, Any], on_event: Callable[[dict[str, Any]], None] | None = None):
         self.target = target
+        self.on_event = on_event
         self._session: aiohttp.ClientSession | None = None
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._next_id = 0
@@ -71,13 +73,27 @@ class Tab:
 
     async def _read_loop(self) -> None:
         assert self._ws is not None
-        async for msg in self._ws:
-            if msg.type != aiohttp.WSMsgType.TEXT:
-                continue
-            data = json.loads(msg.data)
-            fut = self._pending.pop(data.get("id", -1), None)
-            if fut and not fut.done():
-                fut.set_result(data)
+        try:
+            async for msg in self._ws:
+                if msg.type != aiohttp.WSMsgType.TEXT:
+                    continue
+                data = json.loads(msg.data)
+                if "id" not in data:
+                    if self.on_event:
+                        self.on_event(data)
+                    continue
+                fut = self._pending.pop(data["id"], None)
+                if fut and not fut.done():
+                    fut.set_result(data)
+        finally:
+            for fut in self._pending.values():
+                if not fut.done():
+                    fut.set_exception(CdpError("DevTools connection closed"))
+            self._pending.clear()
+
+    async def wait_closed(self) -> None:
+        if self._reader:
+            await asyncio.wait([self._reader])
 
     async def send(self, method: str, params: dict[str, Any] | None = None, timeout: float = 15) -> dict[str, Any]:
         assert self._ws is not None

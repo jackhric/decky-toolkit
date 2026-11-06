@@ -8,7 +8,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSy
 import { tmpdir } from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { options } from '../esbuild.mjs';
+import * as vm from 'vm';
+import { options, toolsOptions } from '../esbuild.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 process.chdir(root);
@@ -430,10 +431,45 @@ await check('forget', async () => {
   assert.match(m.replies.get(1).result.content[0].text, /not paired.*decky-toolkit pair/);
 });
 
+await check('tools helper', async () => {
+  // Evaluated under a Decky bundle URL, as Decky imports a plugin, so the helper finds its plugin in the stack.
+  const { outputFiles: [out] } = await esbuild.build({ ...toolsOptions, format: 'iife', globalName: 'tools', write: false, logLevel: 'warning' });
+  const url = 'http://127.0.0.1:1337/plugins/My%20Plugin/dist/index.js?t=1';
+  const { registerTool } = vm.runInThisContext(`${out.text};tools`, { filename: url });
+  const { z } = await import('zod');
+  let notified = 0;
+  globalThis.__deckyToolkitToolsChanged = () => notified++;
+  const ac = new AbortController();
+  await registerTool({
+    name: 'add', description: 'Adds.', annotations: { readOnlyHint: true },
+    inputSchema: z.object({ a: z.number(), b: z.number().default(1) }),
+    outputSchema: z.object({ sum: z.number() }),
+    execute: ({ a, b }) => ({ sum: a + b }),
+  }, { signal: ac.signal });
+  await registerTool({ name: 'boom', description: 'Throws.', execute: () => { throw new Error('nope'); } });
+  const tools = globalThis.__deckyToolkitTools.tools;
+  const [add, boom] = tools;
+  assert.deepEqual([add.plugin, add.url, add.annotations], ['My Plugin', url, { readOnlyHint: true }]);
+  assert.deepEqual([add.inputSchema.type, add.inputSchema.required, add.outputSchema.required], ['object', ['a'], ['sum']]);
+  assert.deepEqual(boom.inputSchema, { type: 'object', properties: {}, additionalProperties: false });
+  assert.deepEqual(await add.call({ a: 2 }, ac.signal), { value: { sum: 3 } });
+  assert.deepEqual(await add.call({ a: 'x' }, ac.signal), { invalid: 'a: Invalid input: expected number, received string' });
+  await assert.rejects(boom.call({}, ac.signal), /nope/);
+  await assert.rejects(registerTool({ name: 'add', description: 'Again.', execute: () => 0 }), /already registered/);
+  await assert.rejects(registerTool({ name: 'Add', description: 'Bad name.', execute: () => 0 }), /invalid tool name/);
+  await assert.rejects(registerTool({ name: 'x', description: 'Not an object.', inputSchema: z.string(), execute: () => 0 }),
+    /inputSchema must describe an object/);
+  assert.equal(notified, 2);
+  ac.abort();
+  assert.deepEqual([[...tools].map(t => t.name), notified], [['boom'], 3]);
+  delete globalThis.__deckyToolkitTools;
+  delete globalThis.__deckyToolkitToolsChanged;
+});
+
 await check('npm pack contents', async () => {
   const [packed] = JSON.parse(execFileSync('npm', ['pack', '--dry-run', '--json'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
   const names = packed.files.map(f => f.path).sort();
-  assert.deepEqual(names, ['LICENSE', 'README.md', 'dist/cli.js', 'package.json']);
+  assert.deepEqual(names, ['LICENSE', 'README.md', 'dist/cli.js', 'dist/tools.d.ts', 'dist/tools.js', 'package.json']);
   return `${(statSync('dist/cli.js').size / 1024).toFixed(1)} KiB bundle, ${(packed.size / 1024).toFixed(1)} KiB packed`;
 });
 
