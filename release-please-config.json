@@ -10,11 +10,17 @@
     ".": {
       "release-type": "node",
       "component": "plugin",
-      "exclude-paths": ["extension", "packages"]
+      "exclude-paths": ["extension", "packages", "cli"]
     },
     "extension": {
       "release-type": "node",
       "component": "extension"
+    },
+    "cli": {
+      "release-type": "node",
+      "component": "cli",
+      "package-name": "decky-toolkit",
+      "changelog-path": "CHANGELOG.md"
     }
   }
 }

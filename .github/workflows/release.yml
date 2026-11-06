@@ -5,6 +5,7 @@ on:
     tags:
       - 'plugin-v*'
       - 'extension-v*'
+      - 'cli-v*'
 
 permissions:
   contents: read
@@ -24,6 +25,7 @@ jobs:
           case "$tag" in
             plugin-v*) component=plugin; version="${tag#plugin-v}"; files=(package.json plugin.json) ;;
             extension-v*) component=extension; version="${tag#extension-v}"; files=(extension/package.json) ;;
+            cli-v*) component=cli; version="${tag#cli-v}"; files=(cli/package.json) ;;
             *) echo "::error::unexpected tag $tag"; exit 1 ;;
           esac
           export LC_ALL=C
@@ -78,6 +80,7 @@ jobs:
           case "$COMPONENT" in
             plugin) title="Decky Toolkit plugin $VERSION" ;;
             extension) title="Decky Toolkit for VS Code $VERSION" ;;
+            cli) title="decky-toolkit CLI $VERSION" ;;
           esac
           prerelease=false
           if [[ "$VERSION" == *-* ]]; then prerelease=true; fi
@@ -135,3 +138,30 @@ jobs:
           name: extension
           path: release
       - run: npx --yes @vscode/vsce@4.1.0 publish --oidc --packagePath release/*.vsix --skip-duplicate
+
+  publish-npm:
+    name: Publish to npm
+    needs: [check, release]
+    if: needs.check.outputs.component == 'cli' && !contains(needs.check.outputs.version, '-')
+    runs-on: ubuntu-26.04
+    # Trusted publishing (OIDC): npm trusts this workflow and environment, so there is no token.
+    environment: npm
+    permissions:
+      id-token: write
+      contents: read
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 12
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      # Trusted publishing needs npm 11.5.1 or newer; Node 22 ships npm 10.
+      - run: npm install -g npm@latest
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - run: npm publish --provenance --access public
