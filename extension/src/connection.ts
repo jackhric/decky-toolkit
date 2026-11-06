@@ -1,15 +1,18 @@
 import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
-import type { Health, InputSettings, StreamStats } from './api';
-import { DeckyClient, DeviceAddress, HttpError, describeError, isConnectionError, isRejection } from './client';
+import type { Health, InputSettings, StreamStats } from '@decky-toolkit/client/api';
+import { DeckyClient, DeviceAddress, HttpError, describeError, isConnectionError, isRejection } from '@decky-toolkit/client/client';
 import { DEFAULT_MCP_PORT, DeviceProxy, ProxyTarget } from './proxy';
-import type { Identity } from './transport';
+import * as identityFile from '@decky-toolkit/client/identity';
+import type { Identity } from '@decky-toolkit/client/transport';
 
 const STATS_POLL_MS = 5000;
 const DEVICES_KEY = 'decky-toolkit.devices';
 const ACTIVE_KEY = 'decky-toolkit.activeDevice';
 const SESSION_KEY = 'decky-toolkit.connectedDevice';
+// Where pairings lived before the identity file; read once to migrate, and as a fallback when the file cannot be written.
 const IDENTITY_PREFIX = 'decky-toolkit.identity:';
+const MIGRATED_KEY = 'decky-toolkit.identityFileMigrated';
 // Bearer tokens of plugins before pairing moved to client identities; deleted on sight.
 const LEGACY_TOKEN_PREFIX = 'decky-toolkit.token:';
 
@@ -101,12 +104,14 @@ export class Connection implements ConnectionState, vscode.Disposable {
   private recent?: SavedDevice;
   private healthTimer?: NodeJS.Timeout;
   private probeTimer?: NodeJS.Timeout;
+  private store: 'file' | 'secrets' = 'file';
 
   constructor(private readonly ctx: vscode.ExtensionContext) {
     this.proxy = new DeviceProxy(() => this.proxyTarget(), ctx.globalState,
       () => vscode.workspace.getConfiguration('decky-toolkit').get<number>('mcpPort', DEFAULT_MCP_PORT));
     this.disposables.push(
       ctx.secrets.onDidChange(e => {
+        if (this.store !== 'secrets') return;
         if (e.key === this.secretKey) void this.refresh();
         else if (e.key.startsWith(IDENTITY_PREFIX)) void this.loadIdentityFlags().then(() => this.fireStatus());
       }),
@@ -114,6 +119,17 @@ export class Connection implements ConnectionState, vscode.Disposable {
         if (e.affectsConfiguration('decky-toolkit.host') || e.affectsConfiguration('decky-toolkit.port')) void this.refresh();
       }),
     );
+    const watcher = identityFile.watch(() => void this.identityFileChanged());
+    this.disposables.push(new vscode.Disposable(() => watcher.close()));
+  }
+
+  /** Our own writes land here too; only a different pairing for the active device restarts the connection. */
+  private async identityFileChanged(): Promise<void> {
+    if (this.store !== 'file') return;
+    const identity = await this.identityFor(this.address);
+    if (JSON.stringify(identity) !== JSON.stringify(this.cachedIdentity)) return this.refresh();
+    await this.loadIdentityFlags();
+    this.fireStatus();
   }
 
   private get settingsAddress(): DeviceAddress {
@@ -123,8 +139,8 @@ export class Connection implements ConnectionState, vscode.Disposable {
 
   /**
    * Seeds the device list from the host/port settings the first time the extension runs. A list saved by a
-   * version that kept several devices is cut down to the last connected (or active) one; the pairings of the
-   * others stay in secret storage, so adding one of them again reuses its pairing.
+   * version that kept several devices is cut down to the last connected (or active) one. Then the pairing
+   * of the saved device moves from secret storage to the identity file.
    */
   async initDevices(): Promise<void> {
     await Promise.all(this.devices.map(d => this.ctx.secrets.delete(LEGACY_TOKEN_PREFIX + addressKey(d))));
@@ -133,12 +149,42 @@ export class Connection implements ConnectionState, vscode.Disposable {
       await this.ctx.globalState.update(DEVICES_KEY, [keep]);
       await this.ctx.globalState.update(ACTIVE_KEY, keep.id);
     }
-    if (this.ctx.globalState.get<SavedDevice[]>(DEVICES_KEY) !== undefined) return;
-    const { host, port } = this.settingsAddress;
-    if (!host) return;
-    const seed: SavedDevice = { id: newDeviceId(), name: host, host, port };
-    await this.ctx.globalState.update(DEVICES_KEY, [seed]);
-    await this.ctx.globalState.update(ACTIVE_KEY, seed.id);
+    if (this.ctx.globalState.get<SavedDevice[]>(DEVICES_KEY) === undefined) {
+      const { host, port } = this.settingsAddress;
+      if (host) {
+        const seed: SavedDevice = { id: newDeviceId(), name: host, host, port };
+        await this.ctx.globalState.update(DEVICES_KEY, [seed]);
+        await this.ctx.globalState.update(ACTIVE_KEY, seed.id);
+      }
+    }
+    await this.migrateIdentity();
+  }
+
+  /**
+   * Once per installation: copies the saved device's pairing from secret storage into the identity file
+   * unless a file exists. The secret stays; it is used instead if the file cannot be written.
+   */
+  private async migrateIdentity(): Promise<void> {
+    if (this.ctx.globalState.get<boolean>(MIGRATED_KEY)) return;
+    const d = this.activeDevice;
+    try {
+      if (d && !(await identityFile.exists())) {
+        const old = parseIdentity(await this.ctx.secrets.get(secretKeyFor(d)));
+        if (old) await identityFile.write({ version: 1, device: deviceOf(d), ...old });
+      }
+      await this.ctx.globalState.update(MIGRATED_KEY, true);
+    } catch {
+      this.store = 'secrets';
+    }
+  }
+
+  /** The file's `device` mirrors the saved device, so a rename reaches it. */
+  private async mirrorDevice(): Promise<void> {
+    if (this.store !== 'file') return;
+    const f = await identityFile.read();
+    const d = f && this.devices.find(x => identityFile.sameDevice(x, f.device));
+    if (!f || !d || d.name === f.device.name) return;
+    await identityFile.write({ ...f, device: { ...f.device, name: d.name } }).catch(() => undefined);
   }
 
   get devices(): SavedDevice[] {
@@ -154,6 +200,7 @@ export class Connection implements ConnectionState, vscode.Disposable {
   async saveDevices(devices: SavedDevice[], activeId = this.activeDevice?.id): Promise<void> {
     await this.ctx.globalState.update(DEVICES_KEY, devices);
     await this.ctx.globalState.update(ACTIVE_KEY, devices.some(d => d.id === activeId) ? activeId : devices[0]?.id);
+    await this.mirrorDevice();
     await this.refresh();
     const unknown = devices.filter(d => !this.versions.has(d.id)).map(d => d.id);
     if (unknown.length) void this.probeAll(unknown);
@@ -176,19 +223,31 @@ export class Connection implements ConnectionState, vscode.Disposable {
     return port === 8765 ? host : `${host}:${port}`;
   }
 
+  /** The identity file holds one device; any other address is unpaired. */
   async identityFor(address: DeviceAddress): Promise<Identity | undefined> {
-    return parseIdentity(await this.ctx.secrets.get(secretKeyFor(address)));
+    if (this.store === 'secrets') return parseIdentity(await this.ctx.secrets.get(secretKeyFor(address)));
+    const f = await identityFile.read();
+    return f && identityFile.sameDevice(f.device, address) ? identityFile.toIdentity(f) : undefined;
   }
 
   async deleteIdentityFor(address: DeviceAddress): Promise<void> {
     await this.ctx.secrets.delete(secretKeyFor(address));
+    const f = await identityFile.read();
+    if (f && identityFile.sameDevice(f.device, address)) await identityFile.remove();
     this.hasIdentity.set(addressKey(address), false);
   }
 
-  async setIdentityFor(address: DeviceAddress, identity: Identity): Promise<void> {
-    await this.ctx.secrets.store(secretKeyFor(address), JSON.stringify(identity));
-    this.hasIdentity.set(addressKey(address), true);
-    if (secretKeyFor(address) === this.secretKey) await this.refresh();
+  async setIdentityFor(device: SavedDevice, identity: Identity): Promise<void> {
+    if (this.store === 'file') {
+      try {
+        await identityFile.write({ version: 1, device: deviceOf(device), ...identity });
+      } catch {
+        this.store = 'secrets';
+      }
+    }
+    if (this.store === 'secrets') await this.ctx.secrets.store(secretKeyFor(device), JSON.stringify(identity));
+    this.hasIdentity.set(addressKey(device), true);
+    if (secretKeyFor(device) === this.secretKey) await this.refresh();
     else this.fireStatus();
   }
 
@@ -487,7 +546,7 @@ export class Connection implements ConnectionState, vscode.Disposable {
     }
   }
 
-  /** The active device's stored pairing, read fresh from secret storage. */
+  /** The active device's stored pairing, read fresh from the identity file. */
   identity(): Promise<Identity | undefined> {
     return this.identityFor(this.address);
   }
@@ -544,6 +603,10 @@ export function linkMessage(conn: ConnectionState): string {
     case 'disconnected': return `Disconnected from ${name}.\nReconnect from the Devices view or the Reconnect action.`;
     default: return '';
   }
+}
+
+function deviceOf(d: SavedDevice): identityFile.IdentityDevice {
+  return { host: d.host, port: d.port, name: d.name };
 }
 
 function addressKey({ host, port }: DeviceAddress): string {

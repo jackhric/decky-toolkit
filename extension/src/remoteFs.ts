@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
-import type { FsEntry } from './api';
-import { DeckyClient, DeviceAddress, HttpError, describeError, isConnectionError, isMissingRoute, isRejection } from './client';
+import type { FsEntry } from '@decky-toolkit/client/api';
+import { DeckyClient, DeviceAddress, HttpError, describeError, isConnectionError, isMissingRoute, isRejection } from '@decky-toolkit/client/client';
 import type { ConnectionState, SavedDevice } from './connection';
-import type { Identity } from './transport';
+import type { Identity } from '@decky-toolkit/client/transport';
 
 export const SCHEME = 'decky';
 const DEFAULT_PORT = 8765;

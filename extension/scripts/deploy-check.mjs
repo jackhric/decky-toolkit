@@ -24,13 +24,15 @@ if (!identityFile || !pluginRoot || !host || !sshTarget) {
   console.error('Usage: DECKY_IDENTITY_FILE=<file> DECKY_USER=<ssh user> node scripts/deploy-check.mjs <plugin-root> <host> [port]\n(DECKY_HOST and DECKY_SSH=<user@host> also work)');
   process.exit(2);
 }
-// The JSON the extension keeps in secret storage under decky-toolkit.identity:<host:port>: {key, cert, serverCert}.
-const identity = JSON.parse(readFileSync(identityFile, 'utf8'));
+// The identity file (~/.config/decky-toolkit/identity.json: {version, device, key, cert, serverCert}) or the
+// older secret-storage JSON {key, cert, serverCert}.
+const { key, cert, serverCert } = JSON.parse(readFileSync(identityFile, 'utf8'));
+const identity = { key, cert, serverCert };
 const redact = s => String(s).split(identity.key).join('<key>');
 
 const outfile = path.join(root, 'out', 'deploylib.cjs');
 await esbuild.build({
-  stdin: { contents: "export * from './src/client'; export * from './src/pluginDeploy';", resolveDir: root, loader: 'ts' },
+  stdin: { contents: "export * from '../packages/client/src/client'; export * from './src/pluginDeploy';", resolveDir: root, loader: 'ts' },
   bundle: true, platform: 'node', format: 'cjs', outfile, logLevel: 'warning',
 });
 const lib = createRequire(import.meta.url)(outfile);

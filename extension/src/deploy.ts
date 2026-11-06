@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { describeError } from './client';
+import { describeError } from '@decky-toolkit/client/client';
 import type { Connection } from './connection';
 import {
   BuildError, BuildMode, DeployPhase, DeployStep, WorkspacePlugin, deployPlugin, findPluginRoots, readWorkspacePlugin,

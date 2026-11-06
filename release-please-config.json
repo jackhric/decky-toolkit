@@ -10,7 +10,7 @@
     ".": {
       "release-type": "node",
       "component": "plugin",
-      "exclude-paths": ["extension"]
+      "exclude-paths": ["extension", "packages"]
     },
     "extension": {
       "release-type": "node",

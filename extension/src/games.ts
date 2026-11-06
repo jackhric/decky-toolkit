@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import type { AppSummary, FsEntry, GameDirs, GameSaves, SaveCandidate } from './api';
-import { DeckyClient, describeError, isOldDevice } from './client';
+import type { AppSummary, FsEntry, GameDirs, GameSaves, SaveCandidate } from '@decky-toolkit/client/api';
+import { DeckyClient, describeError, isOldDevice } from '@decky-toolkit/client/client';
 import type { Connection, ConnectionState, SavedDevice } from './connection';
 import { deckyUri, deviceAuthority, globEscape } from './remoteFs';
 

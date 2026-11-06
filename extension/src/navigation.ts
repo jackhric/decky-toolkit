@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import type { NavigateRequest, PluginInfo, UiRoutes } from './api';
-import { DeckyClient, isOldDevice, serverError } from './client';
+import type { NavigateRequest, PluginInfo, UiRoutes } from '@decky-toolkit/client/api';
+import { DeckyClient, isOldDevice, serverError } from '@decky-toolkit/client/client';
 import type { Connection } from './connection';
 
 export interface NavItem extends vscode.QuickPickItem {
