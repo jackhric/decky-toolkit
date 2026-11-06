@@ -1,5 +1,5 @@
 ---
-title: Hot reload your plugin
+title: Live reload your plugin
 description: Save a file and just your Decky Loader plugin reloads on the device, without restarting Decky Loader.
 sidebar:
   order: 1
@@ -41,7 +41,7 @@ the plugin reloads in place, usually within 100 ms of the build:
 - A `plugin.json` or `package.json` change deploys again.
 
 You stay where you were: the plugin's Quick Access panel, its own page, the selected settings tab and the
-focused control. If the plugin fails to load, the error shows in the **Decky Toolkit** output with the
+focused control. State inside your components starts fresh, since the bundle is imported again. If the plugin fails to load, the error shows in the **Decky Toolkit** output with the
 line in your source.
 
 Outside VS Code, `npx decky-toolkit dev` in your plugin folder does the same until you press Ctrl-C.

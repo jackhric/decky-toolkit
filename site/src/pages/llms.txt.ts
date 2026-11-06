@@ -12,7 +12,7 @@ export const GET: APIRoute = async ({ site }) => {
     '> Decky Toolkit is a free, open-source (MIT) toolkit for building, testing and deploying Decky Loader plugins',
     '> for the Steam Deck and other SteamOS devices (SteamOS, Bazzite) from VS Code or VSCodium. A Decky Loader',
     '> plugin on the device runs an HTTP and MCP server on port 8765; the VS Code extension (jackhric.decky-toolkit)',
-    '> hot reloads the plugin in your workspace without restarting Decky Loader, shows the device',
+    '> live reloads the plugin in your workspace without restarting Decky Loader, shows the device',
     "> screen with sound, forwards keyboard, mouse and gamepad input, streams logs, and evaluates JavaScript in Steam's",
     '> SharedJSContext. Coding agents such as Claude Code can drive the device over MCP.',
     '',

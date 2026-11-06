@@ -1,7 +1,7 @@
 {
   "name": "decky-toolkit",
   "displayName": "Decky Toolkit",
-  "description": "Build, deploy and hot reload Decky Loader plugins on Steam Deck, SteamOS and Bazzite from VS Code.",
+  "description": "Build, deploy and live reload Decky Loader plugins on Steam Deck, SteamOS and Bazzite from VS Code.",
   "version": "0.9.0",
   "publisher": "jackhric",
   "icon": "media/icon.png",
@@ -26,6 +26,7 @@
     "bazzite",
     "homebrew",
     "plugin development",
+    "live reload",
     "hot reload",
     "deploy",
     "cef",
