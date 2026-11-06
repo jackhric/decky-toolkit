@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import type { FsEntry } from './api';
-import { DeckyClient, DeviceAddress, HttpError, describeError, isConnectionError, isMissingRoute } from './client';
+import { DeckyClient, DeviceAddress, HttpError, describeError, isConnectionError, isMissingRoute, isRejection } from './client';
 import type { ConnectionState, SavedDevice } from './connection';
+import type { Identity } from './transport';
 
 export const SCHEME = 'decky';
 const DEFAULT_PORT = 8765;
@@ -11,7 +12,7 @@ const MAX_SYMLINK_LOOKUPS = 64;
 
 export interface DeviceSource {
   readonly devices: SavedDevice[];
-  tokenFor(address: DeviceAddress): Promise<string | undefined>;
+  identityFor(address: DeviceAddress): Promise<Identity | undefined>;
   noteReachable?(device: SavedDevice, reachable: boolean): void;
 }
 
@@ -60,10 +61,10 @@ function serverMessage(e: HttpError): string {
 export function toFsError(e: unknown, uri: vscode.Uri, device: string): Error {
   if (e instanceof vscode.FileSystemError) return e;
   if (isConnectionError(e)) return vscode.FileSystemError.Unavailable(`Decky device ${device} is not reachable (${describeError(e)})`);
+  if (isRejection(e)) return vscode.FileSystemError.NoPermissions(`${device} no longer accepts this editor; re-pair it in the Decky view`);
   if (!(e instanceof HttpError)) return new vscode.FileSystemError(describeError(e));
   if (isMissingRoute(e)) return vscode.FileSystemError.Unavailable(`the Decky Toolkit plugin on ${device} has no remote file access yet; update it`);
   const code = errorCode(e);
-  if (e.status === 401) return vscode.FileSystemError.NoPermissions(`${device} rejected the token; re-pair it in the Decky view`);
   if (e.status === 403) return vscode.FileSystemError.NoPermissions(serverMessage(e));
   if (e.status === 404) return vscode.FileSystemError.FileNotFound(uri);
   if (code === 'EEXIST') return vscode.FileSystemError.FileExists(uri);
@@ -80,7 +81,7 @@ function deviceOf(devices: SavedDevice[], uri: vscode.Uri): SavedDevice | undefi
 /**
  * Marks decky:// editors and Explorer entries of a device that cannot serve them right now. The files
  * stay open; the badge and colour show in the tab, and the tooltip says why saving would fail.
- * A user Disconnect does not mark them: decky:// works with the stored token without a session.
+ * A user Disconnect does not mark them: decky:// works with the stored pairing without a session.
  */
 export class DeckyFileDecorations implements vscode.FileDecorationProvider, vscode.Disposable {
   private readonly changed = new vscode.EventEmitter<undefined>();
@@ -96,7 +97,7 @@ export class DeckyFileDecorations implements vscode.FileDecorationProvider, vsco
     const d = deviceOf(this.conn.devices, uri);
     if (!d) return decoration('!', `No saved Decky device ${uri.authority}; add it in the Decky view`, 'list.errorForeground');
     const session = this.conn.connectedDevice?.id === d.id;
-    if (session && this.conn.tokenRejected) return decoration('!', `${d.name} rejected the stored token; re-pair it to open or save files`, 'list.errorForeground');
+    if (session && this.conn.rejected) return decoration('!', `${d.name} no longer accepts this editor; re-pair it to open or save files`, 'list.errorForeground');
     const status = this.conn.statusOf(d);
     if (status === 'unreachable') return decoration('!', `Lost connection to ${d.name}; files open and save again as soon as it answers`, 'list.warningForeground');
     if (status === 'unpaired') return decoration('!', `Not paired with ${d.name}; connect to it in the Decky view`, 'list.warningForeground');
@@ -141,10 +142,10 @@ export class DeckyFileSystemProvider implements vscode.FileSystemProvider, vscod
 
   private async call<T>(uri: vscode.Uri, fn: (client: DeckyClient) => Promise<T>): Promise<T> {
     const d = this.device(uri);
-    const token = await this.source.tokenFor(d);
-    if (!token) throw vscode.FileSystemError.Unavailable(`not paired with Decky device ${d.name}; connect to it in the Decky view`);
+    const identity = await this.source.identityFor(d);
+    if (!identity) throw vscode.FileSystemError.Unavailable(`not paired with Decky device ${d.name}; connect to it in the Decky view`);
     try {
-      const result = await fn(new DeckyClient(d, token));
+      const result = await fn(new DeckyClient(d, identity));
       this.source.noteReachable?.(d, true);
       return result;
     } catch (e) {

@@ -2,11 +2,23 @@ import * as http from 'http';
 import { randomBytes } from 'crypto';
 import type { AddressInfo, Socket } from 'net';
 import type { Duplex } from 'stream';
+import { Identity, deviceRequest } from './transport';
 
 export interface ProxyTarget {
   host: string;
   port: number;
-  token: string;
+  identity: Identity;
+}
+
+const SECRET_KEY = 'decky-toolkit.proxySecret';
+export const DEFAULT_MCP_PORT = 8766;
+// A second window finds the configured port taken and moves up; give up on a fixed port after that many.
+const PORT_ATTEMPTS = 20;
+
+/** The slice of `vscode.Memento` the proxy needs, so scripts can run it without VS Code. */
+export interface SecretStore {
+  get<T>(key: string): T | undefined;
+  update(key: string, value: unknown): Thenable<void>;
 }
 
 // Browser-identity headers are dropped: the device rejects foreign Origins (vscode-webview://…)
@@ -18,18 +30,30 @@ const DROP_REQUEST_HEADERS = new Set([
 const DROP_RESPONSE_HEADERS = new Set(['set-cookie', 'connection', 'keep-alive', 'www-authenticate']);
 
 /**
- * Loopback HTTP proxy that adds the bearer token, so webviews never see the token or the device
- * address. Every URL carries a random path prefix: anything else on this machine (including web
- * pages in a browser) can reach 127.0.0.1, but cannot guess the prefix.
+ * Loopback HTTP proxy that talks to the device with this editor's pairing, so webviews and MCP clients
+ * never hold it or the device address. Every URL carries a random path prefix: anything else on this
+ * machine (including web pages in a browser) can reach 127.0.0.1, but cannot guess the prefix. Port and
+ * prefix stay the same across restarts so a written `.mcp.json` keeps working.
  */
 export class DeviceProxy {
   private server?: http.Server;
   private starting?: Promise<string>;
-  private readonly secret = randomBytes(18).toString('base64url');
+  private readonly secret: string;
   private readonly upstreams = new Set<http.ClientRequest>();
   private readonly tunnels = new Set<Duplex>();
 
-  constructor(private readonly target: () => ProxyTarget | undefined) {}
+  constructor(
+    private readonly target: () => ProxyTarget | undefined,
+    state: SecretStore,
+    private readonly port: () => number = () => DEFAULT_MCP_PORT,
+  ) {
+    let secret = state.get<string>(SECRET_KEY);
+    if (!secret) {
+      secret = randomBytes(18).toString('base64url');
+      void state.update(SECRET_KEY, secret);
+    }
+    this.secret = secret;
+  }
 
   get running(): boolean {
     return !!this.server?.listening;
@@ -38,18 +62,49 @@ export class DeviceProxy {
   /** Starts on first use and returns the base URL (no trailing slash). */
   start(): Promise<string> {
     if (!this.starting) {
-      this.starting = new Promise<string>((resolve, reject) => {
-        const server = http.createServer((req, res) => this.handle(req, res));
-        server.on('upgrade', (req, socket, head) => this.handleUpgrade(req, socket, head));
-        server.on('error', reject);
-        server.listen(0, '127.0.0.1', () => {
-          this.server = server;
-          resolve(this.baseUrlFor(server));
-        });
-      });
+      const first = this.port();
+      this.starting = this.listen(first, first);
       this.starting.catch(() => { this.starting = undefined; });
     }
     return this.starting;
+  }
+
+  private listen(port: number, first: number): Promise<string> {
+    return new Promise<string>((resolve, reject) => {
+      const server = http.createServer((req, res) => this.handle(req, res));
+      server.on('upgrade', (req, socket, head) => this.handleUpgrade(req, socket, head));
+      server.once('error', (e: NodeJS.ErrnoException) => {
+        if (e.code !== 'EADDRINUSE' || port === 0) return reject(e);
+        const next = port - first + 1 < PORT_ATTEMPTS && port < 65535 ? port + 1 : 0;
+        resolve(this.listen(next, first));
+      });
+      server.listen(port, '127.0.0.1', () => {
+        this.server = server;
+        resolve(this.baseUrlFor(server));
+      });
+    });
+  }
+
+  /** The MCP endpoint MCP clients are given (`.mcp.json`, Copy MCP URL). */
+  async mcpUrl(): Promise<string> {
+    return `${await this.start()}/mcp`;
+  }
+
+  /**
+   * For a URL this proxy handed out earlier (same prefix) but on another port, the same URL on the
+   * current port; undefined for anything else or when nothing changed.
+   */
+  async rebase(url: string): Promise<string | undefined> {
+    let u: URL;
+    try {
+      u = new URL(url);
+    } catch {
+      return undefined;
+    }
+    if (u.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(u.hostname) || this.devicePath(u.pathname) === undefined) return undefined;
+    const base = new URL(await this.start());
+    if (u.port === base.port && u.hostname === base.hostname) return undefined;
+    return `${base.origin}${u.pathname}${u.search}`;
   }
 
   stop(): void {
@@ -60,7 +115,7 @@ export class DeviceProxy {
     this.starting = undefined;
   }
 
-  /** Aborts in-flight requests, e.g. after the token or host changes. */
+  /** Aborts in-flight requests, e.g. after the pairing or host changes. */
   resetUpstreams(): void {
     for (const u of this.upstreams) u.destroy();
     this.upstreams.clear();
@@ -91,12 +146,11 @@ export class DeviceProxy {
     for (const [k, v] of Object.entries(req.headers)) {
       if (v !== undefined && !DROP_REQUEST_HEADERS.has(k)) headers[k] = v;
     }
-    headers.authorization = `Bearer ${target.token}`;
     headers.host = `${target.host}:${target.port}`;
     return headers;
   }
 
-  /** WebSocket (`/input`): replay the handshake upstream with the token, then splice the sockets. */
+  /** WebSocket (`/input`): replay the handshake upstream, then splice the sockets. */
   private handleUpgrade(req: http.IncomingMessage, socket: Duplex, head: Buffer): void {
     socket.on('error', () => socket.destroy());
     const path = this.devicePath(req.url);
@@ -108,7 +162,7 @@ export class DeviceProxy {
     const headers = this.upstreamHeaders(req, target);
     headers.connection = 'Upgrade';
     headers.upgrade = 'websocket';
-    const upstream = http.request({ host: target.host, port: target.port, method: 'GET', path, headers });
+    const upstream = deviceRequest(target, { method: 'GET', path, headers });
     this.upstreams.add(upstream);
     this.tunnels.add(socket);
     const drop = () => { this.tunnels.delete(socket); socket.destroy(); };
@@ -170,13 +224,7 @@ export class DeviceProxy {
       return;
     }
 
-    const upstream = http.request({
-      host: target.host,
-      port: target.port,
-      method: req.method,
-      path,
-      headers: this.upstreamHeaders(req, target),
-    });
+    const upstream = deviceRequest(target, { method: req.method, path, headers: this.upstreamHeaders(req, target) });
     this.upstreams.add(upstream);
     upstream.setNoDelay(true);
 

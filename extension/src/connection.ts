@@ -1,14 +1,17 @@
 import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
 import type { Health, InputSettings, StreamStats } from './api';
-import { DeckyClient, DeviceAddress, HttpError, describeError, isConnectionError } from './client';
-import { DeviceProxy, ProxyTarget } from './proxy';
+import { DeckyClient, DeviceAddress, HttpError, describeError, isConnectionError, isRejection } from './client';
+import { DEFAULT_MCP_PORT, DeviceProxy, ProxyTarget } from './proxy';
+import type { Identity } from './transport';
 
 const STATS_POLL_MS = 5000;
 const DEVICES_KEY = 'decky-toolkit.devices';
 const ACTIVE_KEY = 'decky-toolkit.activeDevice';
 const SESSION_KEY = 'decky-toolkit.connectedDevice';
-const TOKEN_PREFIX = 'decky-toolkit.token:';
+const IDENTITY_PREFIX = 'decky-toolkit.identity:';
+// Bearer tokens of plugins before pairing moved to client identities; deleted on sight.
+const LEGACY_TOKEN_PREFIX = 'decky-toolkit.token:';
 
 /** Mutable so tests can shorten them. */
 export const connectionTimings = { healthPollMs: 15000, retryMs: 2000 };
@@ -43,14 +46,14 @@ export interface ConnectionState {
   readonly address: DeviceAddress;
   readonly label: string;
   readonly paired: boolean;
-  readonly tokenRejected: boolean;
+  readonly rejected: boolean;
   readonly health: HealthState;
   readonly stats?: StreamStats;
   readonly statsError?: string;
   /** Undefined until the first `/input/settings` answer for the connected device. */
   readonly input?: InputState;
   readonly onDidChange: vscode.Event<void>;
-  /** Host, port or token changed; unlike `onDidChange` not fired for health/stats updates. */
+  /** Host, port or pairing changed; unlike `onDidChange` not fired for health/stats updates. */
   readonly onDidChangeTarget: vscode.Event<void>;
   /** The device of the current session; stays set while it is briefly unreachable. */
   readonly connectedDevice: SavedDevice | undefined;
@@ -61,7 +64,7 @@ export interface ConnectionState {
   statusOf(device: SavedDevice): DeviceStatus;
   /** The code the device shows for a pairing request that is waiting for approval. */
   pairingCodeOf?(id: string): string | undefined;
-  /** Plugin version from the device's last `/health` answer; `/health` needs no token, so it is known before pairing. */
+  /** Plugin version from the device's last `/health` answer; `/health` needs no pairing, so it is known before pairing. */
   versionOf?(id: string): string | undefined;
   authedClient(): DeckyClient | undefined;
   /** Polls `/stream/stats` while at least one returned lease is undisposed. */
@@ -69,7 +72,7 @@ export interface ConnectionState {
 }
 
 export class Connection implements ConnectionState, vscode.Disposable {
-  private cachedToken?: string;
+  private cachedIdentity?: Identity;
   private readonly changed = new vscode.EventEmitter<void>();
   readonly onDidChange = this.changed.event;
   private readonly targetChanged = new vscode.EventEmitter<void>();
@@ -77,19 +80,19 @@ export class Connection implements ConnectionState, vscode.Disposable {
   private readonly statusChanged = new vscode.EventEmitter<void>();
   /** Some device's `statusOf` may have changed. */
   readonly onDidChangeStatus = this.statusChanged.event;
-  readonly proxy = new DeviceProxy(() => this.proxyTarget());
+  readonly proxy: DeviceProxy;
   private readonly disposables: vscode.Disposable[] = [this.changed, this.targetChanged, this.statusChanged];
 
   health: HealthState = { kind: 'unknown' };
   stats?: StreamStats;
   statsError?: string;
   input?: InputState;
-  tokenRejected = false;
+  rejected = false;
   private statsLeases = 0;
   private statsTimer?: NodeJS.Timeout;
-  // Bumped on every refresh so replies for a previous host/token are dropped.
+  // Bumped on every refresh so replies for a previous host/pairing are dropped.
   private generation = 0;
-  private readonly hasToken = new Map<string, boolean>();
+  private readonly hasIdentity = new Map<string, boolean>();
   private readonly busy = new Map<string, 'connecting' | 'pairing'>();
   private readonly unreachableIds = new Set<string>();
   private readonly versions = new Map<string, string>();
@@ -100,10 +103,12 @@ export class Connection implements ConnectionState, vscode.Disposable {
   private probeTimer?: NodeJS.Timeout;
 
   constructor(private readonly ctx: vscode.ExtensionContext) {
+    this.proxy = new DeviceProxy(() => this.proxyTarget(), ctx.globalState,
+      () => vscode.workspace.getConfiguration('decky-toolkit').get<number>('mcpPort', DEFAULT_MCP_PORT));
     this.disposables.push(
       ctx.secrets.onDidChange(e => {
         if (e.key === this.secretKey) void this.refresh();
-        else if (e.key.startsWith(TOKEN_PREFIX)) void this.loadTokenFlags().then(() => this.fireStatus());
+        else if (e.key.startsWith(IDENTITY_PREFIX)) void this.loadIdentityFlags().then(() => this.fireStatus());
       }),
       vscode.workspace.onDidChangeConfiguration(e => {
         if (e.affectsConfiguration('decky-toolkit.host') || e.affectsConfiguration('decky-toolkit.port')) void this.refresh();
@@ -118,6 +123,7 @@ export class Connection implements ConnectionState, vscode.Disposable {
 
   /** Seeds the device list from the host/port settings the first time the extension runs. */
   async initDevices(): Promise<void> {
+    await Promise.all(this.devices.map(d => this.ctx.secrets.delete(LEGACY_TOKEN_PREFIX + addressKey(d))));
     if (this.ctx.globalState.get<SavedDevice[]>(DEVICES_KEY) !== undefined) return;
     const { host, port } = this.settingsAddress;
     if (!host) return;
@@ -161,18 +167,18 @@ export class Connection implements ConnectionState, vscode.Disposable {
     return port === 8765 ? host : `${host}:${port}`;
   }
 
-  async tokenFor(address: DeviceAddress): Promise<string | undefined> {
-    return this.ctx.secrets.get(secretKeyFor(address));
+  async identityFor(address: DeviceAddress): Promise<Identity | undefined> {
+    return parseIdentity(await this.ctx.secrets.get(secretKeyFor(address)));
   }
 
-  async deleteTokenFor(address: DeviceAddress): Promise<void> {
+  async deleteIdentityFor(address: DeviceAddress): Promise<void> {
     await this.ctx.secrets.delete(secretKeyFor(address));
-    this.hasToken.set(addressKey(address), false);
+    this.hasIdentity.set(addressKey(address), false);
   }
 
-  async setTokenFor(address: DeviceAddress, token: string): Promise<void> {
-    await this.ctx.secrets.store(secretKeyFor(address), token);
-    this.hasToken.set(addressKey(address), true);
+  async setIdentityFor(address: DeviceAddress, identity: Identity): Promise<void> {
+    await this.ctx.secrets.store(secretKeyFor(address), JSON.stringify(identity));
+    this.hasIdentity.set(addressKey(address), true);
     if (secretKeyFor(address) === this.secretKey) await this.refresh();
     else this.fireStatus();
   }
@@ -182,23 +188,23 @@ export class Connection implements ConnectionState, vscode.Disposable {
   }
 
   get paired(): boolean {
-    return !!this.cachedToken;
+    return !!this.cachedIdentity;
   }
 
   async refresh(): Promise<void> {
     const gen = ++this.generation;
-    const token = await this.ctx.secrets.get(this.secretKey);
-    await this.loadTokenFlags();
+    const identity = await this.identityFor(this.address);
+    await this.loadIdentityFlags();
     if (gen !== this.generation) return;
-    this.cachedToken = token;
+    this.cachedIdentity = identity;
     const s = this.session, a = this.activeDevice;
-    if (s && !(a && token && a.id === s.id && a.host === s.host && a.port === s.port)) this.endSession();
+    if (s && !(a && identity && a.id === s.id && a.host === s.host && a.port === s.port)) this.endSession();
     this.proxy.resetUpstreams();
     this.health = { kind: 'unknown' };
     this.stats = undefined;
     this.statsError = undefined;
     this.input = undefined;
-    this.tokenRejected = false;
+    this.rejected = false;
     this.targetChanged.fire();
     this.statusChanged.fire();
     this.changed.fire();
@@ -230,9 +236,9 @@ export class Connection implements ConnectionState, vscode.Disposable {
     this.changed.fire();
   }
 
-  private setTokenRejected(rejected: boolean): void {
-    if (rejected === this.tokenRejected) return;
-    this.tokenRejected = rejected;
+  private setRejected(rejected: boolean): void {
+    if (rejected === this.rejected) return;
+    this.rejected = rejected;
     this.fireStatus();
   }
 
@@ -240,7 +246,7 @@ export class Connection implements ConnectionState, vscode.Disposable {
     const s = this.connectedDevice;
     if (s) {
       if (this.busy.has(s.id)) return 'connecting';
-      if (this.tokenRejected) return 'rejected';
+      if (this.rejected) return 'rejected';
       return this.health.kind === 'unreachable' ? 'unreachable' : 'connected';
     }
     if (!this.recent || this.devices.length === 0) return undefined;
@@ -274,16 +280,16 @@ export class Connection implements ConnectionState, vscode.Disposable {
     const ms = this.health.kind === 'unreachable' ? connectionTimings.retryMs : connectionTimings.healthPollMs;
     this.healthTimer = setTimeout(() => {
       void this.checkHealth().then(h => {
-        // /health needs no token; the input settings route tells a rejected token apart.
+        // /health needs no pairing; the input settings route tells a rejected one apart.
         if (h.kind === 'ok' && this.session && this.statsLeases === 0) void this.refreshInput();
       }).finally(() => this.scheduleHealth());
     }, ms);
   }
 
-  private async loadTokenFlags(): Promise<void> {
-    const flags = await Promise.all(this.devices.map(async d => [addressKey(d), !!(await this.tokenFor(d))] as const));
-    this.hasToken.clear();
-    for (const [k, v] of flags) this.hasToken.set(k, v);
+  private async loadIdentityFlags(): Promise<void> {
+    const flags = await Promise.all(this.devices.map(async d => [addressKey(d), !!(await this.identityFor(d))] as const));
+    this.hasIdentity.clear();
+    for (const [k, v] of flags) this.hasIdentity.set(k, v);
   }
 
   private fireStatus(): void {
@@ -311,7 +317,7 @@ export class Connection implements ConnectionState, vscode.Disposable {
     if (busy) return busy;
     if (this.connectedDevice?.id === device.id) return this.health.kind === 'unreachable' ? 'unreachable' : 'connected';
     if (this.unreachableIds.has(device.id)) return 'unreachable';
-    return this.hasToken.get(addressKey(device)) ? 'disconnected' : 'unpaired';
+    return this.hasIdentity.get(addressKey(device)) ? 'disconnected' : 'unpaired';
   }
 
   setBusy(id: string, state: 'connecting' | 'pairing' | undefined): void {
@@ -359,7 +365,7 @@ export class Connection implements ConnectionState, vscode.Disposable {
     }));
   }
 
-  /** Starts a session with the active device, which must already hold a token. */
+  /** Starts a session with the active device, which must already be paired. */
   async markConnected(id: string): Promise<void> {
     const d = this.activeDevice;
     if (!d || d.id !== id) throw new Error('only the active device can be connected');
@@ -367,7 +373,7 @@ export class Connection implements ConnectionState, vscode.Disposable {
     this.recent = this.session;
     this.unreachableIds.delete(id);
     this.health = { kind: 'unknown' };
-    this.tokenRejected = false;
+    this.rejected = false;
     this.scheduleHealth();
     await this.ctx.globalState.update(SESSION_KEY, id);
     this.fireStatus();
@@ -424,12 +430,12 @@ export class Connection implements ConnectionState, vscode.Disposable {
     try {
       next = await client.getInputSettings();
     } catch (e) {
-      if (gen === this.generation && e instanceof HttpError && e.status === 401) this.setTokenRejected(true);
+      if (gen === this.generation && isRejection(e)) this.setRejected(true);
       if (!(e instanceof HttpError && e.status === 404)) return this.input;
       next = 'unsupported';
     }
     if (gen !== this.generation) return next;
-    this.setTokenRejected(false);
+    this.setRejected(false);
     this.setInput(next);
     return next;
   }
@@ -459,34 +465,26 @@ export class Connection implements ConnectionState, vscode.Disposable {
       if (gen !== this.generation || this.statsLeases === 0) return;
       this.stats = stats;
       this.statsError = stats.error ?? undefined;
-      this.setTokenRejected(false);
+      this.setRejected(false);
       this.changed.fire();
       if (this.health.kind !== 'ok') void this.checkHealth();
     } catch (e) {
       if (gen !== this.generation || this.statsLeases === 0) return;
       this.stats = undefined;
       this.statsError = describeError(e);
-      if (e instanceof HttpError && e.status === 401) this.setTokenRejected(true);
+      if (isRejection(e)) this.setRejected(true);
       this.changed.fire();
       if (isConnectionError(e)) this.setHealth({ kind: 'unreachable', error: this.statsError });
     }
   }
 
-  async token(): Promise<string | undefined> {
-    return this.ctx.secrets.get(this.secretKey);
-  }
-
-  async setToken(token: string): Promise<void> {
-    await this.setTokenFor(this.address, token);
-  }
-
-  async clearToken(): Promise<void> {
-    await this.ctx.secrets.delete(this.secretKey);
-    await this.refresh();
+  /** The active device's stored pairing, read fresh from secret storage. */
+  identity(): Promise<Identity | undefined> {
+    return this.identityFor(this.address);
   }
 
   private proxyTarget(): ProxyTarget | undefined {
-    return this.cachedToken ? { ...this.address, token: this.cachedToken } : undefined;
+    return this.cachedIdentity ? { ...this.address, identity: this.cachedIdentity } : undefined;
   }
 
   unauthenticatedClient(): DeckyClient {
@@ -494,7 +492,7 @@ export class Connection implements ConnectionState, vscode.Disposable {
   }
 
   authedClient(): DeckyClient | undefined {
-    return this.cachedToken ? new DeckyClient(this.address, this.cachedToken) : undefined;
+    return this.cachedIdentity ? new DeckyClient(this.address, this.cachedIdentity) : undefined;
   }
 
   /** The connected device's client; offers to connect (and returns undefined) when there is none. */
@@ -520,7 +518,7 @@ export class Connection implements ConnectionState, vscode.Disposable {
 }
 
 const LINK_SUFFIX: Record<LinkState, string> = {
-  connecting: 'connecting…', connected: '', unreachable: 'connection lost', rejected: 'token rejected', disconnected: 'disconnected',
+  connecting: 'connecting…', connected: '', unreachable: 'connection lost', rejected: 'pairing rejected', disconnected: 'disconnected',
 };
 
 /** Short state for titles and view descriptions; empty while connected. */
@@ -534,7 +532,7 @@ export function linkMessage(conn: ConnectionState): string {
   switch (conn.link) {
     case 'connecting': return `Connecting to ${name}…`;
     case 'unreachable': return `Lost connection to ${name}.\nReconnecting as soon as it answers again…`;
-    case 'rejected': return `${name} rejected the stored token.\nReconnect to continue; the device asks you to approve this editor again.`;
+    case 'rejected': return `${name} no longer accepts this editor.\nReconnect to continue; the device asks you to approve this editor again.`;
     case 'disconnected': return `Disconnected from ${name}.\nReconnect from the Devices view or the Reconnect action.`;
     default: return '';
   }
@@ -545,7 +543,18 @@ function addressKey({ host, port }: DeviceAddress): string {
 }
 
 function secretKeyFor(address: DeviceAddress): string {
-  return TOKEN_PREFIX + addressKey(address);
+  return IDENTITY_PREFIX + addressKey(address);
+}
+
+function parseIdentity(raw: string | undefined): Identity | undefined {
+  if (!raw) return undefined;
+  try {
+    const x = JSON.parse(raw) as Partial<Identity>;
+    if (typeof x.key === 'string' && typeof x.cert === 'string' && typeof x.serverCert === 'string') return x as Identity;
+  } catch {
+    // not ours; treated as unpaired
+  }
+  return undefined;
 }
 
 export function newDeviceId(): string {

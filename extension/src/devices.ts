@@ -105,11 +105,11 @@ export async function removeDevice(conn: Connection, arg?: unknown): Promise<voi
   if (!d) return;
   const ok = await vscode.window.showWarningMessage(
     `Forget ${d.name} (${d.host}:${d.port})?`,
-    { modal: true, detail: 'Its stored token is deleted. Connecting to it again asks for approval on the device.' },
+    { modal: true, detail: 'Its pairing is deleted. Connecting to it again asks for approval on the device.' },
     'Forget');
   if (!ok) return;
   const rest = conn.devices.filter(x => x.id !== d.id);
-  if (!rest.some(x => x.host === d.host && x.port === d.port)) await conn.deleteTokenFor(d);
+  if (!rest.some(x => x.host === d.host && x.port === d.port)) await conn.deleteIdentityFor(d);
   await conn.saveDevices(rest);
 }
 

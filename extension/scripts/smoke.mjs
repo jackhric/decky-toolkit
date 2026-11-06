@@ -4,6 +4,9 @@ import * as esbuild from 'esbuild';
 import assert from 'assert/strict';
 import Module, { createRequire } from 'module';
 import { execFileSync } from 'child_process';
+import { X509Certificate, createHash, createPublicKey, generateKeyPairSync } from 'crypto';
+import * as http from 'http';
+import * as https from 'https';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'fs';
 import { hostname, tmpdir } from 'os';
 import * as path from 'path';
@@ -18,8 +21,9 @@ await esbuild.build({
   stdin: {
     contents: "export * from './src/extension'; export * from './src/actionsTree'; export * from './src/pluginsTree'; " +
       "export * from './src/pluginDeploy'; export * from './src/stage'; export { AUTO_DEPLOY_DEBOUNCE_MS } from './src/deploy'; " +
-      "export * from './src/controllers'; export * from './src/navigation'; export { HttpError } from './src/client'; " +
-      "export * from './src/games'; export * from './src/remoteFs'; export * from './src/discovery';",
+      "export * from './src/controllers'; export * from './src/navigation'; export { DeckyClient, HttpError } from './src/client'; " +
+      "export * from './src/games'; export * from './src/remoteFs'; export * from './src/discovery'; export * from './src/transport'; " +
+      "export { pairingCode } from './src/pairing'; export { DeviceProxy } from './src/proxy';",
     resolveDir: root,
     loader: 'ts',
   },
@@ -30,6 +34,34 @@ await esbuild.build({
   external: ['vscode'],
   logLevel: 'warning',
 });
+
+// Throwaway device identity: a self-signed CA/server certificate and a client certificate it signed, as the
+// plugin mints them; `other` is an unrelated self-signed certificate (a reset device).
+const certDir = mkdtempSync(path.join(tmpdir(), 'decky-smoke-certs-'));
+const ossl = (...args) => execFileSync('openssl', args, { cwd: certDir, stdio: ['ignore', 'pipe', 'pipe'] });
+function selfSigned(name) {
+  ossl('req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1', '-nodes', '-keyout', `${name}.key`, '-out', `${name}.crt`,
+    '-days', '2', '-subj', '/CN=Decky Toolkit', '-addext', 'basicConstraints=critical,CA:TRUE', '-addext', 'keyUsage=critical,digitalSignature,keyCertSign');
+  return { key: readFileSync(path.join(certDir, `${name}.key`), 'utf8'), cert: readFileSync(path.join(certDir, `${name}.crt`), 'utf8') };
+}
+const serverPki = selfSigned('server');
+const otherPki = selfSigned('other');
+const clientKeys = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+const clientKeyPem = clientKeys.privateKey.export({ type: 'pkcs8', format: 'pem' });
+writeFileSync(path.join(certDir, 'client.key'), clientKeyPem);
+writeFileSync(path.join(certDir, 'client.ext'), 'extendedKeyUsage=clientAuth\nkeyUsage=digitalSignature\n');
+ossl('req', '-new', '-key', 'client.key', '-subj', '/CN=VS Code on smoke', '-out', 'client.csr');
+ossl('x509', '-req', '-in', 'client.csr', '-CA', 'server.crt', '-CAkey', 'server.key', '-CAcreateserial', '-days', '2', '-extfile', 'client.ext', '-out', 'client.crt');
+const clientCertPem = readFileSync(path.join(certDir, 'client.crt'), 'utf8');
+const peerOf = pem => { const x = new X509Certificate(pem); return { der: x.raw, pem, fingerprint256: x.fingerprint256 }; };
+const serverPeer = peerOf(serverPki.cert);
+const deviceCode = (publicKeyPem, id) => {
+  const spki = createPublicKey(publicKeyPem).export({ type: 'spki', format: 'der' });
+  const d = createHash('sha256').update(Buffer.concat([serverPeer.der, spki, Buffer.from(id)])).digest();
+  return String(d.readUInt32BE(0) % 10000).padStart(4, '0');
+};
+// What a completed pairing stores; the fake device accepts requests that present this client certificate.
+const pairedIdentity = { key: clientKeyPem, cert: clientCertPem, serverCert: serverPki.cert };
 
 class TabInputWebview { constructor(viewType) { this.viewType = viewType; } }
 // A screen tab left behind by an earlier extension host (VS Code prefixes the view type).
@@ -411,14 +443,15 @@ async function fsRoute(u, init, json) {
 }
 
 const fetched = [];
-globalThis.fetch = async (url, init = {}) => {
+const deviceFetch = async (url, init = {}) => {
   let u = new URL(url);
-  let auth = new Headers(init.headers).get('authorization');
-  // Requests through the extension's loopback proxy: the proxy adds the token.
+  let authed = init.identity?.cert === clientCertPem && init.identity?.serverCert === serverPki.cert;
+  // Requests through the extension's loopback proxy: the proxy presents the stored pairing.
   if (u.hostname === '127.0.0.1') {
-    u = new URL(`http://${settings.host}:${settings.port}${u.pathname.replace(/^\/[^/]+/, '')}${u.search}`);
-    auth = 'Bearer fake-token';
+    u = new URL(`https://${settings.host}:${settings.port}${u.pathname.replace(/^\/[^/]+/, '')}${u.search}`);
+    authed = true;
   }
+  if (init.identity && !authed && init.identity.serverCert !== serverPki.cert) throw new ext.TrustError();
   if (device.downFor > 0 && u.pathname === '/health') {
     device.downFor--;
     throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED', message: 'connect ECONNREFUSED' } });
@@ -429,11 +462,14 @@ globalThis.fetch = async (url, init = {}) => {
   if (u.pathname === '/health') return json(health);
   // Pairing requests: each poll answers with the next entry of pairQueue ('pending' once it is empty).
   if (u.pathname === '/pair/request' && init.method === 'POST') {
-    if (device.pairUnsupported) return new Response('Unauthorized', { status: 401 });
+    // A plugin from before pairing by key answers the handshake in plain HTTP.
+    if (device.pairUnsupported) throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'EPROTO', message: 'wrong version number' } });
     const n = device.pairRequests.length;
-    const req = { id: `req${n}`, code: String(4821 + n), body: JSON.parse(init.body) };
+    const body = JSON.parse(init.body);
+    const id = `req${n}`;
+    const req = { id, code: device.tamperCode ? '0000' : deviceCode(body.public_key, id), body };
     device.pairRequests.push(req);
-    return json({ id: req.id, code: req.code, poll_after_ms: 1000 }, 201);
+    return Object.assign(json({ id: req.id, code: req.code, poll_after_ms: 1000 }, 201), { peerCert: serverPeer });
   }
   const pairReq = /^\/pair\/request\/([^/]+)$/.exec(u.pathname);
   if (pairReq && init.method === 'DELETE') {
@@ -445,11 +481,11 @@ globalThis.fetch = async (url, init = {}) => {
     if (next === 'down') throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET', message: 'socket hang up' } });
     if (next === 'gone') return json({ error: 'unknown or expired pairing request' }, 404);
     if (next === 'approved') device.rejectToken = false;
-    if (next === 'approved') return json({ status: 'approved', token: 'fake-token', url: `http://${u.host}`, api_version: 1 });
+    if (next === 'approved') return json({ status: 'approved', client_cert: clientCertPem, server_cert: serverPki.cert, api_version: 2 });
     if (next === 'pending') await new Promise(r => setTimeout(r, 5));
     return json({ status: next });
   }
-  if (auth !== 'Bearer fake-token' || device.rejectToken) return new Response('unauthorized', { status: 401 });
+  if (!authed || device.rejectToken) return new Response('unauthorized', { status: 401 });
   if (u.pathname === '/stream/stats') return json(stats);
   if (u.pathname === '/stream/settings') {
     if (device.streamSettingsMissing) return json({ error: 'capture not available' }, 404);
@@ -546,6 +582,9 @@ globalThis.fetch = async (url, init = {}) => {
   if (reload && init.method === 'POST') return json({ ok: true, dir: decodeURIComponent(reload[1]) });
   return new Response('not found', { status: 404 });
 };
+globalThis.fetch = deviceFetch;
+const realDeviceFetch = ext.transportHooks.fetch;
+ext.transportHooks.fetch = deviceFetch;
 
 // Minimal when-clause evaluator: ==, !=, =~ /re/, !, &&, ||, parentheses (&& binds tighter).
 function evalWhen(expr, context) {
@@ -594,7 +633,18 @@ async function check(name, fn) {
 const settle = (ms = 50) => new Promise(r => setTimeout(r, ms));
 const labels = items => items.map(i => i.label);
 const run = (id, ...args) => calls.commands.get(id)(...args);
-const tokenKey = 'decky-toolkit.token:10.1.2.3:8765';
+const identityKey = 'decky-toolkit.identity:10.1.2.3:8765';
+const storedIdentity = (k = identityKey) => (secrets.has(k) ? JSON.parse(secrets.get(k)) : undefined);
+const storePaired = () => ctx.secrets.store(identityKey, JSON.stringify(pairedIdentity));
+/** The identity a pairing stored: the device's certificates and the private key generated for it. */
+function assertPaired(k = identityKey) {
+  const id = storedIdentity(k);
+  assert.ok(id, `no identity stored under ${k}`);
+  assert.equal(id.cert, clientCertPem);
+  assert.equal(id.serverCert.replace(/\s/g, ''), serverPki.cert.replace(/\s/g, ''), 'pins the certificate the device presented');
+  assert.match(id.key, /^-----BEGIN PRIVATE KEY-----/);
+  return id;
+}
 const lastMessage = kind => calls.messages.filter(m => m.kind === kind).at(-1);
 
 ext.connectionTimings.healthPollMs = 40;
@@ -661,7 +711,7 @@ const EXPECTED_ACTIONS = {
     ['Quick Access', 'decky-toolkit.uiQuickAccess'], ['Close menus', 'decky-toolkit.uiCloseMenus'],
     ['Evaluate JS in Steam UI', 'decky-toolkit.evaluate'], ['Toast on device', 'decky-toolkit.toast']]],
   MCP: ['server-process', 1, [
-    ['Write MCP config for this workspace', 'decky-toolkit.writeMcpConfig'], ['Copy MCP URL', 'decky-toolkit.copyMcpUrl'], ['Copy token', 'decky-toolkit.copyToken']]],
+    ['Write MCP config for this workspace', 'decky-toolkit.writeMcpConfig'], ['Copy MCP URL', 'decky-toolkit.copyMcpUrl']]],
 };
 
 /** Asserts the Actions tree shape and returns { roots, kids: { Screen: [...], ... } }. */
@@ -758,7 +808,9 @@ await check('package.json: container, activation, commands, menus, version', asy
     assert.deepEqual(welcomeFor(view, new Map([['decky-toolkit.link', 'connected']])).filter(t => /device/.test(t) && !/controllers/.test(t)), [], `${view} connected: no lost-connection text`);
   }
   assert.deepEqual(Object.keys(pkg.contributes.configuration.properties).sort(),
-    ['decky-toolkit.deploy.build', 'decky-toolkit.deploy.onChange', 'decky-toolkit.discovery.enabled', 'decky-toolkit.host', 'decky-toolkit.openScreenOnConnect', 'decky-toolkit.pluginDirName', 'decky-toolkit.port']);
+    ['decky-toolkit.deploy.build', 'decky-toolkit.deploy.onChange', 'decky-toolkit.discovery.enabled', 'decky-toolkit.host', 'decky-toolkit.mcpPort', 'decky-toolkit.openScreenOnConnect', 'decky-toolkit.pluginDirName', 'decky-toolkit.port']);
+  assert.equal(pkg.contributes.configuration.properties['decky-toolkit.mcpPort'].default, 8766);
+  assert.doesNotMatch(JSON.stringify(pkg.contributes), /\btoken\b|TLS|certificate|encrypted/i, 'user-facing strings name no mechanism');
   assert.deepEqual(pkg.contributes.configuration.properties['decky-toolkit.deploy.build'].enum, ['auto', 'always', 'never']);
   assert.equal(pkg.contributes.configuration.properties['decky-toolkit.deploy.build'].default, 'auto');
   assert.equal(pkg.contributes.configuration.properties['decky-toolkit.deploy.onChange'].default, false);
@@ -814,7 +866,7 @@ await check('unpaired: only Devices visible, one row, Connect inline', async () 
 
 await check('fake client: plugin tree states, Actions Screen offline when unreachable', async () => {
   const fakeConn = (client, extra = {}) => ({
-    devices: [], activeDevice: undefined, address: { host: 'h', port: 1 }, label: 'h', paired: !!client, tokenRejected: false,
+    devices: [], activeDevice: undefined, address: { host: 'h', port: 1 }, label: 'h', paired: !!client, rejected: false,
     connectedDevice: client ? { id: 'x', name: 'h', host: 'h', port: 1 } : undefined, link: client ? 'connected' : undefined, linkLabel: 'h',
     health: { kind: 'ok', health }, onDidChange: new EventEmitter().event, onDidChangeTarget: new EventEmitter().event,
     authedClient: () => client, watchStats: () => new Disposable(), ...extra,
@@ -837,7 +889,7 @@ await check('fake client: plugin tree states, Actions Screen offline when unreac
   return 'list / empty / error placeholder / not connected / unreachable → empty';
 });
 
-await check('preview webview: CSP and proxy URL, no token', async () => {
+await check('preview webview: CSP and proxy URL, no secrets', async () => {
   const { provider } = calls.webviewProviders.find(w => w.id === 'decky-toolkit.preview');
   const messages = new EventEmitter();
   const posted = [];
@@ -849,7 +901,7 @@ await check('preview webview: CSP and proxy URL, no token', async () => {
   assert.match(webview.html, /img-src http:\/\/127\.0\.0\.1:\d+ blob:/);
   assert.match(webview.html, /<button id="open" hidden>Open full screen view/, 'not connected yet: the button is hidden');
   assert.match(webview.html, /data-live="false"/);
-  assert.ok(!webview.html.includes('fake-token'));
+  assert.ok(!webview.html.includes('PRIVATE KEY') && !webview.html.includes('CERTIFICATE'));
   assert.equal(webview.options.enableScripts, true);
   return 'ok';
 });
@@ -896,15 +948,21 @@ await check('Connect on an unpaired device files a pairing request, waits for ap
   await settle();
   assert.equal(fetched.filter(p => p === '/pair/request').length, 1, 'one request');
   assert.equal(fetched.filter(p => p === '/pair/request/req0').length, 2, 'polled until approved');
-  assert.ok(!fetched.slice(0, fetched.indexOf('/pair/request')).includes('/stream/stats'), 'no token, so no token check before pairing');
-  assert.deepEqual(device.pairRequests[0].body, { client_name: `VS Code on ${hostname()}`, client_kind: 'vscode' });
+  assert.ok(!fetched.slice(0, fetched.indexOf('/pair/request')).includes('/stream/stats'), 'not paired, so no pairing check before pairing');
+  const { public_key: publicKey, ...rest } = device.pairRequests[0].body;
+  assert.deepEqual(rest, { client_name: `VS Code on ${hostname()}`, client_kind: 'vscode' });
+  assert.match(publicKey, /^-----BEGIN PUBLIC KEY-----/, 'sends only the public key');
+  assert.equal(createPublicKey(publicKey).asymmetricKeyDetails.namedCurve, 'prime256v1');
+  const code = device.pairRequests[0].code;
+  assert.equal(code, ext.pairingCode(serverPeer.der, createPublicKey(publicKey).export({ type: 'spki', format: 'der' }), 'req0'));
   const prog = calls.progress.at(-1);
   assert.equal(prog.title, 'Decky Toolkit');
-  assert.equal(prog.messages[0], 'Waiting for approval on 10.1.2.3 · code 4821. On the device: Quick Access → Decky Toolkit → Approve.');
+  assert.equal(prog.messages[0], `Waiting for approval on 10.1.2.3 · code ${code}. On the device: Quick Access → Decky Toolkit → Approve.`);
   assert.ok(!prog.messages.some(m => /\d+ s\b|120/.test(m)), 'no countdown');
-  assert.equal(rowDuringPairing.description, 'v0.2.0 · waiting for approval · code 4821');
+  assert.equal(rowDuringPairing.description, `v0.2.0 · waiting for approval · code ${code}`);
   assert.equal(rowDuringPairing.contextValue, 'deck.busy');
-  assert.equal(secrets.get(tokenKey), 'fake-token');
+  const stored = assertPaired();
+  assert.equal(createPublicKey(stored.key).export({ type: 'spki', format: 'pem' }), publicKey, 'stores the key it sent');
   assert.equal(calls.context.get('decky-toolkit.connected'), true);
   const info = lastMessage('info');
   assert.equal(info.m, 'Decky Toolkit: Paired with 10.1.2.3.');
@@ -1179,7 +1237,7 @@ await check('decky-toolkit.pluginDirName overrides the deploy dir', async () => 
   return 'tooltip names other-dir; closing the folder hides the button';
 });
 
-await check('Screen and MCP leaves: snapshot, MCP URL, token', async () => {
+await check('Screen and MCP leaves: snapshot, MCP URL', async () => {
   ui.saveDialog = opts => opts.defaultUri;
   await run('decky-toolkit.snapshot');
   const dlg = calls.saveDialogs.at(-1);
@@ -1189,11 +1247,38 @@ await check('Screen and MCP leaves: snapshot, MCP URL, token', async () => {
   assert.deepEqual([...w.data], [...frameJpeg]);
   assert.match(lastMessage('info').m, /saved .*screen-.*\.jpg/);
   await run('decky-toolkit.copyMcpUrl');
-  assert.equal(calls.clipboard.at(-1), 'http://10.1.2.3:8765/mcp');
-  await run('decky-toolkit.copyToken');
-  assert.equal(calls.clipboard.at(-1), 'fake-token');
-  assert.match(lastMessage('warning').m, /secret/);
-  return `snapshot → ${dlg.defaultUri.path.split('/').pop()} (${w.data.length} B); token warning "${lastMessage('warning').m}"`;
+  const secret = globalState.get('decky-toolkit.proxySecret');
+  assert.match(calls.clipboard.at(-1), new RegExp(`^http://127\\.0\\.0\\.1:\\d+/${secret}/mcp$`), 'the loopback proxy, not the device');
+  assert.ok(Number(new URL(calls.clipboard.at(-1)).port) >= 8766, 'decky-toolkit.mcpPort or the next free port');
+  const mcpUrl = calls.clipboard.at(-1);
+
+  // Write MCP config: the proxy URL with no headers; other servers and stale fields of ours are replaced.
+  const mcpJson = 'file:///ws/.mcp.json';
+  vscode.workspace.workspaceFolders = [{ uri: Uri.file('/ws'), name: 'ws', index: 0 }];
+  try {
+    files.set(mcpJson, Buffer.from(JSON.stringify({ mcpServers: { other: { command: 'x' }, decky: { type: 'http', url: 'http://10.1.2.3:8765/mcp', headers: { Authorization: 'Bearer old' } } } })));
+    await run('decky-toolkit.writeMcpConfig');
+    const written = JSON.parse(Buffer.from(calls.written.at(-1).data).toString());
+    assert.equal(calls.written.at(-1).uri, mcpJson);
+    assert.deepEqual(written.mcpServers, { other: { command: 'x' }, decky: { type: 'http', url: mcpUrl } });
+    assert.equal(lastMessage('info').m, 'Decky Toolkit: wrote mcpServers.decky to .mcp.json.');
+
+    // Activation: an entry on another port with our prefix is moved to this window's port; anything else is left alone.
+    const moved = mcpUrl.replace(/:\d+\//, ':40999/');
+    files.set(mcpJson, Buffer.from(JSON.stringify({ mcpServers: { decky: { type: 'http', url: moved, note: 'kept' } } })));
+    const before = calls.written.length;
+    await ext.refreshMcpConfig({ proxy: { rebase: async u => (u === moved ? mcpUrl : undefined) } });
+    assert.deepEqual(JSON.parse(Buffer.from(calls.written.at(-1).data).toString()).mcpServers.decky, { type: 'http', url: mcpUrl, note: 'kept' });
+    files.set(mcpJson, Buffer.from(JSON.stringify({ mcpServers: { decky: { type: 'http', url: 'http://127.0.0.1:40999/someone-else/mcp' } } })));
+    await ext.refreshMcpConfig({ proxy: { rebase: async () => undefined } });
+    files.set(mcpJson, Buffer.from('not json'));
+    await ext.refreshMcpConfig({ proxy: { rebase: async () => mcpUrl } });
+    assert.equal(calls.written.length, before + 1, 'unrelated or broken files are not touched');
+  } finally {
+    files.delete(mcpJson);
+    vscode.workspace.workspaceFolders = undefined;
+  }
+  return `snapshot → ${dlg.defaultUri.path.split('/').pop()} (${w.data.length} B); MCP URL ${mcpUrl.replace(secret, '<secret>')}; .mcp.json written and re-pointed`;
 });
 
 // The real media/screen.js in a minimal DOM: what the webview does with the extension's messages.
@@ -1691,7 +1776,7 @@ await check('connection lost: views stay but go blank, screen panel / preview / 
   assert.equal(d.badge, '!');
   assert.equal(d.color.id, 'list.warningForeground');
   assert.match(d.tooltip, /Lost connection to 10\.1\.2\.3; files open and save again/);
-  assert.equal(secrets.get(tokenKey), 'fake-token');
+  assertPaired();
 
   fetched.length = 0;
   device.up = true;
@@ -1762,7 +1847,7 @@ await check('user Disconnect: views stay blank with "Disconnected" and Reconnect
   assert.equal(r.contextValue, 'deck.paired');
   assert.equal(r.command.command, 'decky-toolkit.connect');
   assert.deepEqual(itemMenu('decky-toolkit.devices', r.contextValue, true), ['decky-toolkit.connect', 'decky-toolkit.deviceActions']);
-  assert.equal(secrets.get(tokenKey), 'fake-token');
+  assertPaired();
   assert.equal(status(), '$(vm) Decky: not connected');
   assert.equal(panel.disposed, undefined, 'not closed');
   assert.equal(panel.title, 'Screen: 10.1.2.3 (disconnected)');
@@ -1785,10 +1870,10 @@ await check('user Disconnect: views stay blank with "Disconnected" and Reconnect
   return `row "${r.label}" — "${r.description}" [$(vm)]; welcome "Disconnected from the device." + Reconnect`;
 });
 
-await check('token rejected mid-session: views blank with Re-pair, status bar and device row say so, re-pairing restores', async () => {
+await check('pairing rejected mid-session: views blank with Re-pair, status bar and device row say so, re-pairing restores', async () => {
   await run('decky-toolkit.connect', seedId());
   await settle();
-  // Without a stats lease the /health poll checks the token itself (stats polling would take 5 s).
+  // Without a stats lease the /health poll checks the pairing itself (stats polling would take 5 s).
   const actions = tree('decky-toolkit.actions').view;
   actions.visible = false;
   actions._visibility.fire({ visible: false });
@@ -1797,12 +1882,12 @@ await check('token rejected mid-session: views blank with Re-pair, status bar an
   assert.equal(calls.context.get('decky-toolkit.link'), 'rejected');
   for (const id of LOST_VIEWS) {
     assert.deepEqual(await tree(`decky-toolkit.${id}`).provider.getChildren(), []);
-    assert.match(welcomeFor(`decky-toolkit.${id}`)[0], /rejected the stored token.*\n\[Reconnect\]\(command:decky-toolkit\.reconnect\)$/s);
+    assert.match(welcomeFor(`decky-toolkit.${id}`)[0], /no longer accepts this editor.*\n\[Reconnect\]\(command:decky-toolkit\.reconnect\)$/s);
   }
-  assert.equal(status(), '$(key) 10.1.2.3: token rejected');
+  assert.equal(status(), '$(key) 10.1.2.3: pairing rejected');
   assert.equal(calls.statusItems[0].backgroundColor.id, 'statusBarItem.errorBackground');
   const [r] = devicesProvider().getChildren();
-  assert.equal(r.description, 'v0.2.0 · token rejected');
+  assert.equal(r.description, 'v0.2.0 · pairing rejected');
   const file = ext.deckyUri({ host: '10.1.2.3', port: 8765 }, '/home/jackh/.local/share/VVVVVV/saves/tsave.vvv');
   assert.equal(calls.decorations[0].provideFileDecoration(file).color.id, 'list.errorForeground');
   device.pairQueue = ['approved'];
@@ -1819,7 +1904,7 @@ await check('token rejected mid-session: views blank with Re-pair, status bar an
   return 'rejected → Re-pair → connected';
 });
 
-await check('Connect with a stored token checks /health and connects without pairing', async () => {
+await check('Connect with a stored pairing checks /health and connects without pairing', async () => {
   fetched.length = 0;
   await run('decky-toolkit.connect', seedId());
   await settle();
@@ -1832,25 +1917,61 @@ await check('Connect with a stored token checks /health and connects without pai
   return `requests: ${[...new Set(fetched)].join(', ')}`;
 });
 
-await check('a rejected token (401) goes straight into pairing', async () => {
-  await ctx.secrets.store(tokenKey, 'stale-token');
+await check('a forgotten pairing (401) goes straight into pairing', async () => {
+  await ctx.secrets.store(identityKey, JSON.stringify({ ...pairedIdentity, cert: otherPki.cert }));
   await settle();
   fetched.length = 0;
   device.pairQueue = ['approved'];
   await run('decky-toolkit.connect', seedId());
   await settle();
   assert.ok(fetched.includes('/pair/request'));
-  assert.equal(secrets.get(tokenKey), 'fake-token');
+  assertPaired();
   assert.equal(calls.context.get('decky-toolkit.connected'), true);
   await run('decky-toolkit.disconnectDevice');
   return `requests: ${fetched.join(', ')}`;
+});
+
+await check('a reset device (pinned certificate no longer matches) goes straight into pairing, no extra message', async () => {
+  await ctx.secrets.store(identityKey, JSON.stringify({ ...pairedIdentity, serverCert: otherPki.cert }));
+  await settle();
+  fetched.length = 0;
+  const before = calls.messages.length;
+  device.pairQueue = ['approved'];
+  await run('decky-toolkit.connect', seedId());
+  await settle();
+  assert.ok(fetched.includes('/pair/request'));
+  assertPaired();
+  assert.equal(calls.context.get('decky-toolkit.connected'), true);
+  assert.deepEqual(calls.messages.slice(before).map(m => m.m), ['Decky Toolkit: Paired with 10.1.2.3.']);
+  await run('decky-toolkit.disconnectDevice');
+  return `requests: ${fetched.join(', ')}`;
+});
+
+await check('a pairing code that differs from our own derivation aborts with "could not pair"', async () => {
+  await ctx.secrets.delete(identityKey);
+  await settle();
+  device.pairRequests = [];
+  device.pairCancelled = [];
+  device.tamperCode = true;
+  let offered;
+  ui.warning = (m, buttons) => { offered = { m, buttons }; return undefined; };
+  await run('decky-toolkit.connect', seedId());
+  await settle();
+  device.tamperCode = false;
+  assert.deepEqual(offered, { m: 'Decky Toolkit: could not pair with 10.1.2.3. Try again.', buttons: ['Try again'] });
+  assert.equal(storedIdentity(), undefined);
+  assert.deepEqual(device.pairCancelled, ['req0'], 'the request is withdrawn on the device');
+  assert.equal(calls.context.get('decky-toolkit.connected'), false);
+  await storePaired();
+  await settle();
+  return `"${offered.m}"`;
 });
 
 await check('a command while disconnected offers to connect instead of running', async () => {
   let offered;
   ui.warning = (m, buttons) => { offered = { m, buttons }; return undefined; };
   const copied = calls.clipboard.length;
-  await run('decky-toolkit.copyToken');
+  await run('decky-toolkit.copyMcpUrl');
   assert.equal(offered.m, 'Decky Toolkit: not connected to a device.');
   assert.deepEqual(offered.buttons, ['Connect to 10.1.2.3', 'Choose device']);
   assert.equal(calls.clipboard.length, copied, 'nothing copied');
@@ -1881,7 +2002,7 @@ await check('reachability error: one message with Retry / Edit device, no pairin
 });
 
 await check('pairing denied on the device: "Pairing denied" with Try again, which files a new request', async () => {
-  await ctx.secrets.delete(tokenKey);
+  await ctx.secrets.delete(identityKey);
   await settle();
   device.pairRequests = [];
   device.pairQueue = ['pending', 'denied', 'approved'];
@@ -1891,14 +2012,14 @@ await check('pairing denied on the device: "Pairing denied" with Try again, whic
   await settle();
   assert.deepEqual(offered, [{ m: 'Decky Toolkit: Pairing denied on 10.1.2.3.', buttons: ['Try again'] }]);
   assert.equal(device.pairRequests.length, 2, 'Try again filed a second request');
-  assert.equal(secrets.get(tokenKey), 'fake-token');
+  assertPaired();
   assert.equal(calls.context.get('decky-toolkit.connected'), true);
   await run('decky-toolkit.disconnectDevice');
   return `"${offered[0].m}" [${offered[0].buttons.join(', ')}], then approved`;
 });
 
 await check('pairing has no time limit: survives a lost connection and a forgotten request (new code); Cancel sends DELETE', async () => {
-  await ctx.secrets.delete(tokenKey);
+  await ctx.secrets.delete(identityKey);
   await settle();
   device.pairRequests = [];
   device.pairCancelled = [];
@@ -1912,17 +2033,18 @@ await check('pairing has no time limit: survives a lost connection and a forgott
   prog.cancel();
   await done;
   await settle();
-  assert.equal(row.description, 'v0.2.0 · waiting for approval · code 4822', 'the row shows the new code');
-  assert.ok(prog.messages.some(m => /^Lost contact with 10\.1\.2\.3 \(cannot reach the device \(socket hang up\)\), retrying… Code 4821\.$/.test(m)));
-  assert.equal(prog.messages.at(-1), 'Waiting for approval on 10.1.2.3 · code 4822. On the device: Quick Access → Decky Toolkit → Approve.');
+  const [code0, code1] = device.pairRequests.map(r => r.code);
+  assert.equal(row.description, `v0.2.0 · waiting for approval · code ${code1}`, 'the row shows the new code');
+  assert.ok(prog.messages.some(m => m === `Lost contact with 10.1.2.3 (cannot reach the device (socket hang up)), retrying… Code ${code0}.`));
+  assert.equal(prog.messages.at(-1), `Waiting for approval on 10.1.2.3 · code ${code1}. On the device: Quick Access → Decky Toolkit → Approve.`);
   assert.deepEqual(device.pairCancelled, ['req1']);
   assert.equal(calls.messages.filter(m => m.kind === 'warning').length, warningsBefore, 'cancel is silent');
   assert.equal(calls.context.get('decky-toolkit.connected'), false);
   assert.equal(devicesProvider().getChildren()[0].description, 'v0.2.0 · not paired');
-  return `${prog.messages.length} progress updates, codes 4821 → 4822, DELETE ${device.pairCancelled[0]}`;
+  return `${prog.messages.length} progress updates, codes ${code0} → ${code1}, DELETE ${device.pairCancelled[0]}`;
 });
 
-await check('a device without pairing requests (401): "Update Decky Toolkit", no manual token entry', async () => {
+await check('a device with an older plugin (plain HTTP): "Update Decky Toolkit", no manual pairing', async () => {
   device.pairUnsupported = true;
   let offered;
   ui.warning = (m, buttons) => { offered = { m, buttons }; return undefined; };
@@ -1958,7 +2080,7 @@ await check('Add device: host + optional name, port only via "Change port", then
 });
 
 await check('status bar QuickPick: connect/switch, disconnect, open screen, add', async () => {
-  await ctx.secrets.store(tokenKey, 'fake-token');
+  await storePaired();
   await run('decky-toolkit.connect', seedId());
   await settle();
   let offered;
@@ -2170,7 +2292,7 @@ await check('remote FS provider against a fake /fs* server: stat, readDirectory,
     { id: 'd2', name: 'Gone', host: '10.9.9.9', port: 8765 },
     { id: 'd3', name: 'Fresh', host: '10.1.2.4', port: 8765 },
   ];
-  const fs = new ext.DeckyFileSystemProvider({ devices, tokenFor: async d => (d.host === '10.1.2.4' ? undefined : 'fake-token') });
+  const fs = new ext.DeckyFileSystemProvider({ devices, identityFor: async d => (d.host === '10.1.2.4' ? undefined : pairedIdentity) });
   const events = [];
   fs.onDidChangeFile(e => events.push(...e.map(x => [x.type, x.uri.path])));
   const U = p => ext.deckyUri({ host: '10.1.2.3', port: 8765 }, p);
@@ -2210,7 +2332,7 @@ await check('remote FS provider against a fake /fs* server: stat, readDirectory,
   assert.deepEqual((await code(fs.rename(U(`${VV}/saves/slot2/edited.vvv`), U(`${VV}/saves/tsave.vvv`), { overwrite: false })))[0], 'FileExists');
   assert.deepEqual((await code(fs.rename(U(`${VV}/saves/tsave.vvv`), ext.deckyUri({ host: '10.9.9.9', port: 8765 }, '/x'), { overwrite: false })))[0], 'NoPermissions');
 
-  const raw = await fetch(`http://10.1.2.3:8765/fs?path=${encodeURIComponent(`${VV}/saves/slot2`)}`, { method: 'DELETE', headers: { Authorization: 'Bearer fake-token' } });
+  const raw = await deviceFetch(`https://10.1.2.3:8765/fs?path=${encodeURIComponent(`${VV}/saves/slot2`)}`, { method: 'DELETE', identity: pairedIdentity });
   assert.equal(raw.status, 400, 'the fake server refuses a delete without confirm');
   await fs.delete(U(`${VV}/saves/slot2`), { recursive: true });
   assert.ok(fakeFs.log.includes(`DELETE /fs?path=${encodeURIComponent(`${VV}/saves/slot2`)}&confirm=1`), 'delete sends confirm=1');
@@ -2387,7 +2509,7 @@ await check('discovery: Connect on a found device saves it and starts pairing', 
   assert.equal(list.length, before + 1);
   assert.deepEqual({ ...list.at(-1), id: undefined }, { id: undefined, name: 'bazzite', host: '10.0.70.18', port: 8765 });
   assert.equal(device.pairRequests.length, reqs + 1, 'a pairing request was filed');
-  assert.equal(secrets.get('decky-toolkit.token:10.0.70.18:8765'), 'fake-token');
+  assertPaired('decky-toolkit.identity:10.0.70.18:8765');
   assert.ok(!devicesProvider().getChildren(groupNode()).some(k => k.label === 'bazzite'), 'saved devices leave the group');
   const row = devicesProvider().getChildren().find(r => r.device?.host === '10.0.70.18');
   assert.equal(row.contextValue, 'deck.session');
@@ -2414,13 +2536,13 @@ await check('discovery: hasDevices stays true while only found devices are liste
 await check('decky:// reports reachability to the connection; decorations mark files of a device that cannot serve them', async () => {
   const zed = { id: 'z', name: 'Zed', host: '10.9.9.9', port: 8765 };
   const notes = [];
-  const fs = new ext.DeckyFileSystemProvider({ devices: [zed], tokenFor: async () => 't', noteReachable: (d, ok) => notes.push([d.id, ok]) });
+  const fs = new ext.DeckyFileSystemProvider({ devices: [zed], identityFor: async () => pairedIdentity, noteReachable: (d, ok) => notes.push([d.id, ok]) });
   const err = await fs.readFile(ext.deckyUri(zed, '/home/x')).catch(e => e);
   assert.equal(err.code, 'Unavailable');
   assert.deepEqual(notes, [['z', false]]);
   let status = 'unreachable';
   const statusChanged = new EventEmitter();
-  const state = { devices: [zed], connectedDevice: undefined, tokenRejected: false, statusOf: () => status, onDidChangeStatus: statusChanged.event };
+  const state = { devices: [zed], connectedDevice: undefined, rejected: false, statusOf: () => status, onDidChangeStatus: statusChanged.event };
   const deco = new ext.DeckyFileDecorations(state);
   let fired = 0;
   deco.onDidChangeFileDecorations(() => fired++);
@@ -2440,12 +2562,206 @@ await check('decky:// reports reachability to the connection; decorations mark f
   return 'connection error → noteReachable(false); unreachable / unpaired / unknown device marked, reachable not';
 });
 
+// transport.ts against a real HTTPS server holding the throwaway device certificate. It requests a client
+// certificate without requiring one, as the plugin does (pairing and /health come without one).
+const tlsLog = [];
+const tlsServer = https.createServer({ key: serverPki.key, cert: serverPki.cert, ca: [serverPki.cert], requestCert: true, rejectUnauthorized: false }, async (req, res) => {
+  const peer = req.socket.getPeerCertificate();
+  const chunks = [];
+  for await (const c of req) chunks.push(c);
+  tlsLog.push({ method: req.method, url: req.url, headers: req.headers, body: Buffer.concat(chunks), client: peer?.fingerprint256, authorized: req.socket.authorized });
+  if (req.url === '/sse') {
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    res.write('data: one\n\n');
+    const t = setInterval(() => res.write('data: tick\n\n'), 20);
+    res.on('close', () => { clearInterval(t); tlsLog.push({ closed: '/sse' }); });
+    return;
+  }
+  if (req.url === '/slow') return void setTimeout(() => res.end('late'), 2000);
+  if (req.url === '/empty') return void res.writeHead(204).end();
+  res.writeHead(200, { 'content-type': 'application/json', 'set-cookie': ['a=1', 'b=2'] }).end(JSON.stringify({ ok: true, path: req.url }));
+});
+tlsServer.on('upgrade', (req, socket) => {
+  tlsLog.push({ upgrade: req.url, client: req.socket.getPeerCertificate()?.fingerprint256, headers: req.headers });
+  socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n');
+  socket.on('data', d => socket.write(Buffer.concat([Buffer.from('echo:'), d])));
+});
+await new Promise(r => tlsServer.listen(0, '127.0.0.1', r));
+const tlsPort = tlsServer.address().port;
+const tlsUrl = p => `https://127.0.0.1:${tlsPort}${p}`;
+const clientFp = new X509Certificate(clientCertPem).fingerprint256;
+/** Runs `fn` with the real HTTPS transport instead of the fake device. */
+async function withRealTransport(fn) {
+  ext.transportHooks.fetch = realDeviceFetch;
+  try {
+    return await fn();
+  } finally {
+    ext.transportHooks.fetch = deviceFetch;
+  }
+}
+
+await check('transport: paired requests pin the device and present the client certificate; bodies and headers round-trip', async () => {
+  tlsLog.length = 0;
+  const res = await realDeviceFetch(tlsUrl('/x?q=1'), { identity: pairedIdentity, method: 'POST', body: 'hello', headers: { 'Content-Type': 'text/plain' } });
+  assert.ok(res instanceof Response);
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { ok: true, path: '/x?q=1' });
+  assert.equal(res.headers.get('set-cookie'), 'a=1, b=2');
+  assert.equal(tlsLog[0].client, clientFp, 'the server saw our client certificate');
+  assert.equal(tlsLog[0].authorized, true, 'signed by the device');
+  assert.equal(tlsLog[0].body.toString(), 'hello');
+  assert.equal(tlsLog[0].headers.authorization, undefined, 'no bearer header');
+  await (await realDeviceFetch(tlsUrl('/bin'), { identity: pairedIdentity, method: 'PUT', body: new Uint8Array([1, 2, 3]) })).text();
+  assert.deepEqual([...tlsLog[1].body], [1, 2, 3]);
+  assert.equal(tlsLog[1].headers['content-length'], '3');
+  const form = new FormData();
+  form.append('file', new Blob([new Uint8Array([9, 8, 7])], { type: 'application/zip' }), 'p.zip');
+  await (await realDeviceFetch(tlsUrl('/form'), { identity: pairedIdentity, method: 'POST', body: form })).text();
+  assert.match(tlsLog[2].headers['content-type'], /^multipart\/form-data; boundary=/);
+  assert.match(tlsLog[2].body.toString('latin1'), /filename="p\.zip"\r\nContent-Type: application\/zip\r\n\r\n\x09\x08\x07\r\n/);
+  const empty = await realDeviceFetch(tlsUrl('/empty'), { identity: pairedIdentity });
+  assert.equal(empty.status, 204);
+  assert.equal(await empty.text(), '');
+  const client = new ext.DeckyClient({ host: '127.0.0.1', port: tlsPort }, pairedIdentity);
+  assert.equal((await withRealTransport(() => client.health())).path, '/health', 'DeckyClient goes through it');
+  return `client cert ${clientFp.slice(0, 11)}… seen; string, bytes, multipart, 204`;
+});
+
+await check('transport: a device whose certificate does not match the pin fails with TrustError', async () => {
+  const wrong = await realDeviceFetch(tlsUrl('/x'), { identity: { ...pairedIdentity, serverCert: otherPki.cert } }).catch(e => e);
+  assert.ok(wrong instanceof ext.TrustError, `got ${wrong}`);
+  assert.equal(wrong.cause?.code, 'DEPTH_ZERO_SELF_SIGNED_CERT');
+  // Same chain, different fingerprint: the pin check itself.
+  const pin = ext.tlsOptions(pairedIdentity).checkServerIdentity;
+  assert.ok(pin('10.1.2.3', { fingerprint256: 'AA:BB' }) instanceof ext.TrustError);
+  assert.equal(pin('10.1.2.3', { fingerprint256: serverPeer.fingerprint256 }), undefined, 'an IP address is fine: the pin replaces hostname checks');
+  const viaClient = new ext.DeckyClient({ host: '127.0.0.1', port: tlsPort }, { ...pairedIdentity, serverCert: otherPki.cert });
+  assert.ok((await withRealTransport(() => viaClient.streamStats().catch(x => x))) instanceof ext.TrustError);
+  return `${wrong.name}: ${wrong.message}`;
+});
+
+await check('transport: unpaired requests accept any certificate and expose it for the pairing code', async () => {
+  tlsLog.length = 0;
+  const res = await realDeviceFetch(tlsUrl('/health'));
+  assert.equal(res.status, 200);
+  await res.text();
+  assert.equal(res.peerCert.fingerprint256, serverPeer.fingerprint256);
+  assert.deepEqual(res.peerCert.der, serverPeer.der);
+  assert.equal(res.peerCert.pem.replace(/\s/g, ''), serverPki.cert.replace(/\s/g, ''), 'PEM rebuilt from DER');
+  assert.equal(ext.fingerprint(res.peerCert.der), serverPeer.fingerprint256);
+  assert.equal(ext.fingerprint(res.peerCert.pem), serverPeer.fingerprint256);
+  assert.equal(tlsLog[0].client, undefined, 'no client certificate before pairing');
+  return res.peerCert.fingerprint256.slice(0, 11) + '…';
+});
+
+await check('transport: SSE bodies stream before the response ends; abort tears the request down', async () => {
+  tlsLog.length = 0;
+  const ac = new AbortController();
+  const res = await realDeviceFetch(tlsUrl('/sse'), { identity: pairedIdentity, signal: ac.signal });
+  const reader = res.body.getReader();
+  const first = new TextDecoder().decode((await reader.read()).value);
+  assert.equal(first, 'data: one\n\n', 'first event arrives while the stream is open');
+  await reader.read();
+  ac.abort();
+  const after = await reader.read().catch(e => e);
+  assert.ok(after instanceof Error && after.name === 'AbortError', `body read after abort: ${after?.name ?? JSON.stringify(after)}`);
+  for (let i = 0; i < 50 && !tlsLog.some(l => l.closed); i++) await settle(10);
+  assert.ok(tlsLog.some(l => l.closed === '/sse'), 'the server saw the connection close');
+  const early = new AbortController();
+  const pending = realDeviceFetch(tlsUrl('/slow'), { identity: pairedIdentity, signal: early.signal });
+  setTimeout(() => early.abort(), 30);
+  assert.equal((await pending.catch(x => x)).name, 'AbortError', 'abort before the response rejects like fetch');
+  const timedOut = await realDeviceFetch(tlsUrl('/slow'), { identity: pairedIdentity, signal: AbortSignal.timeout(30) }).catch(x => x);
+  assert.equal(timedOut.name, 'TimeoutError');
+  const pre = await realDeviceFetch(tlsUrl('/x'), { signal: AbortSignal.abort() }).catch(x => x);
+  assert.equal(pre.name, 'AbortError');
+  return 'event before end, AbortError mid-body and before the answer, TimeoutError';
+});
+
+await check('transport: an older plugin answering in plain HTTP is "unsupported", not unreachable', async () => {
+  const plain = http.createServer((_q, r) => r.end('{"ok":true}'));
+  await new Promise(r => plain.listen(0, '127.0.0.1', r));
+  const port = plain.address().port;
+  try {
+    const e = await realDeviceFetch(`https://127.0.0.1:${port}/health`).catch(x => x);
+    assert.ok(ext.isPlainHttpDevice(e), `${e?.cause?.code}`);
+    const client = new ext.DeckyClient({ host: '127.0.0.1', port });
+    const pem = clientKeys.publicKey.export({ type: 'spki', format: 'pem' });
+    assert.equal(await withRealTransport(() => client.requestPairing('x', pem)), 'unsupported');
+    const refused = await realDeviceFetch('https://127.0.0.1:1/health').catch(x => x);
+    assert.equal(refused.cause?.code, 'ECONNREFUSED', 'connection errors keep the fetch shape');
+    assert.equal(refused.message, 'fetch failed');
+  } finally {
+    plain.close();
+  }
+  return 'EPROTO → unsupported; ECONNREFUSED → fetch failed';
+});
+
+await check('proxy: stable port (next free when taken), persisted prefix, HTTPS upstream with the pairing, WebSocket', async () => {
+  const blocker = http.createServer();
+  await new Promise(r => blocker.listen(0, '127.0.0.1', r));
+  const taken = blocker.address().port;
+  const state = new Map();
+  const memento = { get: k => state.get(k), update: async (k, v) => { state.set(k, v); } };
+  const target = { host: '127.0.0.1', port: tlsPort, identity: pairedIdentity };
+  const proxy = new ext.DeviceProxy(() => target, memento, () => taken);
+  const wrong = new ext.DeviceProxy(() => ({ ...target, identity: { ...pairedIdentity, serverCert: otherPki.cert } }), memento, () => 0);
+  try {
+    const base = await proxy.start();
+    const secret = state.get('decky-toolkit.proxySecret');
+    assert.ok(secret && secret.length >= 20);
+    assert.equal(base, `http://127.0.0.1:${taken + 1}/${secret}`, 'next port after the taken one');
+    assert.equal(await proxy.mcpUrl(), `${base}/mcp`);
+    assert.equal(await proxy.rebase(`http://127.0.0.1:${taken + 7}/${secret}/mcp`), `${base}/mcp`);
+    assert.equal(await proxy.rebase(`http://localhost:${taken + 7}/${secret}/mcp`), `${base}/mcp`);
+    assert.equal(await proxy.rebase(`${base}/mcp`), undefined, 'already right');
+    assert.equal(await proxy.rebase(`http://127.0.0.1:${taken + 7}/other/mcp`), undefined, 'not ours');
+    assert.equal(await proxy.rebase('https://10.1.2.3:8765/mcp'), undefined);
+
+    tlsLog.length = 0;
+    const res = await new Promise((resolve, reject) => {
+      const q = http.request(`${base}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer x' } }, resolve);
+      q.on('error', reject);
+      q.end('{"jsonrpc":"2.0"}');
+    });
+    let text = '';
+    for await (const c of res) text += c;
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(JSON.parse(text), { ok: true, path: '/mcp' });
+    assert.equal(tlsLog[0].client, clientFp, 'upstream presents the client certificate');
+    assert.equal(tlsLog[0].headers.authorization, undefined, 'no authorization header upstream');
+    assert.equal(tlsLog[0].body.toString(), '{"jsonrpc":"2.0"}');
+
+    const echoed = await new Promise((resolve, reject) => {
+      const q = http.request(`${base}/input`, { headers: { connection: 'Upgrade', upgrade: 'websocket', 'sec-websocket-key': 'x', 'sec-websocket-version': '13' } });
+      q.on('upgrade', (r, sock) => { sock.write('ping'); sock.once('data', d => { sock.destroy(); resolve([r.statusCode, d.toString()]); }); });
+      q.on('error', reject);
+      q.end();
+    });
+    assert.deepEqual(echoed, [101, 'echo:ping']);
+    assert.equal(tlsLog.find(l => l.upgrade)?.client, clientFp, 'the WebSocket upgrade presents it too');
+
+    const wrongBase = await wrong.start();
+    assert.equal(wrongBase.split('/').pop(), secret, 'the prefix survives a restart');
+    const bad = await new Promise((resolve, reject) => http.get(`${wrongBase}/health`, resolve).on('error', reject));
+    bad.resume();
+    assert.equal(bad.statusCode, 502, 'a device that does not match the pin is not reached');
+  } finally {
+    proxy.stop();
+    wrong.stop();
+    blocker.close();
+  }
+  return `taken ${taken} → ${taken + 1}`;
+});
+
 await check('no unexpected error messages', async () => {
   assert.deepEqual(calls.unexpectedErrors, []);
 });
 
 for (const d of ctx.subscriptions) d.dispose?.();
 ext.deactivate();
+tlsServer.closeAllConnections();
+tlsServer.close();
 const failed = results.filter(r => !r).length;
 console.log(failed ? `\n${failed} check(s) failed` : `\nall ${results.length} smoke checks passed`);
 process.exit(failed ? 1 : 0);

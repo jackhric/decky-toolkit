@@ -23,8 +23,8 @@ export function deviceRow(conn: ConnectionState, d: SavedDevice): DeviceNode {
   n.id = `deck:${d.id}`;
   n.device = d;
   const code = status === 'pairing' ? conn.pairingCodeOf?.(d.id) : undefined;
-  const rejected = session && status === 'connected' && conn.tokenRejected;
-  const label = code ? `waiting for approval · code ${code}` : rejected ? 'token rejected' : statusLabel(status);
+  const rejected = session && status === 'connected' && conn.rejected;
+  const label = code ? `waiting for approval · code ${code}` : rejected ? 'pairing rejected' : statusLabel(status);
   const version = conn.versionOf?.(d.id);
   const versioned = version ? `v${version} · ${label}` : label;
   n.description = nameIsHost ? versioned : `${address} · ${versioned}`;
@@ -36,7 +36,7 @@ export function deviceRow(conn: ConnectionState, d: SavedDevice): DeviceNode {
   const md = new vscode.MarkdownString();
   md.appendMarkdown(`**${d.name}** · ${address}${version ? ` · Decky Toolkit ${version}` : ''}\n\n`);
   const h = conn.health;
-  if (rejected) md.appendMarkdown('The device rejected the stored token · click to reconnect; the device asks you to approve this editor again\n\n');
+  if (rejected) md.appendMarkdown('The device no longer accepts this editor · click to reconnect; the device asks you to approve this editor again\n\n');
   else if (session && h.kind === 'ok') md.appendMarkdown(`Connected · ${h.health.name} ${h.health.version}, API v${h.health.api_version}\n\n`);
   else if (session && h.kind === 'unreachable') md.appendMarkdown(`Lost connection: ${h.error}. Reconnecting as soon as it answers\n\n`);
   else md.appendMarkdown(`${label}${busy ? '' : status === 'unpaired' ? ' · click to pair and connect' : ' · click to connect'}\n\n`);
