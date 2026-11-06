@@ -196,9 +196,15 @@ const STYLE = `
 .dtk-link.dtk-focus { text-decoration: underline; color: #fff !important; }
 .dtk-primary { background: #1a9fff !important; color: #fff !important; }
 .dtk-primary.gpfocus { background: #4fb4ff !important; box-shadow: 0 0 0 2px #fff; }
+.dtk-mark { color: #7a7f86; transition: color 0.4s; }
+.dtk-mark.connected { color: #4fa83a; }
+.dtk-mark.pending { animation: dtk-breathe 2s ease-in-out infinite; }
+@keyframes dtk-breathe { 0%, 100% { color: #3a5f80; opacity: 0.75; } 50% { color: #1a9fff; opacity: 1; } }
 `;
 
-function Centered({ children, steaming = false, connected = false }: { children: ReactNode; steaming?: boolean; connected?: boolean }) {
+type MarkState = "idle" | "pending" | "connected";
+
+function Centered({ children, mark = "idle" }: { children: ReactNode; mark?: MarkState }) {
   return (
     <Focusable
       flow-children="column"
@@ -216,7 +222,7 @@ function Centered({ children, steaming = false, connected = false }: { children:
       }}
     >
       <style>{STYLE}</style>
-      <SteamingMark size={96} steaming={steaming} style={{ color: connected ? "#4fa83a" : "#7a7f86", marginBottom: "8px", transition: "color 0.4s" }} />
+      <SteamingMark size={96} steaming={mark === "connected"} className={`dtk-mark ${mark}`} style={{ marginBottom: "8px" }} />
       {children}
       <Focusable
         className="dtk-link"
@@ -238,11 +244,10 @@ function Panel() {
   const { status, pending, clients, busy, decide } = useToolkit();
   const current = pending[0];
   const up = !!status && status.enabled && status.running && !status.error;
-  const connected = !!status?.connected;
 
   if (current) {
     return (
-      <Centered steaming={up} connected={connected}>
+      <Centered mark="pending">
         <DialogButtonPrimary className="dtk-primary" style={{ width: "100%" }} disabled={busy} onClick={() => decide(current, true)}>
           Approve {current.client_name}
         </DialogButtonPrimary>
@@ -272,7 +277,7 @@ function Panel() {
   }
 
   return (
-    <Centered steaming={up} connected={connected}>
+    <Centered mark={up && status.connected ? "connected" : "idle"}>
       <Focusable
         className="dtk-card"
         focusClassName="dtk-focus"

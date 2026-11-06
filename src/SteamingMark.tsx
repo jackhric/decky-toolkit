@@ -87,9 +87,9 @@ function Steam({ size }: { size: number }) {
   );
 }
 
-export function SteamingMark({ size = 96, steaming, style }: { size?: number; steaming: boolean; style?: CSSProperties }) {
+export function SteamingMark({ size = 96, steaming, className, style }: { size?: number; steaming: boolean; className?: string; style?: CSSProperties }) {
   return (
-    <div style={{ position: "relative", lineHeight: 0, ...style }}>
+    <div className={className} style={{ position: "relative", lineHeight: 0, ...style }}>
       <Mark size={size} />
       {steaming && <Steam size={size} />}
     </div>
