@@ -1,3 +1,3 @@
-declare const CLI_VERSION: string | undefined;
+declare const CLI_VERSION: string;
 
-export const VERSION: string = typeof CLI_VERSION === 'string' ? CLI_VERSION : '0.0.0-dev';
+export const VERSION = CLI_VERSION;
