@@ -21,8 +21,8 @@ See README.md for setup and docs/reference.md for the tool list and architecture
   parses KeyValues; tools in `tools/games.py`), `record.py` (screen recording to MKV; tools in `tools/record.py`),
   `tools/perf.py` (Steam performance overlay), `advertise.py` (DNS-SD advertisement via `avahi-publish`) and
   `identity.py` (non-secret `hostname`/`device_id`/`os` for `/health`).
-- `src/index.tsx` — Quick Access panel (React, `@decky/ui`, `@decky/api`). Built by `pnpm run build`
-  into `dist/index.js`.
+- `src/index.tsx` — Quick Access panel (React, `@decky/ui`, `@decky/api`). Built by `pnpm run build` (Vite,
+  `vite.config.ts`) into `dist/index.js`.
 - `scripts/test.sh` — Python tests under uv with the loader's Python major (CI runs it). Deploying this repo to
   a device is done with the extension itself (it detects the root `plugin.json`); there are no ssh scripts.
 - `scripts/install-gif/record.sh` — re-records `docs/images/install/vscode-install.gif` (official VS Code under
