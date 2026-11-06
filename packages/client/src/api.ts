@@ -84,6 +84,22 @@ export interface InstallResult {
   restarted: RestartMode;
 }
 
+export type LiveReloadMode = 'frontend' | 'backend';
+
+/** `POST /plugins/{dir}/reload?mode=…`. Reloading our own backend only schedules it (`scheduled`). */
+export interface LiveReloadResult {
+  dir: string;
+  name: string;
+  mode: LiveReloadMode;
+  load_ms?: number;
+  reloaded?: boolean;
+  /** Errors the plugin logged while loading, with bundle positions. */
+  errors?: string[];
+  restored?: string[];
+  routes?: string[];
+  scheduled?: boolean;
+}
+
 export interface PluginInfo {
   dir: string;
   name?: string;

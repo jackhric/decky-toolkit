@@ -152,7 +152,9 @@ export async function confirmReload(
     }
     if (!loads && !nudged && o.nudgeAfterMs !== undefined && Date.now() - start > o.nudgeAfterMs) {
       nudged = true;
-      await client.reloadPlugin(p.dir);
+      // Deploying Decky Toolkit itself: its server is down while the watcher reloads it, so the log polls above
+      // saw nothing and this call cannot connect. That is the reload in progress, not a failed deploy.
+      await client.reloadPlugin(p.dir).catch(() => undefined);
     }
     await sleep(250, o.signal);
   }

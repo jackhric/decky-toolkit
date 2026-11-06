@@ -88,7 +88,19 @@ async function deviceFetch(url, init = {}) {
     if (restart === 'plugin') s.journal.push(`[loader][INFO]: Loaded ${s.installMeta.name} (v${s.installMeta.version}) #${s.installs.length}`);
     return done(json({ installed: { dir, name: s.installMeta.name, version: s.installMeta.version }, restarted: restart }));
   }
+  const files = /^\/plugins\/([^/]+)\/files$/.exec(u.pathname);
+  if (files && init.method === 'PUT') {
+    const dir = decodeURIComponent(files[1]), rel = u.searchParams.get('path');
+    s.filePuts = [...(s.filePuts ?? []), { dir, path: rel, text: Buffer.from(init.body).toString() }];
+    return done(json({ dir, path: rel, bytes: init.body.length }));
+  }
   const reload = /^\/plugins\/([^/]+)\/reload$/.exec(u.pathname);
+  if (reload && init.method === 'POST' && u.searchParams.get('mode')) {
+    const dir = decodeURIComponent(reload[1]), mode = u.searchParams.get('mode');
+    s.liveReloads = [...(s.liveReloads ?? []), { dir, mode }];
+    return done(json({ dir, name: s.installMeta.name, mode, load_ms: 9, reloaded: true, restored: ['panel'], routes: [],
+      errors: mode === 'frontend' ? ['Error: boom\n    at http://127.0.0.1:1337/plugins/My%20Plugin/dist/index.js?t=1:1:1'] : [] }));
+  }
   if (reload && init.method === 'POST') {
     const dir = decodeURIComponent(reload[1]);
     const p = s.plugins.find(x => x.dir === dir);

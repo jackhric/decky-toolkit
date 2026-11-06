@@ -319,11 +319,20 @@ after 4 s (it is off for 10 s after the loader starts). Without the flag a deplo
 reload and finishes sooner.
 
 **Auto-deploy on change** (off by default; toggle with **Plugin → Auto-deploy on change** or the
-`decky-toolkit.deploy.onChange` setting): changes to `dist/index.js`, `main.py` or
-`py_modules/**/*.py` trigger a fast deploy 750 ms after the last change, without building. Keep
-your bundler running in watch mode (`pnpm run watch`) so every save rebuilds `dist/index.js`. A
-change during a running deploy queues one more deploy. Auto-deploys report in the status bar
-instead of a notification.
+`decky-toolkit.deploy.onChange` setting) keeps the device in step with your plugin folder. While it is on,
+the extension runs the plugin's `watch` script (`decky-toolkit.deploy.watchBuild`), with its output in the
+Decky Toolkit output channel. The first change to `dist/`, `py_modules/`, `assets/`, `defaults/`, `main.py`
+or the manifests deploys the plugin. After that, each change is pushed file by file and the plugin reloads
+in place, usually within 100 ms of the build:
+
+- a bundle change re-imports only the frontend; the backend keeps running;
+- a Python change restarts the backend;
+- a `plugin.json` or `package.json` change deploys again.
+
+You stay where you were: the plugin's Quick Access panel, its own page, the selected settings tab and the
+focused control. Errors the plugin logs while loading appear in the output channel with positions in your
+sources. Reloads report in the status bar. A device whose Decky Toolkit predates live sync gets a fast
+deploy for every change instead.
 
 ## Remote input
 
@@ -514,7 +523,8 @@ All of these are also in the command palette under the `Decky:` category.
 | `decky-toolkit.mcpPort` | `8766` | Local port MCP clients connect to; the next free port is used when another window holds it. Takes effect after a window reload |
 | `decky-toolkit.pluginDirName` | (empty) | Target dir under `~/homebrew/plugins` for deploy; empty means the plugin folder's name |
 | `decky-toolkit.deploy.build` | `auto` | `auto`: build only when `src/` is newer than `dist/index.js`; `always`; `never` |
-| `decky-toolkit.deploy.onChange` | `false` | Fast-deploy (without building) when `dist/index.js`, `main.py` or `py_modules/**/*.py` change |
+| `decky-toolkit.deploy.onChange` | `false` | Keep the device in step: deploy on the first change, then push changed files and reload the plugin in place |
+| `decky-toolkit.deploy.watchBuild` | `true` | While auto-deploy is on, run the plugin's `watch` script in the background |
 | `decky-toolkit.discovery.enabled` | `true` | List unsaved Decky Toolkit devices on the local network under **On this network** (see [Discovery](#discovery)) |
 
 The saved device lives in VS Code's global state (`decky-toolkit.devices`), so all windows share it. A
