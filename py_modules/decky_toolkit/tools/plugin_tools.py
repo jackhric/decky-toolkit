@@ -28,15 +28,20 @@ STABLE_SECONDS = 30
 # Owns the registry's lifecycle: a tool belongs to the plugin entry in DeckyPluginLoader.plugins that was current when
 # first seen (Decky unloads a plugin before importing its bundle again, so a registration made while its bundle loads
 # is adopted by the entry pushed right after). A different entry, or a newer load (bundle URL) of the same plugin,
-# drops it. Decky replaces `plugins` with a new array whenever a plugin loads or unloads; the listener reports that.
+# drops it. Decky's importPlugin filters `plugins` into a new array and later pushes the new entry into that same array,
+# so the listener compares entries, not the array: a read between the two would otherwise never hear of the push.
 _SYNC = """(() => {
   const R = (window.__deckyToolkitTools ??= { version: 1, tools: new Set() });
   const L = window.DeckyPluginLoader;
   if (!L?.plugins) return '[]';
   if (!window.__deckyToolkitToolsWatch) {
-    let seen = L.plugins;
+    let seen = [...L.plugins];
     L.deckyState.eventBus.addEventListener('update', () => {
-      if (L.plugins !== seen) { seen = L.plugins; window.__deckyToolkitToolsChanged?.(''); }
+      const now = L.plugins;
+      if (now.length !== seen.length || now.some((p, i) => p !== seen[i])) {
+        seen = [...now];
+        window.__deckyToolkitToolsChanged?.('');
+      }
     });
     window.__deckyToolkitToolsWatch = true;
   }
