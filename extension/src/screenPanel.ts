@@ -131,15 +131,12 @@ export class ScreenPanel {
       void setContext('input', state?.enabled ? 'on' : 'off');
     };
     controllers.onDidChange(() => this.checkPadTarget(), null, this.disposables);
-    this.disposables.push(controllers.watch());
     let sentLive: boolean | undefined, sentText: string | undefined;
     const sendLink = (force = false) => {
       const live = conn.link === 'connected';
       const text = live ? '' : linkMessage(conn);
       panel.title = screenTitle(conn);
       if (!force && live === sentLive && text === sentText) return;
-      // Settings may have changed while the device was away.
-      if (live && sentLive === false) void this.loadStream();
       sentLive = live;
       sentText = text;
       void this.post({ type: 'link', live, text });
@@ -161,9 +158,10 @@ export class ScreenPanel {
     conn.onDidChange(() => {
       sendLink();
       sendInput();
-      // The 5 s stats tick carries the settings, so changes from other clients reach the panel.
-      const st = conn.stats?.settings;
-      if (st && this.stream) this.setStream({ ...this.stream, ...st });
+    }, null, this.disposables);
+    // Also replayed on every reconnect, so changes made while the device was away arrive too.
+    conn.onDidReceiveEvent(e => {
+      if (e.event === 'stream_settings') this.setStream(e.data);
     }, null, this.disposables);
     conn.onDidChangeTarget(() => {
       sendLink();

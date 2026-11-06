@@ -23,10 +23,20 @@ export class PluginNode extends vscode.TreeItem {
 export class PluginsTreeProvider implements vscode.TreeDataProvider<vscode.TreeItem>, vscode.Disposable {
   private readonly changed = new vscode.EventEmitter<undefined>();
   readonly onDidChangeTreeData = this.changed.event;
-  private readonly sub: vscode.Disposable;
+  private readonly subs: vscode.Disposable[];
+  private listed?: string;
 
   constructor(private readonly conn: ConnectionState) {
-    this.sub = conn.onDidChangeTarget(() => this.refresh());
+    this.subs = [
+      conn.onDidChangeTarget(() => this.refresh()),
+      conn.onDidReceiveEvent(e => {
+        if (e.event !== 'plugins') return;
+        // Every reconnect replays the list; only a different one needs a reload.
+        const listed = JSON.stringify(e.data.plugins);
+        if (this.listed !== undefined && listed !== this.listed) this.refresh();
+        this.listed = listed;
+      }),
+    ];
   }
 
   refresh(): void {
@@ -45,7 +55,7 @@ export class PluginsTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
   }
 
   dispose(): void {
-    this.sub.dispose();
+    this.subs.forEach(s => s.dispose());
     this.changed.dispose();
   }
 }

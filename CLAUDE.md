@@ -16,7 +16,8 @@ See README.md for setup and docs/reference.md for the tool list and architecture
     (client-certificate auth), `tls.py` (device identity, client certs, paired-client store), `pairing.py`,
     `audit.py` (request origin context variable, audit middleware), `advertise.py` (DNS-SD via `avahi-publish`),
     `identity.py` (non-secret `hostname`/`device_id`/`os` for `/health`), `long_lived.py` (ends streams,
-    websockets and long polls on shutdown).
+    websockets and long polls on shutdown), `events.py` (the event hub: one publish path for `GET /api/v1/events`
+    and the panel's `decky.emit` events; per-event sources feed `hello` and `refresh`, see `docs/api.md`).
   - `loader/`: `install.py` (plugin zip validation + atomic install), `logs.py` (journal / plugin log tail and
     follow), `fixes.py` (workarounds for Decky Loader bugs, applied in our own process), `live.py` (live sync:
     single-file writes into an installed plugin, frontend/backend reload in place with UI restore).
@@ -109,8 +110,20 @@ See README.md for setup and docs/reference.md for the tool list and architecture
 - `DeckyPluginLoader.deckyState.eventBus` fires `update` whenever `DeckyPluginLoader.plugins` is replaced (load or
   unload); a plugin reload (deploy with `restart=plugin`) dropped and re-added only the tools that changed, no gap.
 - `Runtime.addBinding` on our long-lived SharedJSContext session is how the page pushes changes; a loader restart drops
-  CEF :8080 for a few seconds and the session reconnects. The CLI notices a new `tools_hash` on its next health poll
-  (~15 s).
+  CEF :8080 for a few seconds and the session reconnects. The CLI learns a new hash from the `tools` event.
+
+## Event stream facts (verified 2026-11-06, Decky v3.3.1)
+- `GET /api/v1/events`: `hello` (with every source's state, Steam UI query included) 12-31 ms after connect.
+  `stream_settings` reached a subscriber 54 ms after `call stream_settings` started (with the event in the same tick
+  as the reply) and 7 ms after a REST `PUT`; `controllers` 1.1 s after `controller_add` started (it waits for Steam
+  Input) and ~100 ms after `controller_remove`.
+- `plugin_reload` of Decky Toolkit itself: `shutdown` 1.2 s after the call (the reload is scheduled 1 s out), the
+  client's first retry 0.5 s later got a fresh `hello`.
+- `decky-toolkit mcp` sent `notifications/tools/list_changed` 28-32 ms after a frontend `plugin_reload` of a plugin
+  whose tool description changes per load (before the reload call itself answered); after a `loader_restart` it came
+  4.7 s after the call, with the reconnect's `hello`.
+- After a loader restart that first installed a plugin calling `registerTool`, its tool was not listed until the plugin's
+  frontend was reloaded once (seen once; looks like the registry sync running before Decky lists the plugin).
 
 ## Live sync and loader shutdown facts (verified 2026-11-06, Decky v3.3.1)
 - The frontend loads as an ES module: `DeckyPluginLoader.importPlugin(name, version)` does

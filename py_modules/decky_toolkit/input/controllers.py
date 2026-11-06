@@ -6,10 +6,13 @@ import logging
 import re
 import time
 from dataclasses import dataclass
-from typing import Any, AsyncIterator, Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from ..steam import cdp
 from .service import InputService, InputUnavailable, VirtualPad
+
+if TYPE_CHECKING:
+    from ..server.events import EventHub
 
 DEVICES_PATH = "/proc/bus/input/devices"
 BTN_GAMEPAD = 0x130
@@ -193,7 +196,7 @@ class ControllerService:
     def __init__(self, input_service: InputService, logger: logging.Logger, *,
                  read_devices: ReadDevices = read_proc_devices, steam_query: SteamQuery = steam_input_controllers,
                  poll: float = POLL_SECONDS, steam_poll: float = STEAM_POLL_SECONDS,
-                 confirm_seconds: float = STEAM_CONFIRM_SECONDS):
+                 confirm_seconds: float = STEAM_CONFIRM_SECONDS, events: "EventHub | None" = None):
         self.input = input_service
         self.log = logger
         self._read_devices = read_devices
@@ -201,12 +204,15 @@ class ControllerService:
         self.poll = poll
         self.steam_poll = steam_poll
         self.confirm_seconds = confirm_seconds
-        self._subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
+        self.events = events
         self._task: asyncio.Task[None] | None = None
         self._wake = asyncio.Event()
         self._lock = asyncio.Lock()
         self._gone: dict[str, float] = {}
         input_service.add_pad_listener(self._wake.set)
+        if events is not None:
+            # Watching costs a /proc read a second and a Steam UI query every few; only while someone listens.
+            events.on_subscribe.append(self._watch)
 
     def _evdev(self) -> list[EvdevDevice]:
         try:
@@ -268,25 +274,15 @@ class ControllerService:
             self._gone[pad.steam_serial] = time.monotonic() + GHOST_SECONDS
         return self.input.remove_pad(pad_id)
 
-    # ---- change stream ----
+    # ---- change events ----
 
-    async def subscribe(self) -> AsyncIterator[dict[str, Any]]:
-        q: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=16)
-        self._subscribers.add(q)
+    @staticmethod
+    def event(snap: dict[str, Any]) -> dict[str, Any]:
+        return {"controllers": snap["controllers"], "virtual": snap["virtual"]}
+
+    def _watch(self) -> None:
         if self._task is None or self._task.done():
             self._task = asyncio.create_task(self._run())
-        try:
-            yield {"type": "controllers", **await self.snapshot()}
-            while True:
-                yield await q.get()
-        finally:
-            self._subscribers.discard(q)
-
-    def _publish(self, event: dict[str, Any]) -> None:
-        for q in list(self._subscribers):
-            if q.full():
-                q.get_nowait()
-            q.put_nowait(event)
 
     async def _run(self) -> None:
         loop = asyncio.get_running_loop()
@@ -294,7 +290,7 @@ class ControllerService:
         last_emitted: str | None = None
         steam: dict[str, Any] | None = None
         steam_at = -1e9
-        while self._subscribers:
+        while self.events is not None and len(self.events):
             evdev = [(d.sysname, d.name) for d in self._evdev()]
             changed = evdev != last_evdev or self._wake.is_set()
             self._wake.clear()
@@ -306,8 +302,8 @@ class ControllerService:
             # last_event_at moves with every gamepad event; that alone is not a list change.
             key = json.dumps({"c": snap["controllers"], "v": [{**v, "last_event_at": None} for v in snap["virtual"]]},
                              sort_keys=True, default=str)
-            if last_emitted is not None and key != last_emitted:
-                self._publish({"type": "controllers", "controllers": snap["controllers"], "virtual": snap["virtual"]})
+            if key != last_emitted:
+                self.events.publish("controllers", self.event(snap))
             last_emitted = key
             try:
                 await asyncio.wait_for(self._wake.wait(), self.poll)

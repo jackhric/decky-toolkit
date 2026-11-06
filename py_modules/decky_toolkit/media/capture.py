@@ -100,6 +100,7 @@ class ScreenCapturer:
         self._restarting = False
         # The AudioCapturer, if any: audio is part of the stream settings but runs its own pipeline.
         self.audio = None
+        self.on_settings_change: Callable[[], None] | None = None
         self.log = logger
         self._proc: asyncio.subprocess.Process | None = None
         self._reader_task: asyncio.Task[None] | None = None
@@ -235,8 +236,11 @@ class ScreenCapturer:
             raise ValueError("audio must be true or false")
         video_changed = s.update_stream(fps, quality, width)
         audio_changed = audio is not None and s.update_audio(audio)
-        if (video_changed or audio_changed) and self._save_settings:
-            self._save_settings()
+        if video_changed or audio_changed:
+            if self._save_settings:
+                self._save_settings()
+            if self.on_settings_change:
+                self.on_settings_change()
         if audio_changed and self.audio is not None:
             await self.audio.apply_enabled()
         if video_changed:

@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from ..input.controllers import ControllerService
     from ..steam.ui import UiNavigator
     from .plugin_tools import PluginTools
+    from ..server.events import EventHub
 
 ToolFn = Callable[..., Awaitable[Any]]
 # Exceptions that are expected, user-facing failures: reported without a traceback.
@@ -42,6 +43,8 @@ class ToolRegistry:
         self.audited: set[str] = set(audit.AUDITED_TOOLS)
         # Tools other plugins register from their frontend; set by PluginTools.attach.
         self.plugin_tools: "PluginTools | None" = None
+        # Where tools report device changes that are not visible to their own service (plugin installs).
+        self.events: "EventHub | None" = None
 
     def __len__(self) -> int:
         return len(self.describe())
@@ -144,7 +147,7 @@ def error_result(text: str) -> dict[str, Any]:
 def build_registry(capturer: ScreenCapturer | None = None, input_service: InputService | None = None,
                    controllers: "ControllerService | None" = None, navigator: "UiNavigator | None" = None,
                    console: "ConsoleCollector | None" = None, activity: "InputActivity | None" = None,
-                   plugin_tools: "PluginTools | None" = None) -> ToolRegistry:
+                   plugin_tools: "PluginTools | None" = None, events: "EventHub | None" = None) -> ToolRegistry:
     from ..steam.apps import Apps as AppsLib
     from . import (activity as activity_tools, apps, cef, controllers as controller_tools, games, input, logs, perf,
                    plugin_api, plugins, record, screen, shell, system, ui)
@@ -159,6 +162,7 @@ def build_registry(capturer: ScreenCapturer | None = None, input_service: InputS
     orient = ui.Orientation(inspector, activity)
 
     reg = ToolRegistry()
+    reg.events = events
     system.register(reg)
     plugins.register(reg)
     cef.register(reg)

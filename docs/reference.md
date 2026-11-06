@@ -164,7 +164,8 @@ player slot and whether it is the active one, plus the kernel device it maps to.
 `controller_add` plugs in a virtual Xbox 360 pad (up to 4) and only returns once Steam
 Input lists it; drive it with `input_gamepad(pad=<id>)`, which goes through Steam Input like a real
 controller, and unplug it with `controller_remove`. Without `pad`, `input_gamepad` uses an
-implicit pad that disappears after 60 s idle. `GET /api/v1/controllers/events` streams every change.
+implicit pad that disappears after 60 s idle. Clients get every change as the `controllers` event of
+`GET /api/v1/events`.
 
 ## UI navigation
 
@@ -200,6 +201,11 @@ described in [docs/api.md](api.md#pairing).
 - `py_modules/decky_toolkit/server/protocol.py` implements the JSON-RPC methods `initialize`, `ping`,
   `tools/list`, `tools/call` and the HTTP transport rules (client-certificate auth, `Origin` check, 202 for
   notifications, 405 for GET).
+- `py_modules/decky_toolkit/server/events.py` is the event hub: every device change (tools, stream and input
+  settings, plugins, controllers, pairing) is published once and goes to `GET /api/v1/events` subscribers and,
+  where the panel listens, to the Decky frontend. The extension and `decky-toolkit mcp` follow that stream
+  instead of polling; `decky-toolkit mcp` sends `notifications/tools/list_changed` as soon as a `tools` event
+  carries a new hash.
 - `py_modules/decky_toolkit/steam/cdp.py` is a tiny Chrome DevTools Protocol client used to talk to Steam's
   CEF debugger. The plugin deliberately does **not** connect to the loader's own websocket on port
   1337: the loader keeps a single client and would kick the Steam UI off.

@@ -1,86 +1,40 @@
 import * as vscode from 'vscode';
-import type { ControllerInfo, ControllersList, VirtualPad } from '@decky-toolkit/client/api';
-import { describeError, parseSse, serverError } from '@decky-toolkit/client/client';
+import type { ControllerInfo, DeviceState, VirtualPad } from '@decky-toolkit/client/api';
+import { describeError, serverError } from '@decky-toolkit/client/client';
 import type { Connection, ConnectionState } from './connection';
-
-/** Mutable so tests can shorten it. */
-export const controllerTimings = { pollMs: 5000 };
 
 export const MAX_VIRTUAL_PADS = 4;
 
-export type ControllersState = ControllersList | { error: string };
+export type ControllerList = DeviceState['controllers'];
+export type ControllersState = ControllerList | { error: string };
 
-export function isList(s: ControllersState | undefined): s is ControllersList {
+export function isList(s: ControllersState | undefined): s is ControllerList {
   return typeof s === 'object' && 'controllers' in s;
 }
 
-/**
- * The connected device's controllers. While at least one lease is held it follows
- * `/controllers/events` through the loopback proxy and falls back to polling when the stream fails.
- */
+/** The connected device's controllers, kept current by its `controllers` events. */
 export class ControllerWatcher implements vscode.Disposable {
   private readonly changed = new vscode.EventEmitter<void>();
   readonly onDidChange = this.changed.event;
   state?: ControllersState;
-  private leases = 0;
-  // Bumped on stop and on target changes so late replies are dropped.
+  // Bumped on target changes so late replies are dropped.
   private gen = 0;
-  private events?: AbortController;
-  private timer?: NodeJS.Timeout;
-  private readonly sub: vscode.Disposable;
-  private readonly linkSub: vscode.Disposable;
+  private readonly subs: vscode.Disposable[];
 
-  constructor(private readonly conn: ConnectionState, private readonly proxyBase: () => Promise<string>) {
-    this.sub = conn.onDidChangeTarget(() => {
-      this.gen++;
-      this.events?.abort();
-      this.events = undefined;
-      this.set(undefined);
-      if (this.leases > 0) void this.tick();
-    });
-    let wasConnected = this.connected;
-    this.linkSub = conn.onDidChange(() => {
-      const now = this.connected;
-      if (now === wasConnected) return;
-      wasConnected = now;
-      if (!now) {
+  constructor(private readonly conn: ConnectionState) {
+    this.subs = [
+      conn.onDidChangeTarget(() => {
         this.gen++;
-        this.events?.abort();
-        this.events = undefined;
-      } else if (this.leases > 0) {
-        void this.tick();
-      }
-    });
+        this.set(undefined);
+      }),
+      conn.onDidReceiveEvent(e => {
+        if (e.event === 'controllers') this.set({ controllers: e.data.controllers, virtual: e.data.virtual });
+      }),
+    ];
   }
 
   get connected(): boolean {
     return !!(this.conn.link === 'connected' && this.conn.authedClient());
-  }
-
-  watch(): vscode.Disposable {
-    if (this.leases++ === 0) {
-      this.timer = setInterval(() => void this.tick(), controllerTimings.pollMs);
-      void this.tick();
-    }
-    let released = false;
-    return new vscode.Disposable(() => {
-      if (released) return;
-      released = true;
-      if (--this.leases === 0) {
-        clearInterval(this.timer);
-        this.timer = undefined;
-        this.gen++;
-        this.events?.abort();
-        this.events = undefined;
-      }
-    });
-  }
-
-  /** Polls only while the event stream is not open; reopens it after a drop. */
-  private async tick(): Promise<void> {
-    if (this.events || !this.connected) return;
-    await this.refresh();
-    if (this.leases > 0 && isList(this.state)) void this.follow();
   }
 
   async refresh(): Promise<ControllersState | undefined> {
@@ -89,43 +43,13 @@ export class ControllerWatcher implements vscode.Disposable {
     const gen = this.gen;
     let next: ControllersState;
     try {
-      next = await client.controllers();
+      const { controllers, virtual } = await client.controllers();
+      next = { controllers, virtual };
     } catch (e) {
       next = { error: describeError(e) };
     }
     if (gen === this.gen) this.set(next);
     return next;
-  }
-
-  private async follow(): Promise<void> {
-    if (this.events) return;
-    const gen = this.gen;
-    const ac = new AbortController();
-    this.events = ac;
-    try {
-      const base = await this.proxyBase();
-      const res = await fetch(`${base}/controllers/events`, { headers: { Accept: 'text/event-stream' }, signal: ac.signal });
-      if (!res.ok || !res.body) {
-        await res.body?.cancel();
-        return;
-      }
-      await parseSse(res.body, data => {
-        if (gen !== this.gen) return;
-        let ev: { type?: string; controllers?: ControllerInfo[]; virtual?: VirtualPad[] };
-        try {
-          ev = JSON.parse(data);
-        } catch {
-          return;
-        }
-        if (ev.type !== 'controllers' || !Array.isArray(ev.controllers) || !Array.isArray(ev.virtual)) return;
-        const prev = isList(this.state) ? this.state.input_enabled : false;
-        this.set({ controllers: ev.controllers, virtual: ev.virtual, input_enabled: prev });
-      });
-    } catch {
-      // dropped or aborted: the next tick polls and reopens it
-    } finally {
-      if (this.events === ac) this.events = undefined;
-    }
   }
 
   private set(next: ControllersState | undefined): void {
@@ -135,10 +59,7 @@ export class ControllerWatcher implements vscode.Disposable {
   }
 
   dispose(): void {
-    clearInterval(this.timer);
-    this.events?.abort();
-    this.sub.dispose();
-    this.linkSub.dispose();
+    this.subs.forEach(s => s.dispose());
     this.changed.dispose();
   }
 }
