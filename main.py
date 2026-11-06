@@ -171,9 +171,7 @@ class Plugin:
         req = self.pairing.pending_request(request_id)
         cert = await self.identity.sign_client(req.public_key, req.client_name)
         self.pairing.approve(request_id, cert)
-        # One paired client at a time for now; the replaced one gets 401 and has to pair again.
-        for old in self.clients.replace_all(fingerprint(cert), req.client_name, req.client_kind):
-            decky.logger.info("pairing: %s replaces paired client %s (%s)", req.client_name, old["name"], old["fingerprint"][:16])
+        self.clients.add(fingerprint(cert), req.client_name, req.client_kind)
         decky.logger.info("pairing: approved %s (%s) from %s", req.client_name, req.client_kind, req.remote)
         await decky.emit("decky_toolkit_paired", req.remote, req.client_name)
         return self.pairing.list()
@@ -210,9 +208,10 @@ class Plugin:
         assert self.input is not None
         return await self.input.set_enabled(bool(enabled))
 
-    def _connected_client(self) -> dict[str, Any] | None:
-        c = self.clients.connected()
-        return c and {k: c[k] for k in ("name", "kind", "remote", "connected_since")}
+    def _connected_clients(self) -> list[dict[str, Any]]:
+        return [{**{k: c[k] for k in ("name", "kind", "remote", "connected_since", "fingerprint")},
+                 "streaming": self.connections.streaming(c["fingerprint"])}
+                for c in self.clients.connected_clients()]
 
     async def get_status(self) -> dict[str, Any]:
         return {
@@ -226,7 +225,7 @@ class Plugin:
             "input": self.input.status() if self.input else None,
             "error": self.last_error,
             "connected": self.clients.any_connected(),
-            "client": self._connected_client(),
+            "clients": self._connected_clients(),
         }
 
     async def set_stream_settings(self, fps: int | None = None, quality: int | None = None, width: int | None = None,

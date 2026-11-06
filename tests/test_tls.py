@@ -109,11 +109,13 @@ def test_paired_clients_store(tmp_path):
     assert [c["fingerprint"] for c in json.loads(path.read_text())] == ["aa"]
     clients.add("bb", "agent", "mcp")
     n = len(changes)
-    replaced = clients.replace_all("cc", "VS Code on other", "vscode")
-    assert sorted(c["fingerprint"] for c in replaced) == ["aa", "bb"]
-    assert [c["fingerprint"] for c in json.loads(path.read_text())] == ["cc"]
+    clients.add("cc", "VS Code on other", "vscode")
+    assert [c["fingerprint"] for c in json.loads(path.read_text())] == ["aa", "bb", "cc"], "pairing appends"
     assert len(changes) == n + 1 and changes[-1] == clients.list(), "one save, one change event"
-    assert clients.replace_all("cc", "VS Code on other", "vscode") == [] and len(clients.list()) == 1
+    now[0] += 100
+    again = clients.add("cc", "VS Code renamed", "vscode")
+    assert len(clients.list()) == 3 and again["name"] == "VS Code renamed" and again["added_at"] == 1061, \
+        "pairing the same key again keeps one entry"
     path.write_text("not json")
     assert PairedClients(str(path)).list() == []
 
@@ -137,23 +139,30 @@ def test_paired_clients_session(tmp_path):
     now = [1000.0]
     clients = PairedClients(str(tmp_path / "clients.json"), clock=lambda: now[0])
     clients.add("aa", "VS Code on box", "vscode")
-    assert clients.connected() is None
+    clients.add("bb", "agent", "mcp")
+    assert clients.connected_clients() == []
     assert clients.list()[0]["connected_since"] is None and clients.list()[0]["remote"] is None
     clients.touch("aa", "10.0.0.30")
     for _ in range(10):
         now[0] += 10
         clients.touch("aa")
-    c = clients.connected()
+    [c] = clients.connected_clients()
     assert c["connected_since"] == 1000 and c["remote"] == "10.0.0.30", "requests keep the session and the last address"
+    clients.touch("bb", "10.0.0.40")
     clients.touch("aa", "10.0.0.31")
-    assert clients.connected()["remote"] == "10.0.0.31"
-    now[0] += 15
-    assert clients.connected() is None and clients.list()[0]["connected_since"] is None
+    a, b = clients.connected_clients()
+    assert (a["fingerprint"], a["remote"], a["connected_since"]) == ("aa", "10.0.0.31", 1000)
+    assert (b["fingerprint"], b["remote"], b["connected_since"]) == ("bb", "10.0.0.40", 1100), "sessions are per client"
+    now[0] += 10
+    clients.touch("bb")
+    now[0] += 5
+    assert [c["fingerprint"] for c in clients.connected_clients()] == ["bb"], "one client going quiet leaves the other"
+    assert clients.list()[0]["connected_since"] is None
     assert clients.list()[0]["remote"] == "10.0.0.31", "the last address outlives the session"
     clients.touch("aa", "10.0.0.30")
-    assert clients.connected()["connected_since"] == 1115, "a request after a gap starts a new session"
-    clients.replace_all("bb", "agent", "mcp")
-    assert clients.connected() is None and clients.list()[0]["remote"] is None
+    assert clients.connected_clients()[0]["connected_since"] == 1115, "a request after a gap starts a new session"
+    clients.remove("aa")
+    assert [c["fingerprint"] for c in clients.connected_clients()] == ["bb"]
 
 
 def client_context(server_cert: str | None = None, cert: tuple[Path, Path] | None = None) -> ssl.SSLContext:

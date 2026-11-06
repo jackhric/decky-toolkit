@@ -209,7 +209,7 @@ consumer, no re-encode, viewers are not affected. Resolution, quality and the ma
 ## Pairing
 
 A client asks for access, the device owner approves or denies it in the Decky panel (Quick Access →
-Decky Toolkit: while a request is pending the panel shows only an "Approve <client>" button with the code). Approving a request replaces the previously paired client; one client is paired at a time. There is no time limit: a request stays pending as long as its client
+Decky Toolkit: while a request is pending the panel shows only an "Approve <client>" button with the code). A device keeps several paired clients: approving a request adds that client to the allow-list next to the others (approving the same public key again keeps one entry and updates its name), and each one is forgotten on its own. There is no time limit: a request stays pending as long as its client
 keeps polling. Requests live in memory, so a plugin restart forgets them (polls then get `404` and
 the client files a new one).
 
@@ -228,7 +228,7 @@ result. A prune runs every 10 s.
 The Decky panel uses the frontend methods `list_pair_requests`, `approve_pair_request(id)` and
 `deny_pair_request(id)` (each returns the list above), plus `list_paired_clients()` and
 `forget_paired_client(fingerprint)` (both return the allow-list; each entry has `connected`, true when that client made an authenticated request in the last 15 s, kept in memory only, and `get_status()` has a top-level `connected`).
-Entries also carry `connected_since` (epoch seconds when the current run of requests began, after a gap of 15 s or more; `null` while not connected) and `remote` (address of the last request, `null` if none since the plugin started); `get_status()` has `client`, `null` or `{name, kind, remote, connected_since}` for the connected client.
+Entries also carry `connected_since` (epoch seconds when the current run of requests began, after a gap of 15 s or more; `null` while not connected) and `remote` (address of the last request, `null` if none since the plugin started); `get_status()` has `clients`, one `{name, kind, remote, connected_since, fingerprint, streaming}` per connected client (`[]` when none; `streaming` is true while that client holds a `/stream.mjpeg`).
 `forget_paired_client` also closes that client's open connections at once, so its streams (MJPEG, SSE, WebSocket) end instead of running until it hangs up. There is no HTTP or MCP route to
 approve a request or forget a client, and `call_plugin_method` refuses `approve_pair_request`,
 `deny_pair_request` and `forget_paired_client` on this plugin: both need someone at the device.
