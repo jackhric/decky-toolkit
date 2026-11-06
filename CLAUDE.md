@@ -22,7 +22,12 @@ See README.md for setup and docs/reference.md for the tool list and architecture
   `tools/perf.py` (Steam performance overlay), `advertise.py` (DNS-SD advertisement via `avahi-publish`) and
   `identity.py` (non-secret `hostname`/`device_id`/`os` for `/health`).
 - `packages/client/` — device client source shared by bundling (transport, API types, discovery, pairing,
-  identity file, plugin staging; no `vscode`); the extension imports it as `@decky-toolkit/client/*`.
+  identity file, plugin staging; no `vscode`); the extension and the CLI import it as `@decky-toolkit/client/*`.
+- `cli/` — the `decky-toolkit` npm package: `pair`, `status`, `mcp` (hand-written stdio MCP server that answers
+  `initialize`/`ping` locally and relays `tools/*` to the device's `/mcp`, plus local `deploy_plugin`/`device_status`),
+  `deploy`, `call`, `forget`. One esbuild bundle `dist/cli.js`, no runtime dependencies. `scripts/smoke.mjs` runs
+  the built CLI as a child process against `scripts/fake-device.mjs` (installed through the client's hooks).
+  The extension's "Write MCP config" writes `npx -y decky-toolkit mcp` into `.mcp.json`.
 - `src/index.tsx` — Quick Access panel (React, `@decky/ui`, `@decky/api`). Built by `pnpm run build` (Vite,
   `vite.config.ts`) into `dist/index.js`.
 - `scripts/test.sh` — Python tests under uv with the loader's Python major (CI runs it). Deploying this repo to
@@ -339,14 +344,18 @@ SharedJSContext via the `cef_evaluate` tool, or use `call_plugin_method` (`plugi
 - Work branches off `dev` and PRs target `dev`; `dev` is merged into `main` to release. CI runs on PRs and
   pushes for both branches; release-please only runs on `main`.
 - `.github/workflows/ci.yml`: plugin (typecheck, build, zip), Python tests, extension (typecheck, build,
-  smoke, package). Also called by `release.yml`.
+  smoke, package), CLI (typecheck, build, smoke, `npm pack`). Also called by `release.yml`.
 - Versions are bumped only by release-please (`release-please-config.json`, `.release-please-manifest.json`)
   from conventional commits: never edit the `version` in `package.json` or `extension/package.json` by
-  hand. Components `plugin` (repo root, excluding `extension/`) and `extension`; tags `plugin-vX.Y.Z` /
-  `extension-vX.Y.Z`. Merging the release PR creates draft releases plus tags; `release.yml` checks the tag
-  against package.json, runs CI, attaches the zip / `.vsix`, publishes the draft, and publishes extension
-  releases to Open VSX and the VS Code Marketplace by trusted publishing (OIDC, environments `openvsx` and
-  `marketplace`, no token secrets).
+  hand. Components `plugin` (repo root, excluding `extension/`, `cli/`, `packages/`), `extension` and `cli`
+  (npm package `decky-toolkit`); tags `plugin-vX.Y.Z` / `extension-vX.Y.Z` / `cli-vX.Y.Z`. Merging the release PR
+  creates draft releases plus tags; `release.yml` checks the tag against package.json, runs CI, attaches the zip /
+  `.vsix` / `.tgz`, publishes the draft, publishes extension releases to Open VSX and the VS Code Marketplace and
+  CLI releases to npm (`npm publish --provenance`), all by trusted publishing (OIDC, environments `openvsx`,
+  `marketplace` and `npm`, no token secrets).
+- release-please assigns commits to components by path, and `packages/client/` belongs to none: a commit that
+  only touches it bumps nothing. Land client changes together with the consumer change (`extension/` or `cli/`)
+  and scope the commit to that consumer (`feat(cli): ...`, `fix(extension): ...`).
 - Node matches Decky Loader's own CI (`node-version: 26` in SteamDeckHomebrew/decky-loader workflows).
 - GitHub Pages (`pages.yml`, source: GitHub Actions) serves the site plus the latest plugin release as
   `jackhric.github.io/decky-toolkit/decky-toolkit.zip`, the Decky "Install Plugin from URL" link. It deploys on
