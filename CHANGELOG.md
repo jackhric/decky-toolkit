@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.4.0](https://github.com/jackhric/decky-toolkit/compare/plugin-v0.3.0...plugin-v0.4.0) (2026-11-06)
+
+
+### ⚠ BREAKING CHANGES
+
+* rename and merge the MCP tools into one <area>_<action> scheme ([#81](https://github.com/jackhric/decky-toolkit/issues/81))
+
+### Features
+
+* keep agents' tool lists current, refuse unknown arguments, add backend stack dumps ([#79](https://github.com/jackhric/decky-toolkit/issues/79)) ([f884efb](https://github.com/jackhric/decky-toolkit/commit/f884efbc1d02cb8b65191a823b2114a6d8f5ade5))
+* live sync for plugin development ([#78](https://github.com/jackhric/decky-toolkit/issues/78)) ([f8d3b99](https://github.com/jackhric/decky-toolkit/commit/f8d3b9922a13c876f02bf6a3ea1a3d9a764ecaa4))
+* rename and merge the MCP tools into one &lt;area&gt;_&lt;action&gt; scheme ([#81](https://github.com/jackhric/decky-toolkit/issues/81)) ([45ad870](https://github.com/jackhric/decky-toolkit/commit/45ad870abf905b7150a4d7c5df7a18643b1f4750))
+* shell, activity, UI state and log tools for agents on the device ([#80](https://github.com/jackhric/decky-toolkit/issues/80)) ([09fae06](https://github.com/jackhric/decky-toolkit/commit/09fae06637f53ed9c362ba84339a612cd49ddae9))
+
+
+### Bug Fixes
+
+* stop the backend within the loader's grace period on reload ([#76](https://github.com/jackhric/decky-toolkit/issues/76)) ([9c08936](https://github.com/jackhric/decky-toolkit/commit/9c08936b65bd76cbd6ecceb45b8999dd2b26a57a))
+
 ## [0.3.0](https://github.com/jackhric/decky-toolkit/compare/plugin-v0.2.1...plugin-v0.3.0) (2026-11-06)
 
 
