@@ -357,6 +357,9 @@ SharedJSContext via the `cef_evaluate` tool, or use `call_plugin_method` (`plugi
   only touches it bumps nothing. Land client changes together with the consumer change (`extension/` or `cli/`)
   and scope the commit to that consumer (`feat(cli): ...`, `fix(extension): ...`).
 - Node matches Decky Loader's own CI (`node-version: 26` in SteamDeckHomebrew/decky-loader workflows).
+- Toolchain policy: one pnpm pinned by `packageManager` (with its sha512) in the root, `extension/` and `cli/`
+  `package.json` (CI's `pnpm/action-setup` reads it; run `npx pnpm@<that version>` or corepack locally), Node 26 in CI
+  and `.nvmrc`, and the same TypeScript, esbuild and `@types/node` across packages; bump them together.
 - GitHub Pages (`pages.yml`, source: GitHub Actions) serves the site plus the latest plugin release as
   `jackhric.github.io/decky-toolkit/decky-toolkit.zip`, the Decky "Install Plugin from URL" link. It deploys on
   plugin releases (called from `release.yml`), on pushes to `main` touching `site/`, and by hand. A deploy
