@@ -1,6 +1,6 @@
 """App dirs, save locations and a guarded file browser."""
 import asyncio
-import os
+import base64
 from typing import Any
 
 from ..games import files as games
@@ -8,11 +8,6 @@ from ..steam.apps import Apps
 from . import ToolRegistry
 
 APPID = {"type": "integer", "description": "Steam appid"}
-
-
-def delete_roots() -> list[tuple[str, int]]:
-    root = games.steam_root()
-    return games.delete_roots(root, games.library_folders(root), os.environ.get("DECKY_PLUGIN_RUNTIME_DIR"))
 
 
 def register(reg: ToolRegistry, apps: Apps | None = None) -> None:
@@ -69,6 +64,31 @@ def register(reg: ToolRegistry, apps: Apps | None = None) -> None:
         {"properties": {"path": {"type": "string"}, "confirm": {"type": "boolean"}}, "required": ["path", "confirm"]},
     )
     async def fs_delete(path: str, confirm: bool = False) -> dict[str, Any]:
-        if confirm is not True:
-            raise ValueError("fs_delete is destructive: pass confirm=true to delete")
-        return await asyncio.to_thread(games.fs_delete, path, confirm, delete_roots())
+        return await asyncio.to_thread(lambda: games.fs_delete(path, confirm, games.device_delete_roots()))
+
+    @reg.add(
+        "fs_read",
+        "Read a file on the device (as root; ~ is the desktop user's home): text, or base64 if it is not UTF-8. "
+        "Longer files are cut to max_bytes from the start. Refuses Steam credential/session files and SSH keys.",
+        {"properties": {"path": {"type": "string"}, "max_bytes": {"type": "integer", "default": 200000, "minimum": 1}},
+         "required": ["path"]},
+    )
+    async def fs_read(path: str, max_bytes: int = 200_000) -> dict[str, Any]:
+        data = await asyncio.to_thread(games.fs_read, path, max_bytes=max_bytes + 1, truncate=True)
+        out: dict[str, Any] = {"path": path, "truncated": len(data) > max_bytes}
+        data = data[:max_bytes]
+        try:
+            out["text"] = data.decode()
+        except UnicodeDecodeError:
+            out["base64"] = base64.b64encode(data).decode()
+        return out
+
+    @reg.add(
+        "fs_write",
+        "Write a text file anywhere on the device (as root; ~ is the desktop user's home), atomically, creating parent "
+        "dirs. An existing file keeps its mode and owner; a new one is 0644, owned like its parent dir. Refuses Steam "
+        "credential/session files, Steam library folder lists and SSH keys.",
+        {"properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]},
+    )
+    async def fs_write(path: str, content: str) -> dict[str, Any]:
+        return await asyncio.to_thread(games.fs_write, path, content.encode(), None)

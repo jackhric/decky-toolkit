@@ -26,7 +26,7 @@ Tools are named `<area>_<action>`. Each table row is one area.
 | `input_` | `input_settings` (no arguments: read; `enabled`: turn remote input on or off, off by default), `input_key`, `input_text`, `input_mouse`, `input_gamepad` |
 | `controller_` | `controller_list` (gamepads as Steam Input sees them, with evdev detail), `controller_add` / `controller_remove` (a virtual Xbox 360 pad; returns once Steam Input lists it) |
 | `app_` | `app_list` (Steam library; `running: true` lists running apps with the pid of their `reaper` process), `app_info`, `app_launch`, `app_terminate` (`confirm: true`), `app_dirs` (install dir, Proton prefix and its user dirs, Steam Cloud userdata, shader cache, XDG dirs), `app_saves` (likely save files, Steam Cloud's own list first) |
-| `fs_` | `fs_list`, `fs_stat`, `fs_read`, `fs_write` (as root; Steam credential/session files and SSH keys refused), `fs_delete` (only inside game, prefix, userdata or plugin data dirs; `confirm: true`) |
+| `fs_` | `fs_list`, `fs_stat`, `fs_read`, `fs_write` (as root, anywhere; Steam credential/session files and SSH keys refused), `fs_delete` (only inside game, prefix, userdata or plugin data dirs; `confirm: true`) |
 | `perf_` | `perf_overlay` (no `level`: read; `level` 0-4 as on the Quick Access performance tab: set) |
 
 Other plugins can add their own tools from their frontend with `registerTool` from `decky-toolkit/tools`; they are
@@ -248,8 +248,9 @@ stays the same across restarts.
   on the plugin settings page when not in use.
 - `fs_write`, `fs_read` and `cef_evaluate` are intentionally powerful: any paired client
   has root on the device.
-- The file browser tools (`fs_*`, `app_saves`) refuse Steam's login files (`config/loginusers.vdf`,
-  `config/config.vdf`, `ssfn*`). Destructive tools (`fs_delete`, `app_terminate`, `recording_delete`) need
+- The file tools (`fs_*`, `app_saves`) and the extension's file browser refuse Steam's login and session
+  files (`config/loginusers.vdf`, `config/config.vdf`, `ssfn*`, cookies) and SSH keys. The extension's file
+  browser writes only inside game, Proton prefix, userdata and plugin data dirs; the `fs_write` tool writes anywhere except those files. Destructive tools (`fs_delete`, `app_terminate`, `recording_delete`) need
   `confirm: true`, and `fs_delete` only works inside game, Proton prefix, userdata and plugin data dirs.
 
 ## Targets

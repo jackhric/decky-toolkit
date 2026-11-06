@@ -134,16 +134,13 @@ def test_apps_routes(monkeypatch, tmp_path):
             assert r.status == 401
         async with s.get(f"{base}/api/v1/apps?query=v", headers=H) as r:
             assert r.status == 200 and (await r.json())["count"] == 2
-        async with s.get(f"{base}/api/v1/apps/70300", headers=H) as r:
-            body = await r.json()
-            assert r.status == 200 and body["developer"] == "Terry Cavanagh" and body["dirs"]["platform"] == "native"
         async with s.get(f"{base}/api/v1/apps/70300/dirs", headers=H) as r:
             assert r.status == 200 and (await r.json())["appid"] == 70300
         async with s.get(f"{base}/api/v1/apps/70300/saves", headers=H) as r:
             assert r.status == 200 and (await r.json())["candidates"] == []
-        async with s.get(f"{base}/api/v1/apps/12345", headers=H) as r:
+        async with s.get(f"{base}/api/v1/apps/12345/dirs", headers=H) as r:
             assert r.status == 404
-        async with s.get(f"{base}/api/v1/apps/abc", headers=H) as r:
+        async with s.get(f"{base}/api/v1/apps/abc/dirs", headers=H) as r:
             assert r.status == 400
         async with s.post(f"{base}/api/v1/apps/70300/launch", json={"wait": 1}, headers=H) as r:
             assert r.status == 200 and (await r.json())["launched"] is True

@@ -10,7 +10,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
 from decky_toolkit.games import files as games, vdf  # noqa: E402
-from decky_toolkit.games.files import SensitivePath  # noqa: E402
+from decky_toolkit.tools.guard import SensitivePath  # noqa: E402
 
 from test_routes import H, with_server  # noqa: E402
 
@@ -235,7 +235,7 @@ def test_fs_delete_guards(tree):
         f"{lib2}/steamapps/common/ChainedTogether/../../appmanifest_{PROTON_APP}.acf",
     ]
     for p in refused:
-        with pytest.raises(ValueError, match="refused"):
+        with pytest.raises(games.OutsideRoots):
             games.fs_delete(p, True, roots)
     with pytest.raises(SensitivePath):
         games.fs_delete(f"{root}/config/loginusers.vdf", True, roots)
@@ -247,7 +247,7 @@ def test_fs_delete_guards(tree):
     assert outside.read_text() == "keep" and not link.exists()
     escape = Path(lib2) / "steamapps/common/ChainedTogether/escape"
     escape.symlink_to(Path(home) / ".local/share/VVVVVV", target_is_directory=True)
-    with pytest.raises(ValueError, match="refused"):
+    with pytest.raises(games.OutsideRoots):
         games.fs_delete(str(escape / "saves/tsave.vvv"), True, roots)
 
     assert games.fs_delete(save, True, roots) == {"deleted": save, "files": 1, "bytes": 4}
@@ -303,6 +303,7 @@ def fs_env(tree, tmp_path):
 def test_fs_read_write_mkdir_rename(tree, tmp_path):
     home, root, lib2 = tree["home"], tree["root"], tree["lib2"]
     roots, keys, runtime = fs_env(tree, tmp_path)
+    scope = (roots, keys)
     assert "vvvvvv" in keys and "chainedtogether" in keys
 
     assert games.fs_read("~/.local/share/VVVVVV/saves/tsave.vvv", home=home) == b"s"
@@ -316,14 +317,14 @@ def test_fs_read_write_mkdir_rename(tree, tmp_path):
         games.fs_read("~/.local/share/VVVVVV/saves/tsave.vvv", home=home, max_bytes=0)
 
     new = str(runtime / "a/b/new.txt")
-    assert games.fs_write(new, b"hi", roots, keys, home=home) == {"path": new, "bytes": 2, "created": True}
+    assert games.fs_write(new, b"hi", scope, home=home) == {"path": new, "bytes": 2, "created": True}
     assert Path(new).read_bytes() == b"hi" and oct(Path(new).stat().st_mode & 0o777) == "0o644"
     with pytest.raises(FileExistsError):
-        games.fs_write(new, b"x", roots, keys, home=home, overwrite=False)
+        games.fs_write(new, b"x", scope, home=home, overwrite=False)
     with pytest.raises(FileNotFoundError):
-        games.fs_write(str(runtime / "missing.txt"), b"x", roots, keys, home=home, create=False)
+        games.fs_write(str(runtime / "missing.txt"), b"x", scope, home=home, create=False)
     os.chmod(new, 0o600)
-    assert games.fs_write(new, b"again", roots, keys, home=home)["created"] is False
+    assert games.fs_write(new, b"again", scope, home=home)["created"] is False
     assert Path(new).read_bytes() == b"again" and oct(Path(new).stat().st_mode & 0o777) == "0o600"
     assert not [p for p in os.listdir(runtime / "a/b") if p.endswith(".tmp")]
 
@@ -336,39 +337,51 @@ def test_fs_read_write_mkdir_rename(tree, tmp_path):
                 f"{root}/config/x.vdf", f"{home}/.config/x", "/etc/passwd", str(runtime)):
         assert not games.writable(bad, roots, home, keys), bad
         with pytest.raises(PermissionError):
-            games.fs_write(bad, b"x", roots, keys, home=home)
+            games.fs_write(bad, b"x", scope, home=home)
     with pytest.raises(SensitivePath):
-        games.fs_write(f"{root}/config/loginusers.vdf", b"x", roots, keys, home=home)
+        games.fs_write(f"{root}/config/loginusers.vdf", b"x", scope, home=home)
     with pytest.raises(PermissionError):
-        games.fs_write(f"{root}/steamapps/common/vvvvvv/steamapps/libraryfolders.vdf", b"x", roots, keys, home=home)
+        games.fs_write(f"{root}/steamapps/common/vvvvvv/steamapps/libraryfolders.vdf", b"x", scope, home=home)
 
     escape = tmp_path / "outside"
     escape.mkdir()
     link = runtime / "link"
     link.symlink_to(escape)
     with pytest.raises(PermissionError):
-        games.fs_write(str(link / "f"), b"x", roots, keys, home=home)
+        games.fs_write(str(link / "f"), b"x", scope, home=home)
     assert not (escape / "f").exists()
 
     d = str(runtime / "dir")
-    assert games.fs_mkdir(d, roots, keys, home=home)["created"]
+    assert games.fs_mkdir(d, scope, home=home)["created"]
     with pytest.raises(FileExistsError):
-        games.fs_mkdir(d, roots, keys, home=home)
+        games.fs_mkdir(d, scope, home=home)
     with pytest.raises(FileNotFoundError):
-        games.fs_mkdir(str(runtime / "x/y"), roots, keys, home=home)
-    assert games.fs_mkdir(str(runtime / "x/y"), roots, keys, home=home, parents=True)["created"]
+        games.fs_mkdir(str(runtime / "x/y"), scope, home=home)
+    assert games.fs_mkdir(str(runtime / "x/y"), scope, home=home, parents=True)["created"]
 
     dst = str(runtime / "dir/moved.txt")
-    assert games.fs_rename(new, dst, roots, keys, home=home) == {"from": new, "to": dst}
+    assert games.fs_rename(new, dst, scope, home=home) == {"from": new, "to": dst}
     assert Path(dst).read_bytes() == b"again" and not Path(new).exists()
-    games.fs_write(new, b"1", roots, keys, home=home)
+    games.fs_write(new, b"1", scope, home=home)
     with pytest.raises(FileExistsError):
-        games.fs_rename(new, dst, roots, keys, home=home)
-    games.fs_rename(new, dst, roots, keys, home=home, overwrite=True)
+        games.fs_rename(new, dst, scope, home=home)
+    games.fs_rename(new, dst, scope, home=home, overwrite=True)
     with pytest.raises(PermissionError):
-        games.fs_rename(dst, f"{home}/moved.txt", roots, keys, home=home)
+        games.fs_rename(dst, f"{home}/moved.txt", scope, home=home)
     with pytest.raises(PermissionError):
-        games.fs_rename(f"{home}/.local/share/Unrelated/save.dat", str(runtime / "s.dat"), roots, keys, home=home)
+        games.fs_rename(f"{home}/.local/share/Unrelated/save.dat", str(runtime / "s.dat"), scope, home=home)
+
+
+def test_fs_write_anywhere(tree, tmp_path):
+    home, root = tree["home"], tree["root"]
+    target = tmp_path / "anywhere/notes.txt"
+    assert games.fs_write(str(target), b"hi", None, home=home)["created"] and target.read_bytes() == b"hi"
+    assert games.fs_write("~/.bashrc", b"x", None, home=home)["path"] == f"{home}/.bashrc"
+    with pytest.raises(SensitivePath):
+        games.fs_write(f"{root}/config/loginusers.vdf", b"x", None, home=home)
+    with pytest.raises(SensitivePath):
+        games.fs_write(f"{root}/config/libraryfolders.vdf", b"x", None, home=home)
+    assert games.fs_read(str(target), max_bytes=1, truncate=True) == b"h"
 
 
 def test_fs_write_routes(tree, tmp_path, monkeypatch):
@@ -385,7 +398,7 @@ def test_fs_write_routes(tree, tmp_path, monkeypatch):
             assert r.status == 200 and r.content_type == "application/octet-stream" and await r.read() == b"s"
         for method, url in (("GET", "/fs/read?path=~/.local/share/VVVVVV/saves/tsave.vvv"), ("PUT", f"/fs/write?{q}"),
                             ("POST", "/fs/mkdir"), ("POST", "/fs/rename"), ("DELETE", f"/fs?{q}&confirm=1")):
-            async with s.request(method, base + url, headers=cookie) as r:
+            async with s.request(method, f"{base}/api/v1{url}", headers=cookie) as r:
                 assert r.status == 401, url
         async with s.get(f"{base}/api/v1/fs/read?path=~/.local/share/Steam/config/loginusers.vdf", headers=H) as r:
             assert r.status == 403

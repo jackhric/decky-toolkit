@@ -28,7 +28,7 @@ def _plugin_version() -> str:
 
 
 SERVER_INFO = {"name": "decky-toolkit", "version": _plugin_version()}
-# Also served by /health, so the CLI's stdio server passes on the same text.
+# Sent with initialize; the CLI's stdio server asks for it and passes it on.
 INSTRUCTIONS = (
     "Decky Toolkit controls a SteamOS device running Decky Loader; tools are named <area>_<action>. Call ui_state "
     "before navigating, sending input, launching anything or judging a screenshot: screenshots show pixels, not "

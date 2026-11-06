@@ -49,8 +49,19 @@ def _error(status: int, message: str) -> web.Response:
     return web.json_response({"error": message}, status=status)
 
 
+@web.middleware
+async def _not_found(request: web.Request, handler):
+    # Runs before auth, so an outdated client learns why even before its certificate is checked.
+    if isinstance(request.match_info.http_exception, web.HTTPNotFound):
+        if request.path.startswith(API_PREFIX + "/"):
+            return _error(404, "Not found")
+        return _error(404, f"This client is older than the Decky Toolkit plugin {SERVER_INFO['version']}: update the "
+                           "VS Code extension, or run npx decky-toolkit@latest")
+    return await handler(request)
+
+
 # First match wins, so subclasses come before their bases.
-_STATUS = ((games.SensitivePath, 403), (PermissionError, 403), (FileNotFoundError, 404), (ValueError, 400),
+_STATUS = ((PermissionError, 403), (FileNotFoundError, 404), (ValueError, 400),
            (cdp.CdpError, 502), (InputUnavailable, 503), (CaptureUnavailable, 503))
 
 
@@ -113,7 +124,7 @@ class Api:
 
     def build_app(self) -> web.Application:
         app = web.Application(client_max_size=64 * 1024 * 1024,
-                              middlewares=[self.auth.middleware(), audit.middleware(self.log)])
+                              middlewares=[_not_found, self.auth.middleware(), audit.middleware(self.log)])
         # Before long_lived drops the transports, so event streams get to write `shutdown`.
         app.on_shutdown.append(lambda _app: self.events.close())
         self.long_lived.install(app)
@@ -147,7 +158,6 @@ class Api:
             web.get("/logs/tail", self.handle_logs_tail),
             web.get("/logs/stream", live(self.handle_logs_stream)),
             web.get("/apps", self.handle_apps),
-            web.get("/apps/{appid}", self.handle_app),
             web.get("/apps/{appid}/dirs", self.handle_app_dirs),
             web.get("/apps/{appid}/saves", self.handle_app_saves),
             web.get("/apps/{appid}/proton-log", self.handle_app_proton_log),
@@ -236,7 +246,6 @@ class Api:
             return _error(404, "no pending pairing request with that id")
         return web.json_response({"cancelled": True})
 
-
     async def handle_stream(self, request: web.Request) -> web.StreamResponse:
         if self.capturer is None:
             return web.Response(status=404, text="capture not available")
@@ -260,10 +269,6 @@ class Api:
         except (ConnectionResetError, asyncio.CancelledError):
             pass
         return res
-
-
-
-
 
     async def handle_frame(self, _request: web.Request) -> web.Response:
         if self.capturer is None:
@@ -290,7 +295,6 @@ class Api:
         return await _json(lambda: _with_body(request, {"fps", "quality", "width", "audio"}, capturer.update_settings))
 
     # ---- audio ----
-
 
     async def handle_audio_ws(self, request: web.Request) -> web.StreamResponse:
         if self.audio is None:
@@ -341,8 +345,6 @@ class Api:
         if (svc := self.input) is None:
             return _error(404, "input not available")
         return await _json(lambda: _with_body(request, {"enabled"}, svc.set_enabled, ("enabled",)))
-
-
 
     async def handle_input_ws(self, request: web.Request) -> web.StreamResponse:
         if self.input is None:
@@ -513,7 +515,6 @@ class Api:
                 return _error(502, f"installed, but plugin reload failed: {e}")
         return web.json_response(result)
 
-
     async def handle_plugin_file_put(self, request: web.Request) -> web.Response:
         rel = request.query.get("path", "")
         data = await request.read()
@@ -525,8 +526,6 @@ class Api:
             return _error(403, str(e))
         except FileNotFoundError as e:
             return _error(404, str(e))
-
-
 
     # ---- logs ----
 
@@ -612,9 +611,6 @@ class Api:
         tools = request.query.get("include_tools", "0") in ("1", "true")
         return await _json(lambda: self.apps.list(installed, request.query.get("query"), tools))
 
-    async def handle_app(self, request: web.Request) -> web.Response:
-        return await _json(lambda: self.apps.info(_appid(request)))
-
     async def handle_app_dirs(self, request: web.Request) -> web.Response:
         return await _json(lambda: self.apps.dirs(_appid(request)))
 
@@ -642,17 +638,10 @@ class Api:
         glob = request.query.get("glob") or None
         return await self._fs_call(request, lambda: games.fs_list(path, depth, glob))
 
-    @staticmethod
-    def _fs_roots() -> tuple[list[tuple[str, int]], list[tuple[str, int]], list[str]]:
-        root = games.steam_root()
-        libs = games.library_folders(root)
-        runtime = os.environ.get("DECKY_PLUGIN_RUNTIME_DIR")
-        return games.write_roots(root, libs, runtime), games.delete_roots(root, libs, runtime), games.installed_name_keys(libs)
-
     async def _fs_call(self, request: web.Request, fn) -> web.Response:
         try:
             result = await asyncio.to_thread(fn)
-        except (games.SensitivePath, PermissionError) as e:
+        except PermissionError as e:
             return web.json_response({"error": str(e), "code": "EACCES"}, status=403)
         except FileExistsError as e:
             return web.json_response({"error": str(e), "code": "EEXIST"}, status=409)
@@ -689,26 +678,19 @@ class Api:
             return _error(400, "path is required")
         data = await request.read()
         create, overwrite = self._flag(request, "create", True), self._flag(request, "overwrite", True)
-
-        def write() -> dict:
-            roots, _, keys = self._fs_roots()
-            return games.fs_write(path, data, roots, keys, create=create, overwrite=overwrite)
-        return await self._fs_call(request, write)
+        return await self._fs_call(request, lambda: games.fs_write(path, data, games.device_write_scope(), create=create,
+                                                                   overwrite=overwrite))
 
     async def handle_fs_mkdir(self, request: web.Request) -> web.Response:
         try:
             body = await _body(request, {"path", "parents"})
         except ValueError as e:
             return _error(400, str(e))
-        path = body.get("path") or request.query.get("path")
+        path = body.get("path")
         if not isinstance(path, str) or not path:
             return _error(400, "path is required")
-        parents = body.get("parents") is True or self._flag(request, "parents", False)
-
-        def mkdir() -> dict:
-            roots, _, keys = self._fs_roots()
-            return games.fs_mkdir(path, roots, keys, parents=parents)
-        return await self._fs_call(request, mkdir)
+        parents = body.get("parents") is True
+        return await self._fs_call(request, lambda: games.fs_mkdir(path, games.device_write_scope(), parents=parents))
 
     async def handle_fs_rename(self, request: web.Request) -> web.Response:
         try:
@@ -719,11 +701,7 @@ class Api:
         if not isinstance(src, str) or not src or not isinstance(dst, str) or not dst:
             return _error(400, "from and to are required")
         overwrite = body.get("overwrite") is True
-
-        def rename() -> dict:
-            roots, _, keys = self._fs_roots()
-            return games.fs_rename(src, dst, roots, keys, overwrite=overwrite)
-        return await self._fs_call(request, rename)
+        return await self._fs_call(request, lambda: games.fs_rename(src, dst, games.device_write_scope(), overwrite=overwrite))
 
     async def handle_fs_delete(self, request: web.Request) -> web.Response:
         path = request.query.get("path")
@@ -731,15 +709,5 @@ class Api:
             return _error(400, "path is required")
         if request.query.get("confirm") != "1":
             return _error(400, "deleting is destructive: add confirm=1")
-
-        def delete() -> dict:
-            _, roots, _ = self._fs_roots()
-            p = games.expand(path)
-            games.check_sensitive(p)
-            if os.path.lexists(p) and not games.deletable(p, roots):
-                raise games.OutsideRoots(f"refused: {p} is not inside a game dir (steamapps/common/<game>/...), a "
-                                         "compatdata or shadercache entry, userdata/<account>/<appid> or the plugin "
-                                         "runtime dir")
-            return games.fs_delete(p, True, roots)
-        return await self._fs_call(request, delete)
+        return await self._fs_call(request, lambda: games.fs_delete(path, True, games.device_delete_roots()))
 
