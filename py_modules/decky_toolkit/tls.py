@@ -180,10 +180,9 @@ class PairedClients:
         now = self.clock()
         return [self._entry(c, now) for c in self._clients.values()]
 
-    def connected(self) -> dict | None:
-        """The connected client (there is at most one paired client), or None."""
+    def connected_clients(self) -> list[dict]:
         now = self.clock()
-        return next((self._entry(c, now) for fp, c in self._clients.items() if self._connected(fp, now)), None)
+        return [self._entry(c, now) for fp, c in self._clients.items() if self._connected(fp, now)]
 
     def any_connected(self) -> bool:
         now = self.clock()
@@ -193,18 +192,15 @@ class PairedClients:
         return fp in self._clients
 
     def add(self, fp: str, name: str, kind: str) -> dict:
-        client = {"fingerprint": fp, "name": name, "kind": kind, "added_at": int(self.clock()), "last_seen": None}
-        self._clients[fp] = client
+        """Pairs a client next to the others; pairing the same key again only renames it."""
+        client = self._clients.get(fp)
+        if client is None:
+            client = self._clients[fp] = {"fingerprint": fp, "name": name, "kind": kind,
+                                          "added_at": int(self.clock()), "last_seen": None}
+        else:
+            client.update(name=name, kind=kind)
         self._save()
         return dict(client)
-
-    def replace_all(self, fp: str, name: str, kind: str) -> list[dict]:
-        """Make this the only paired client; returns the clients it replaced."""
-        replaced = [dict(c) for f, c in self._clients.items() if f != fp]
-        self._clients = {}
-        self._active, self._since, self._remote = {}, {}, {}
-        self.add(fp, name, kind)
-        return replaced
 
     def remove(self, fp: str) -> bool:
         for d in (self._active, self._since, self._remote):

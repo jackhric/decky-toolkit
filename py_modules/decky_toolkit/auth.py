@@ -1,5 +1,7 @@
 """Client-certificate authentication shared by the MCP and REST routes."""
 import asyncio
+import contextlib
+import contextvars
 from typing import Callable
 from urllib.parse import urlparse
 
@@ -12,6 +14,7 @@ from .tls import PairedClients, fingerprint_der
 # get a plain 404 instead of a 401.
 SELF_AUTH_PATHS = frozenset({"/", "/health", "/viewer", "/pair", "/pair/request"})
 PAIR_REQUEST_PREFIX = "/pair/request/"
+client_fingerprint: contextvars.ContextVar[str | None] = contextvars.ContextVar("client_fingerprint", default=None)
 
 
 def peer_fingerprint(request: web.Request) -> str | None:
@@ -26,6 +29,7 @@ class Connections:
 
     def __init__(self):
         self._live: dict[str, dict[asyncio.BaseTransport, int]] = {}
+        self._screens: dict[str, int] = {}
 
     def add(self, fp: str, transport: asyncio.BaseTransport) -> None:
         live = self._live.setdefault(fp, {})
@@ -42,6 +46,24 @@ class Connections:
 
     def count(self, fp: str) -> int:
         return len(self._live.get(fp, {}))
+
+    @contextlib.contextmanager
+    def watching_screen(self):
+        """Marks the requesting client as holding a screen stream, so the panel can say which one streams."""
+        fp = client_fingerprint.get()
+        if fp:
+            self._screens[fp] = self._screens.get(fp, 0) + 1
+        try:
+            yield
+        finally:
+            if fp:
+                if self._screens.get(fp, 0) > 1:
+                    self._screens[fp] -= 1
+                else:
+                    self._screens.pop(fp, None)
+
+    def streaming(self, fp: str) -> bool:
+        return fp in self._screens
 
     def close(self, fp: str) -> int:
         live = self._live.pop(fp, {})
@@ -84,11 +106,12 @@ class CertAuth:
             fp, transport = client["fingerprint"], request.transport
             if transport is not None:
                 self.connections.add(fp, transport)
-            token = audit.paired_client.set(client["name"])
+            token, fp_token = audit.paired_client.set(client["name"]), client_fingerprint.set(fp)
             try:
                 return await handler(request)
             finally:
                 audit.paired_client.reset(token)
+                client_fingerprint.reset(fp_token)
                 if transport is not None:
                     self.connections.remove(fp, transport)
         return auth_middleware

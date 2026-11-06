@@ -318,7 +318,10 @@ the request id, so the client can check it. No time limit. Requests live in memo
 (`py_modules/decky_toolkit/pairing.py`): a pending one expires 60 s after its last poll, a decided one 5 min
 after the decision, and a plugin restart forgets them all, so clients re-request (new code) on a 404.
 The signed client certificate goes out once per approval. Paired clients are listed and forgotten on the
-device (`list_paired_clients`, `forget_paired_client`); a forgotten client gets a plain 401.
+device (`list_paired_clients`, `forget_paired_client`); a forgotten client gets a plain 401. A device keeps
+several paired clients (like adb's `adb_keys`): approving appends to `clients.json` keyed by fingerprint, so
+re-pairing the same key keeps one entry. `get_status().clients` lists every client with a request in the last
+15 s, and the panel shows one connection card with its own disconnect button per connected client.
 Approving a request and forgetting a client are deliberately device-only (no HTTP/MCP route;
 `call_plugin_method` refuses them), the two exceptions to the remote-configurable rule below. `/mcp` needs a
 paired client certificate like every other route; external MCP agents reach it through the extension's
