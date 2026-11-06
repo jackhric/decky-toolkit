@@ -172,16 +172,19 @@ def test_audit_log_lines_over_http(caplog):
     assert not any("document.cookie" in r.getMessage() for r in caplog.records)
 
 
-def test_forgetting_a_client_closes_its_open_streams():
+def test_forgetting_a_client_closes_only_its_open_streams():
     auth = stub_auth()
-    fp = H[PEER_HEADER]
+    fp, other = H[PEER_HEADER], "cd" * 32
+    auth.clients.add(other, "second client", "mcp")
+    H2 = {PEER_HEADER: other}
 
     async def stream(request):
         resp = web.StreamResponse()
         await resp.prepare(request)
-        while True:
-            await resp.write(b"frame\n")
-            await asyncio.sleep(0.05)
+        with auth.connections.watching_screen():
+            while True:
+                await resp.write(b"frame\n")
+                await asyncio.sleep(0.05)
 
     async def drain(r):
         try:
@@ -198,15 +201,26 @@ def test_forgetting_a_client_closes_its_open_streams():
         await web.TCPSite(runner, "127.0.0.1", 0).start()
         base = f"http://127.0.0.1:{runner.addresses[0][1]}"
         try:
-            async with ClientSession(timeout=ClientTimeout(total=5)) as s:
-                async with s.get(f"{base}/stream", headers=H) as r:
+            async with ClientSession(timeout=ClientTimeout(total=5)) as s, \
+                    ClientSession(timeout=ClientTimeout(total=5)) as s2:
+                async with s.get(f"{base}/stream", headers=H) as r, s2.get(f"{base}/stream", headers=H2) as r2:
                     assert await r.content.readline() == b"frame\n"
-                    assert auth.connections.count(fp) == 1
+                    assert await r2.content.readline() == b"frame\n"
+                    assert auth.connections.count(fp) == 1 and auth.connections.count(other) == 1
+                    assert auth.connections.streaming(fp) and auth.connections.streaming(other)
                     assert auth.clients.remove(fp) and auth.connections.close(fp) == 1
                     await asyncio.wait_for(drain(r), 1)
+                    for _ in range(3):
+                        assert await r2.content.readline() == b"frame\n", "the other client keeps streaming"
+                    assert auth.connections.count(other) == 1
                 async with s.get(f"{base}/stream", headers=H) as r:
                     assert r.status == 401
-            assert auth.connections.count(fp) == 0
+            for _ in range(20):
+                if not auth.connections.streaming(other):
+                    break
+                await asyncio.sleep(0.05)
+            assert auth.connections.count(fp) == 0 and not auth.connections.streaming(fp)
+            assert not auth.connections.streaming(other), "a closed stream no longer counts as streaming"
         finally:
             await runner.cleanup()
 
