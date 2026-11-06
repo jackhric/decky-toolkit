@@ -311,7 +311,7 @@ there is no bearer token. `tls.py` mints the device's EC P-256 identity (self-si
 A client generates its own key pair, files `POST /pair/request` with its public key and long-polls
 `GET /pair/request/{id}?wait=25`; the device owner approves or denies it in the panel, whose landing view
 shows the address and, while a request is pending, only an "Approve <client>" button with the code and Deny;
-server, input and paired-client settings live on the `/decky-toolkit/settings` page behind the header gear
+server, input and paired-device settings live on the `/decky-toolkit/settings` page (sidebar categories) behind the header gear
 (frontend methods `list_pair_requests`,
 `approve_pair_request`, `deny_pair_request`). The code is derived from the server cert, the client key and
 the request id, so the client can check it. No time limit. Requests live in memory

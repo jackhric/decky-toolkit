@@ -78,8 +78,8 @@ you did not make.
 The normal panel is deliberately minimal: the Decky Toolkit mark, the device's IP address in large
 type ("port 8765" below it), which is all the extension's Add device needs, one line of help (or why
 the server is not running) and a **How pairing works** link. The gear button in the panel header opens
-the plugin's settings page: **Server** (enable toggle, status, address, port, restart), **Remote
-input** and **Paired clients**, which lists every paired client with its last use and a **Forget**
+the plugin's settings page, a Steam-style page with categories on the left: **Server** (enable toggle, status, address, port, restart), **Remote
+input** and **Paired devices**, which lists every paired client with its last use and a **Forget**
 button, which only works on the device.
 
 ## Screen panel
@@ -219,7 +219,7 @@ described in [docs/api.md](api.md#pairing).
   CEF debugger. The plugin deliberately does **not** connect to the loader's own websocket on port
   1337: the loader keeps a single client and would kick the Steam UI off.
 - `src/index.tsx` is the Quick Access panel (the address, or the pending pairing request to approve or
-  deny) and the settings page at `/decky-toolkit/settings` (server, remote input, paired clients). Both
+  deny) and the settings page at `/decky-toolkit/settings` (a `SidebarNavigation` with Server, Remote input and Paired devices). Both
   only mirror state.
 
 The plugin runs with the `root` flag so it can restart the loader, read every plugin's logs and write
