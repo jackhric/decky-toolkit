@@ -28,11 +28,8 @@
 </p>
 
 <p align="center">
-  <img alt="VS Code with plugin code, the SteamOS device's live screen showing the plugin's Quick Access panel, and the plugin's logs streaming below" src="docs/images/media/hero.png">
-</p>
-
-<p align="center">
-  <img alt="A game's save files and an .ini opened from the SteamOS device over decky://, next to the game's page on the live screen" src="docs/images/media/games-files.png">
+  <img alt="VS Code with plugin code, the SteamOS device's live screen showing the plugin's Quick Access panel, and the plugin's logs streaming below" src="docs/images/media/hero.png" width="49%">
+  <img alt="A game's save files and an .ini opened from the SteamOS device over decky://, next to the game's page on the live screen" src="docs/images/media/games-files.png" width="49%">
 </p>
 
 ## Features
