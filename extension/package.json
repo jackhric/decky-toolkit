@@ -940,10 +940,11 @@
     "dev-check": "node scripts/dev-check.mjs"
   },
   "devDependencies": {
-    "@types/node": "^20.19.0",
+    "@types/node": "^26.6.6",
     "@types/vscode": "~1.90.0",
-    "@vscode/vsce": "^3.2.0",
-    "esbuild": "^0.25.0",
-    "typescript": "^5.9.0"
-  }
+    "@vscode/vsce": "^3.9.2",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  },
+  "packageManager": "pnpm@12.18.0+sha512.9d7882d5dc82147ecfc4e062aa34834e0ad0296710a1837a1115ae012127d36b7109e321ac1598a1dd0a65597681b1e99917e12ed0d749eae91187943363beb3"
 }
