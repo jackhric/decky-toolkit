@@ -309,8 +309,10 @@ The server is TLS-only (TLS 1.3, no setting to turn it off) and authenticates cl
 there is no bearer token. `tls.py` mints the device's EC P-256 identity (self-signed, also the CA) under
 `<settings dir>/tls/` with `openssl`, and keeps the allow-list `clients.json` of paired fingerprints.
 A client generates its own key pair, files `POST /pair/request` with its public key and long-polls
-`GET /pair/request/{id}?wait=25`; the device owner approves or denies it in the panel, which shows only an
-"Approve pairing request?" prompt while one is pending (frontend methods `list_pair_requests`,
+`GET /pair/request/{id}?wait=25`; the device owner approves or denies it in the panel, whose landing view
+shows the address and, while a request is pending, only an "Approve <client>" button with the code and Deny;
+server, input and paired-client settings live on the `/decky-toolkit/settings` page behind the header gear
+(frontend methods `list_pair_requests`,
 `approve_pair_request`, `deny_pair_request`). The code is derived from the server cert, the client key and
 the request id, so the client can check it. No time limit. Requests live in memory
 (`py_modules/decky_toolkit/pairing.py`): a pending one expires 60 s after its last poll, a decided one 5 min

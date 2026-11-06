@@ -63,9 +63,9 @@ From the VS Code extension (see [extension/README.md](../extension/README.md#pai
 2. The editor shows *Waiting for approval on <device> · code 4821* (and the device row says
    *waiting for approval · code 4821*).
 3. On the device a toast says *VS Code on <your-pc> wants to pair · code 4821*. Open Quick Access
-   (…) → Decky Toolkit. While a request is pending the panel shows only *Approve pairing request?* with
-   *VS Code on <your-pc> (<your-ip>) · code 4821* and **Approve** / **Deny** side by side (several
-   requests come one at a time, "1 of 3"). Check the code and press **Approve**.
+   (…) → Decky Toolkit. While a request is pending the panel shows only a large
+   **Approve VS Code on <your-pc>** button with *Code 4821 · <your-ip>* under it and **Deny** below
+   (several requests come one at a time, "Request 1 of 3"). Check the code and press **Approve**.
 4. The extension stores its pairing and connects. Deny shows *Pairing denied on <device>* with
    **Try again**; Cancel in the editor withdraws the request.
 
@@ -75,11 +75,12 @@ see [docs/api.md](api.md#pairing). Pending requests expire 60 s after their clie
 polling, at most 10 can be pending (2 per address), and the toast and code let you spot a request
 you did not make.
 
-The normal panel is deliberately minimal: the device's IP address in large type ("port 8765"
-below it), which is all the extension's Add device needs, and one server status line. Everything
-else (server and remote input toggles, restart) is under
-**Advanced**. The **Paired clients** section lists every paired client with its last use and a
-**Forget** button, which only works on the device.
+The normal panel is deliberately minimal: the Decky Toolkit mark, the device's IP address in large
+type ("port 8765" below it), which is all the extension's Add device needs, one line of help (or why
+the server is not running) and a **How pairing works** link. The gear button in the panel header opens
+the plugin's settings page: **Server** (enable toggle, status, address, port, restart), **Remote
+input** and **Paired clients**, which lists every paired client with its last use and a **Forget**
+button, which only works on the device.
 
 ## Screen panel
 
@@ -141,7 +142,7 @@ listens.
 ## Remote input
 
 The screen panel and MCP clients can drive the Deck with keyboard, mouse and gamepad input. It is
-**off by default**. Turn it on with the **Allow remote input** toggle in the Decky Toolkit panel, the
+**off by default**. Turn it on with the **Allow remote input** toggle on the Decky Toolkit settings page (gear in the panel header), the
 keyboard icon in the screen panel's tab bar, `PUT /input/settings` or the `set_input_enabled` tool. The setting
 is stored in `settings.json` and applies to every client.
 
@@ -217,8 +218,9 @@ described in [docs/api.md](api.md#pairing).
 - `py_modules/decky_toolkit/cdp.py` is a tiny Chrome DevTools Protocol client used to talk to Steam's
   CEF debugger. The plugin deliberately does **not** connect to the loader's own websocket on port
   1337: the loader keeps a single client and would kick the Steam UI off.
-- `src/index.tsx` is the Quick Access panel. It only mirrors state: the endpoint, pairing requests to
-  approve or deny, the paired clients, the stream and input status and a server restart.
+- `src/index.tsx` is the Quick Access panel (the address, or the pending pairing request to approve or
+  deny) and the settings page at `/decky-toolkit/settings` (server, remote input, paired clients). Both
+  only mirror state.
 
 The plugin runs with the `root` flag so it can restart the loader, read every plugin's logs and write
 anywhere. The `debug` flag makes the loader hot-reload the plugin when its files change, which is how
@@ -252,7 +254,7 @@ stays the same across restarts.
 - The server binds `0.0.0.0` by default. Bazzite's default firewalld zone already allows TCP
   1025-65535 inbound, so it is reachable from the LAN as soon as the plugin loads.
 - Only paired clients are served. Treat this as a development tool on a trusted LAN and disable it
-  from the panel when not in use.
+  on the plugin settings page when not in use.
 - `write_file`, `read_file` and `cef_evaluate` are intentionally powerful: any paired client
   has root on the device.
 - The file browser tools (`fs_*`, `game_saves`) refuse Steam's login files (`config/loginusers.vdf`,
