@@ -94,10 +94,10 @@ function lastSeen(at: number | null): string {
 
 function connectedFor(since: number | null, now: number): string {
   const minutes = since === null ? 0 : Math.floor((now / 1000 - since) / 60);
-  if (minutes < 1) return "connected just now";
-  if (minutes < 60) return `connected ${minutes} min`;
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} min`;
   const m = minutes % 60;
-  return `connected ${Math.floor(minutes / 60)} h${m ? ` ${m} min` : ""}`;
+  return `${Math.floor(minutes / 60)} h${m ? ` ${m} min` : ""}`;
 }
 
 function useNow(everyMs: number): number {
@@ -238,7 +238,10 @@ const STYLE = `
 .dtk-card { border-radius: 4px; background: rgba(255,255,255,0.04); transition: background 0.15s; }
 .dtk-card.dtk-focus { background: rgba(255,255,255,0.2); box-shadow: inset 0 0 0 2px rgba(255,255,255,0.45); }
 .dtk-link.dtk-focus { text-decoration: underline; color: #fff !important; }
-.dtk-icon-button.gpfocus { background: #fff !important; color: #000 !important; }
+.dtk-row { display: flex; justify-content: space-between; gap: 10px; font-size: 14px; color: #8b929a; }
+.dtk-row > span:last-child:not(:first-child) { color: #dcdedf; text-align: right; font-variant-numeric: tabular-nums; }
+.dtk-card-footer { margin: 10px -14px 0 !important; width: calc(100% + 28px) !important; border-radius: 0 !important; background: rgba(255,255,255,0.06) !important; color: #dcdedf !important; }
+.dtk-card-footer.gpfocus, .dtk-card-footer:hover { background: #fff !important; color: #000 !important; }
 .dtk-primary { background: #1a9fff !important; color: #fff !important; }
 .dtk-primary.gpfocus { background: #4fb4ff !important; box-shadow: 0 0 0 2px #fff; }
 .dtk-mark { color: #7a7f86; transition: color 0.4s; }
@@ -288,28 +291,36 @@ const hint = { color: MUTED, fontSize: "15px", lineHeight: 1.45, margin: 0, maxW
 function ConnectionCard({ client, status, busy, onDisconnect }: { client: ConnectedClient; status: Status; busy: boolean; onDisconnect: () => void }) {
   const now = useNow(15000);
   const stream = status.stream?.running && client.streaming ? status.stream : null;
-  const line = { fontSize: "14px", color: MUTED, marginTop: "2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } as const;
   return (
     <Focusable
       className="dtk-card"
-      flow-children="row"
-      style={{ width: "100%", padding: "12px 10px 12px 14px", boxSizing: "border-box", display: "flex", alignItems: "center", gap: "10px", textAlign: "left" }}
+      flow-children="column"
+      style={{ width: "100%", padding: "14px 14px 0", boxSizing: "border-box", overflow: "hidden", display: "flex", flexDirection: "column", gap: "4px", textAlign: "left" }}
     >
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ ...line, fontSize: "20px", fontWeight: 600, color: "#fff", marginTop: 0 }}>{client.name}</div>
-        {/* Too narrow for "connected … · from …" on one line next to the button. */}
-        <div style={line}>{connectedFor(client.connected_since, now)}</div>
-        {client.remote && <div style={line}>from {client.remote}</div>}
-        {stream && <div style={line}>streaming{stream.fps > 0 && ` ${Math.round(stream.fps)} fps`}</div>}
+      <div style={{ fontSize: "20px", fontWeight: 600, color: "#fff", overflowWrap: "anywhere" }}>{client.name}</div>
+      <div className="dtk-row">
+        <span>{KIND_LABELS[client.kind] ?? client.kind}</span>
+        {client.remote && <span>{client.remote}</span>}
       </div>
+      <div className="dtk-row">
+        <span>Connected</span>
+        <span>{connectedFor(client.connected_since, now)}</span>
+      </div>
+      {stream && (
+        <div className="dtk-row">
+          <span>Screen</span>
+          <span>{stream.fps > 0 ? `${Math.round(stream.fps)} fps` : "streaming"}</span>
+        </div>
+      )}
       <DialogButton
-        className="dtk-icon-button"
+        className="dtk-card-footer"
         aria-label={`Disconnect ${client.name}`}
         disabled={busy}
         onClick={onDisconnect}
-        style={{ width: "40px", height: "40px", minWidth: 0, padding: 0, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}
+        style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}
       >
         <FaUnlink style={{ display: "block" }} />
+        Disconnect
       </DialogButton>
     </Focusable>
   );
