@@ -9,7 +9,7 @@ import { DEFAULT_PORT, DiscoveredDevice, scanNetwork } from '@decky-toolkit/clie
 import * as identityFile from '@decky-toolkit/client/identity';
 import { CLAUDE_MCP_ADD as MCP_ADD } from '@decky-toolkit/client/mcpConfig';
 import { PairOutcome, requestApproval } from '@decky-toolkit/client/pairing';
-import { InvalidOption, StatusReport, deploy, deviceStatus, explain, onDevice, pairedClient, parseRestart } from './device';
+import { InvalidOption, StatusReport, deploy, deviceStatus, explain, onDevice, pairedClient, parseBuild, parseRestart } from './device';
 import { dev } from './dev';
 import { McpServer } from './mcp';
 import { VERSION } from './version';
@@ -22,7 +22,8 @@ Commands:
   pair [host[:port]] [--name <name>]   Pair this machine with a device (no host: search the local network)
   status [--json]                      Show the paired device and whether it answers
   mcp                                  Run an MCP server over stdio with the device's tools
-  deploy [dir] [--restart <mode>]      Install the Decky plugin in dir (default: .) on the device
+  deploy [dir] [--restart <mode>] [--build <mode>]
+                                       Build if needed and install the Decky plugin in dir (default: .) on the device
   dev [dir] [--no-build]               Deploy, then live-sync every change: runs the plugin's watch script,
                                        pushes changed files and reloads only what changed
   call <tool> [json-args] [--out <file>]
@@ -31,6 +32,7 @@ Commands:
 
 Options:
   --restart none|plugin|loader         What deploy reloads (default: picked from the plugin)
+  --build auto|always|never            When deploy runs the build script (default auto: when src/ is newer than dist/index.js)
   -h, --help                           Show this help
   -v, --version                        Show the version
 
@@ -251,10 +253,10 @@ const COMMANDS: Record<string, (argv: string[]) => Promise<number>> = {
     return 0;
   },
   deploy: async argv => {
-    const { values, positionals } = parse(argv, { restart: { type: 'string' } }, 1);
-    const restart = parseRestart(values.restart);
+    const { values, positionals } = parse(argv, { restart: { type: 'string' }, build: { type: 'string' } }, 1);
+    const [restart, build] = [parseRestart(values.restart), parseBuild(values.build)];
     try {
-      const r = await deploy(positionals[0] ?? '.', restart, out);
+      const r = await deploy(positionals[0] ?? '.', restart, build, out);
       const how = r.reloaded === null ? '' : r.reloaded ? ', reload confirmed' : ', reload NOT confirmed';
       out(`Deployed ${r.plugin.name}${r.plugin.version ? ` ${r.plugin.version}` : ''} to ${r.device.host} as ${r.plugin.dir} in ${(r.totalMs / 1000).toFixed(1)} s `
         + `(upload ${r.uploadMs} ms, restart ${r.restarted}${how}).`);

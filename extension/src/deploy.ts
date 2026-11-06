@@ -2,10 +2,11 @@ import type { ChildProcess } from 'child_process';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { describeError, outdatedDevice } from '@decky-toolkit/client/client';
-import { DeployPhase, WorkspacePlugin, readWorkspacePlugin } from '@decky-toolkit/client/deploy';
+import {
+  BuildError, BuildMode, DeployPhase, DeployStep, WorkspacePlugin, deployPlugin, findPluginRoots, readWorkspacePlugin,
+} from '@decky-toolkit/client/deploy';
 import { LiveSync, startWatchBuild, stopWatchBuild } from '@decky-toolkit/client/live';
 import type { Connection } from './connection';
-import { BuildError, BuildMode, BuildStep, buildAndDeploy, findPluginRoots } from './pluginDeploy';
 
 const SCAN_DEBOUNCE_MS = 150;
 export const AUTO_DEPLOY_DEBOUNCE_MS = 750;
@@ -277,7 +278,7 @@ export class DeployController implements vscode.Disposable {
     }, AUTO_DEPLOY_DEBOUNCE_MS));
   }
 
-  async deploy(req: DeployRequest = {}): Promise<BuildStep | undefined> {
+  async deploy(req: DeployRequest = {}): Promise<DeployStep | undefined> {
     if (this.running) {
       if (req.auto) this.queued = req.plugin;
       else void vscode.window.showInformationMessage(`Decky Toolkit: already deploying ${this.running.plugin.name}.`);
@@ -290,10 +291,9 @@ export class DeployController implements vscode.Disposable {
     this.lastRoot = p.root;
     const device = this.conn.connectedDevice?.name ?? client.address.host;
     const build: BuildMode = req.auto ? 'never' : vscode.workspace.getConfiguration('decky-toolkit').get<BuildMode>('deploy.build', 'auto');
-    const restart = req.full ? 'loader' : 'fast';
     this.running = { plugin: p, auto: !!req.auto };
     this.render();
-    this.out.appendLine(`\n=== ${req.auto ? 'Auto-deploying' : 'Deploying'} ${pluginSummary(p)} → ~/homebrew/plugins/${p.dir} on ${device}` +
+    this.out.appendLine(`\n=== ${req.auto ? 'Auto-deploying' : 'Deploying'} ${pluginSummary(p)} to ${device}` +
       ` (${req.full ? 'full loader restart' : 'fast'}, build ${build}, ${new Date().toLocaleTimeString()})`);
     if (!req.auto) this.out.show(true);
     const ac = new AbortController();
@@ -306,8 +306,8 @@ export class DeployController implements vscode.Disposable {
         },
         (progress, token) => {
           token?.onCancellationRequested(() => ac.abort(new vscode.CancellationError()));
-          return buildAndDeploy(client, p, {
-            restart, build, signal: ac.signal,
+          return deployPlugin(client, p, {
+            restart: req.full ? 'loader' : undefined, build, signal: ac.signal,
             log: line => this.out.appendLine(line),
             onPhase: phase => {
               this.running!.phase = phase;
@@ -339,7 +339,7 @@ export class DeployController implements vscode.Disposable {
     }
   }
 
-  private report(p: WorkspacePlugin, step: BuildStep, auto: boolean): void {
+  private report(p: WorkspacePlugin, step: DeployStep, auto: boolean): void {
     const secs = (step.totalMs / 1000).toFixed(1);
     const how = step.via === 'loader' ? ' (loader restarted)' : '';
     this.out.appendLine(`Deployed ${p.name} in ${secs} s${how}`);

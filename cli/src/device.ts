@@ -1,7 +1,7 @@
 import * as path from 'path';
 import type { Health, RestartMode } from '@decky-toolkit/client/api';
 import { DeckyClient, DeviceAddress, describeError, isConnectionError, isRejection, outdatedDevice } from '@decky-toolkit/client/client';
-import { DeployStep, deployPlugin, readWorkspacePlugin } from '@decky-toolkit/client/deploy';
+import { BUILD_MODES, BuildMode, DeployStep, deployPlugin, readWorkspacePlugin } from '@decky-toolkit/client/deploy';
 import * as identityFile from '@decky-toolkit/client/identity';
 
 export const PAIR_HINT = 'run `decky-toolkit pair`';
@@ -103,8 +103,15 @@ export function parseRestart(value: unknown): RestartMode | undefined {
   throw new InvalidOption(`restart must be one of ${RESTART_MODES.join(', ')}`);
 }
 
+export function parseBuild(value: unknown): BuildMode {
+  if (value === undefined) return 'auto';
+  if (BUILD_MODES.includes(value as BuildMode)) return value as BuildMode;
+  throw new InvalidOption(`build must be one of ${BUILD_MODES.join(', ')}`);
+}
+
 export interface DeployResult {
   plugin: { name: string; dir: string; version: string | null };
+  build: DeployStep['build'];
   restart: RestartMode;
   restarted: RestartMode;
   via: DeployStep['via'];
@@ -120,15 +127,14 @@ export interface DeployResult {
   device: { host: string; port: number; pluginVersion?: string };
 }
 
-/** The shared pipeline, into the dir the device already uses for a plugin of this name. */
-export async function deploy(dir: string, restart: RestartMode | undefined, log: (line: string) => void): Promise<DeployResult> {
+export async function deploy(dir: string, restart: RestartMode | undefined, build: BuildMode, log: (line: string) => void): Promise<DeployResult> {
   const root = path.resolve(dir);
   const [p, { file, client }] = await Promise.all([readWorkspacePlugin(root), pairedClient()]);
   if (!p) throw new Error(`${root} has no readable plugin.json`);
-  const s = await deployPlugin(client, p, { restart, log, matchInstalledByName: true });
+  const s = await deployPlugin(client, p, { restart, build, log });
   return {
     plugin: { name: p.name, dir: s.dir, version: s.installed.version ?? null },
-    restart: s.restart, restarted: s.restarted, via: s.via, files: s.files, zipBytes: s.zipBytes, uploadMs: s.uploadMs,
+    build: s.build, restart: s.restart, restarted: s.restarted, via: s.via, files: s.files, zipBytes: s.zipBytes, uploadMs: s.uploadMs,
     reloaded: s.confirm?.confirmed ?? null, ...(s.confirm ? { reload: s.confirm.detail } : {}), nudged: !!s.confirm?.nudged, totalMs: s.totalMs,
     device: { host: file.device.host, port: file.device.port, ...(s.health ? { pluginVersion: s.health.version } : {}) },
   };

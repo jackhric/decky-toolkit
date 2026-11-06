@@ -7,7 +7,8 @@ sidebar:
 
 The extension finds Decky plugins in your workspace: every folder with a `plugin.json`, in a workspace
 folder or up to two levels below it. It installs to `~/homebrew/plugins/<folder name>` (the
-`decky-toolkit.pluginDirName` setting overrides the name). Plugins are expected to follow the
+`decky-toolkit.pluginDirName` setting overrides the name); a plugin the device already has under the same
+`plugin.json` name is updated where it is. Plugins are expected to follow the
 [decky-plugin-template](https://github.com/SteamDeckHomebrew/decky-plugin-template) layout.
 
 Turn on [deploy on change](#deploy-on-change) and every save reloads your plugin. To deploy on demand, press

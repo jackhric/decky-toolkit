@@ -25,7 +25,7 @@ const outfile = path.join(root, 'out', 'smoke.cjs');
 await esbuild.build({
   stdin: {
     contents: "export * from './src/extension'; export * from './src/actionsTree'; export * from './src/pluginsTree'; " +
-      "export * from './src/pluginDeploy'; export * from '../packages/client/src/deploy'; export * from '../packages/client/src/stage'; export { AUTO_DEPLOY_DEBOUNCE_MS } from './src/deploy'; " +
+      "export * from '../packages/client/src/deploy'; export * from '../packages/client/src/stage'; export { AUTO_DEPLOY_DEBOUNCE_MS } from './src/deploy'; " +
       "export * from './src/controllers'; export * from './src/navigation'; export { DeckyClient, HttpError, eventTimings } from '../packages/client/src/client'; " +
       "export * from './src/games'; export * from './src/remoteFs'; export * from './src/discovery'; export * from '../packages/client/src/transport'; " +
       "export { pairingCode } from './src/pairing'; export { DeviceProxy } from './src/proxy'; export { Connection } from './src/connection'; " +
@@ -1444,17 +1444,24 @@ await check('auto-deploy on a device with live sync: first change deploys, later
   return `deploy, then push ${device.filePuts.map(f => f.path).join(' + ')} and a frontend reload ("${status}"), plugin.json → deploy`;
 });
 
-await check('decky-toolkit.pluginDirName overrides the deploy dir', async () => {
+await check('decky-toolkit.pluginDirName names a first install; an installed plugin of the same name keeps its dir', async () => {
   settings.pluginDirName = 'other-dir';
   configEmitter.fire({ affectsConfiguration: s => s === 'decky-toolkit.pluginDirName' || s === 'decky-toolkit' });
   await settle(300);
   assert.match((await actionsProvider().getChildren())[1].tooltip, /~\/homebrew\/plugins\/other-dir/);
-  settings.pluginDirName = '';
   settings['deploy.build'] = 'never';
+  await run('decky-toolkit.deploy');
+  assert.deepEqual([device.installs.at(-1).dir, device.installs.at(-1).restart], ['my-plugin', 'plugin'], 'updated where the device has it');
+  const kept = plugins;
+  plugins = plugins.filter(x => x.name !== 'My Plugin');
+  await run('decky-toolkit.deploy');
+  assert.deepEqual([device.installs.at(-1).dir, device.installs.at(-1).restart], ['other-dir', 'loader'], 'a first install goes to the setting');
+  plugins = kept;
+  settings.pluginDirName = '';
   await openWorkspace();
   assert.equal(statusButton().visible, false, 'button hidden without a plugin');
   assert.equal((await actionsProvider().getChildren())[1].description, 'no plugin.json in workspace');
-  return 'tooltip names other-dir; closing the folder hides the button';
+  return 'tooltip names other-dir; installed → my-plugin, first install → other-dir; closing the folder hides the button';
 });
 
 await check('Screen and MCP leaves: snapshot, MCP URL', async () => {
