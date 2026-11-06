@@ -291,10 +291,9 @@ function ConnectionCard({ client, status, busy, onDisconnect }: { client: Connec
     >
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ ...line, fontSize: "20px", fontWeight: 600, color: "#fff", marginTop: 0 }}>{client.name}</div>
-        <div style={line}>
-          {connectedFor(client.connected_since, now)}
-          {client.remote && ` · from ${client.remote}`}
-        </div>
+        {/* Too narrow for "connected … · from …" on one line next to the button. */}
+        <div style={line}>{connectedFor(client.connected_since, now)}</div>
+        {client.remote && <div style={line}>from {client.remote}</div>}
         {stream && <div style={line}>streaming{stream.fps > 0 && ` ${Math.round(stream.fps)} fps`}</div>}
       </div>
       <DialogButton
