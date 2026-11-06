@@ -3,6 +3,8 @@ import { homedir } from 'os';
 import * as path from 'path';
 import { ActionsTreeProvider, WORKSPACE_PLUGIN } from './actionsTree';
 import { DeckyClient, describeError, isMissingRoute } from '@decky-toolkit/client/client';
+import * as identityFile from '@decky-toolkit/client/identity';
+import { McpConfig, formatMcpConfig, mergeMcpConfig, parseMcpConfig, rebaseMcpConfig } from '@decky-toolkit/client/mcpConfig';
 import { Connection, LinkState, linkSuffix } from './connection';
 import { ControllerWatcher, ControllersTreeProvider, addVirtualController, removeVirtualController } from './controllers';
 import { DeployController, PluginWorkspace } from './deploy';
@@ -396,11 +398,6 @@ async function evaluate(c: Connection, out: vscode.OutputChannel, ctx: vscode.Ex
   }
 }
 
-// The CLI reads the same per-machine identity file, so the entry needs no URL or headers and survives editor restarts.
-const MCP_ENTRY = { command: 'npx', args: ['-y', 'decky-toolkit', 'mcp'] };
-
-type McpConfig = { mcpServers?: Record<string, unknown>; [k: string]: unknown };
-
 function mcpConfigUri(): vscode.Uri | undefined {
   const folder = vscode.workspace.workspaceFolders?.[0];
   return folder && vscode.Uri.joinPath(folder.uri, '.mcp.json');
@@ -415,37 +412,26 @@ async function readMcpConfig(uri: vscode.Uri): Promise<McpConfig | undefined> {
     if (e instanceof vscode.FileSystemError) return undefined;
     throw e;
   }
-  try {
-    return JSON.parse(Buffer.from(raw).toString('utf8'));
-  } catch (e) {
-    throw new Error(`existing .mcp.json is not valid JSON: ${describeError(e)}`);
-  }
+  return parseMcpConfig(Buffer.from(raw).toString('utf8'));
 }
 
-async function writeMcpEntry(uri: vscode.Uri, config: McpConfig, entry: Record<string, unknown>): Promise<void> {
-  config.mcpServers = { ...(config.mcpServers ?? {}), decky: entry };
-  await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(config, null, 2) + '\n'));
+async function writeMcpFile(uri: vscode.Uri, config: McpConfig): Promise<void> {
+  await vscode.workspace.fs.writeFile(uri, Buffer.from(formatMcpConfig(config)));
 }
 
+/** The entry runs the CLI, which needs only this machine's identity file; without one, connecting pairs first. */
 async function writeMcpConfig(c: Connection): Promise<void> {
   const uri = mcpConfigUri();
   if (!uri) throw new Error('open a workspace folder first.');
-  if (!(await c.client())) return;
-  await writeMcpEntry(uri, (await readMcpConfig(uri)) ?? {}, MCP_ENTRY);
+  if (!(await identityFile.read()) && !(await c.client())) return;
+  await writeMcpFile(uri, mergeMcpConfig(await readMcpConfig(uri)));
   void vscode.window.showInformationMessage('Decky Toolkit: wrote mcpServers.decky to .mcp.json.');
 }
 
 /** Points a `.mcp.json` written by an earlier session at this window's proxy port, if that moved. */
 export async function refreshMcpConfig(c: Pick<Connection, 'proxy'>): Promise<void> {
   const uri = mcpConfigUri();
-  if (!uri) return;
-  let config: McpConfig | undefined;
-  try {
-    config = await readMcpConfig(uri);
-  } catch {
-    return;
-  }
-  const entry = config?.mcpServers?.decky as Record<string, unknown> | undefined;
-  const url = typeof entry?.url === 'string' ? await c.proxy.rebase(entry.url) : undefined;
-  if (config && entry && url) await writeMcpEntry(uri, config, { ...entry, url });
+  const config = uri && await readMcpConfig(uri).catch(() => undefined);
+  const rebased = config && await rebaseMcpConfig(config, url => c.proxy.rebase(url));
+  if (uri && rebased) await writeMcpFile(uri, rebased);
 }
