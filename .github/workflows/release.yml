@@ -99,9 +99,14 @@ jobs:
           if [[ "$VERSION" == *-* ]]; then prerelease=true; fi
           latest=false
           if [ "$COMPONENT" = plugin ] && [ "$prerelease" = false ]; then latest=true; fi
-          if out=$(gh release view "$tag" --json isDraft 2>&1); then
-            gh release upload "$tag" release/* --clobber
-            gh release edit "$tag" --title "$title" --prerelease="$prerelease" --latest="$latest" --draft=false
+          if out=$(gh release view "$tag" --json isDraft --jq .isDraft 2>&1); then
+            # Releases are immutable once published: a re-run only finishes a draft.
+            if [ "$out" = true ]; then
+              gh release upload "$tag" release/* --clobber
+              gh release edit "$tag" --title "$title" --prerelease="$prerelease" --latest="$latest" --draft=false
+            else
+              echo "::notice::$tag is already published; keeping its assets"
+            fi
           elif [[ "$out" != *"release not found"* ]]; then
             echo "::error::gh release view $tag failed: $out"
             exit 1
