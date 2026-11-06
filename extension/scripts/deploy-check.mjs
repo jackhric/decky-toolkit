@@ -4,8 +4,8 @@
 //   <plugin-root> is a decky-plugin-template checkout named "Decky Toolkit Test" whose src/version.ts
 //   exports VERSION, whose py_modules/testver/__init__.py defines VERSION and whose frontend sets
 //   window.__deckyToolkitTestVersion = VERSION. The script rewrites those files for each round.
-// Set KEEP=1 to leave the plugin installed; otherwise Decky uninstalls it (no loader restart) and
-// ssh removes its logs and settings. Only the full-restart round restarts the loader.
+// Set KEEP=1 to leave the plugin installed; otherwise Decky uninstalls it (no loader restart) and the
+// device_run tool removes its logs and settings. Only the first install and the full-restart round restart the loader.
 import * as esbuild from 'esbuild';
 import { execFileSync } from 'child_process';
 import { readFileSync, writeFileSync } from 'fs';
@@ -18,10 +18,9 @@ const root = path.resolve(here, '..');
 const pluginRoot = process.argv[2];
 const host = process.argv[3] ?? process.env.DECKY_HOST;
 const port = Number(process.argv[4] ?? process.env.DECKY_PORT ?? 8765);
-const sshTarget = process.env.DECKY_SSH ?? (process.env.DECKY_USER && `${process.env.DECKY_USER}@${host}`);
 const identityFile = process.env.DECKY_IDENTITY_FILE;
-if (!identityFile || !pluginRoot || !host || !sshTarget) {
-  console.error('Usage: DECKY_IDENTITY_FILE=<file> DECKY_USER=<ssh user> node scripts/deploy-check.mjs <plugin-root> <host> [port]\n(DECKY_HOST and DECKY_SSH=<user@host> also work)');
+if (!identityFile || !pluginRoot || !host) {
+  console.error('Usage: DECKY_IDENTITY_FILE=<file> node scripts/deploy-check.mjs <plugin-root> <host> [port]  (or set DECKY_HOST)');
   process.exit(2);
 }
 // The identity file (~/.config/decky-toolkit/identity.json: {version, device, key, cert, serverCert}) or the
@@ -38,6 +37,16 @@ await esbuild.build({
 const lib = createRequire(import.meta.url)(outfile);
 const { DeckyClient, isConnectionError, readWorkspacePlugin, deployPlugin, newLines, sleep } = lib;
 const client = new DeckyClient({ host, port }, identity);
+
+/** Runs `command` on the device through the device_run tool (as the desktop user, or root) and returns its stdout. */
+async function deviceRun(command, root = false) {
+  const r = await client.callTool('device_run', { command, root });
+  const text = r.content?.[0]?.text ?? '';
+  if (r.isError) throw new Error(`device_run ${command}: ${text}`);
+  const out = JSON.parse(text);
+  if (out.exit_code !== 0) throw new Error(`device_run ${command}: exit ${out.exit_code}: ${out.stderr}`);
+  return out.stdout;
+}
 
 const verbose = !!process.env.VERBOSE;
 const log = line => { if (verbose) console.log('      ' + line); };
@@ -114,8 +123,7 @@ async function backendVersion() {
 
 const LOADED = /\[loader\]\[INFO\]: Loaded Decky Toolkit Test /;
 const journal = () => client.logTail({ source: 'loader', tail: 300 });
-const backendProcesses = () =>
-  Number(execFileSync('ssh', [sshTarget, "pgrep -fc '^Decky Toolkit Test ' || true"]).toString().trim() || 0);
+const backendProcesses = async () => Number((await deviceRun("pgrep -fc '^Decky Toolkit Test ' || true")).trim() || 0);
 
 async function round(label, v, restart, opts = {}) {
   setVersion(v, opts);
@@ -132,7 +140,7 @@ async function round(label, v, restart, opts = {}) {
   await sleep(6000);
   const loads = newLines(before, await journal()).filter(l => LOADED.test(l)).length;
   const beLater = await backendVersion().catch(e => `error: ${e.message}`);
-  const procs = backendProcesses();
+  const procs = await backendProcesses();
   const listed = (await client.listPlugins()).find(x => x.dir === 'decky-toolkit-test');
   timings.push({ label, via: r.via, deployMs, wallMs: wall, build: r.build, confirm: r.confirm, loads });
   const detail = `via=${r.via} restart=${r.restarted} build=${r.build.ran ? `${r.build.ms} ms (${r.build.reason})` : `skipped (${r.build.reason})`}, ` +
@@ -188,13 +196,14 @@ if (!process.env.KEEP) {
   // Decky's own uninstall stops the backend, unloads the frontend and removes the dir, no restart.
   await check('cleanup: uninstall decky-toolkit-test through Decky', async () => {
     await evaluate("window.DeckyBackend.call('utilities/uninstall_plugin', 'Decky Toolkit Test')");
-    execFileSync('ssh', [sshTarget, 'sudo rm -rf ~/homebrew/plugins/decky-toolkit-test ~/homebrew/logs/decky-toolkit-test ~/homebrew/settings/decky-toolkit-test ~/homebrew/data/decky-toolkit-test']);
+    const homebrew = `${(await deviceRun('printf %s "$HOME"')).trim()}/homebrew`;
+    await deviceRun(`rm -rf ${['plugins', 'logs', 'settings', 'data'].map(d => `'${homebrew}/${d}/decky-toolkit-test'`).join(' ')}`, true);
     const fe = await evaluate("String(window.DeckyPluginLoader.plugins.some(p => p.name === 'Decky Toolkit Test'))");
     if (!/false/.test(fe)) throw new Error(`frontend still lists the plugin (${fe})`);
-    if (backendProcesses()) throw new Error('a backend process is still running');
+    if (await backendProcesses()) throw new Error('a backend process is still running');
     const listed = (await client.listPlugins()).map(p => p.dir);
     if (listed.includes('decky-toolkit-test')) throw new Error(`still listed: ${listed}`);
-    const left = execFileSync('ssh', [sshTarget, 'ls -d ~/homebrew/*/decky-toolkit-test 2>/dev/null || true']).toString().trim();
+    const left = (await deviceRun(`ls -d '${homebrew}'/*/decky-toolkit-test 2>/dev/null || true`)).trim();
     if (left) throw new Error(`left behind: ${left}`);
     return `plugins now: ${listed.join(', ')}`;
   });

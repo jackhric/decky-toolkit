@@ -581,7 +581,8 @@ Install the packaged build with `code --install-extension decky-toolkit-<version
 
 ### Smoke test (no device)
 
-`scripts/smoke.mjs` loads the bundled extension against a stub `vscode` module and a fake device:
+`scripts/smoke.mjs` loads the bundled extension against a stub `vscode` module and a fake device
+(`scripts/smoke/harness.mjs`), then runs the checks in `scripts/smoke/<area>.mjs` in order:
 
 ```sh
 pnpm run smoke
