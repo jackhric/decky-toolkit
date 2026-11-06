@@ -16,8 +16,8 @@ Turn on [deploy on change](#deploy-on-change) and every save reloads your plugin
 ## What a deploy does
 
 1. **Build, only if needed.** With `decky-toolkit.deploy.build` set to `auto` (the default), `pnpm run build`
-   runs only when a file under `src/` (or `tsconfig.json` / `rollup.config.*`) is newer than `dist/index.js`.
-   `main.py` and `py_modules/` never need a build.
+   runs only when a file under `src/` (or `tsconfig.json` / `rollup.config.*` / `vite.config.*`) is newer than
+   `dist/index.js`. `main.py` and `py_modules/` never need a build.
 2. **Stage and zip** what the template ships (`dist`, `plugin.json`, `package.json`, `main.py`, `py_modules`,
    `defaults`, `assets`, …), without `node_modules`, `__pycache__` and `.git`.
 3. **Upload** to the device, which swaps the plugin directory atomically.
