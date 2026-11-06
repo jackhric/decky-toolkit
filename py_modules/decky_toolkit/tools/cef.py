@@ -1,15 +1,9 @@
 """Tools that drive the Steam client through its CEF DevTools port."""
-import json
 from typing import Any
 
 from ..steam import cdp
+from ..steam.toast import toast
 from . import ToolRegistry
-
-
-async def toast(title: str, body: str, duration_ms: int = 5000) -> Any:
-    js = ("(async () => { const t = window.DeckyPluginLoader?.toaster; if (!t) throw new Error('DeckyPluginLoader.toaster missing');"
-          f" t.toast({{ title: {json.dumps(title)}, body: {json.dumps(body)}, duration: {int(duration_ms)} }}); return 'ok'; }})()")
-    return await cdp.evaluate_in(None, js)
 
 
 def register(reg: ToolRegistry) -> None:

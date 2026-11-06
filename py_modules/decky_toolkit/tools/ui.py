@@ -6,12 +6,11 @@ from typing import Any
 
 from ..media.capture import ScreenCapturer
 from ..steam import cdp
-from ..input.activity import InputActivity
+from ..input.activity import AT_DEVICE_SECONDS, InputActivity, someone_at_device
 from ..steam.ui import ACTIONS, QUERY_TARGET, QUICK_ACCESS_TABS, UiInspector
 from . import ToolRegistry
 
 CAPTURE_SETTLE_SECONDS = 0.7
-AT_DEVICE_SECONDS = 60
 
 
 class Orientation:
@@ -22,8 +21,7 @@ class Orientation:
 
     async def __call__(self) -> dict[str, Any]:
         state = await self.inspector.snapshot()
-        last = self.activity.snapshot()["last"]
-        state["someone_at_device"] = bool(last and last["seconds_ago"] <= AT_DEVICE_SECONDS)
+        state["someone_at_device"] = someone_at_device(self.activity.snapshot())
         return state
 
     @staticmethod
