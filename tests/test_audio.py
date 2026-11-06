@@ -12,7 +12,7 @@ from decky_toolkit import audio as audio_mod  # noqa: E402
 from decky_toolkit.audio import CHUNK_BYTES, FORMAT, MAX_BACKLOG_CHUNKS, AudioCapturer, AudioDisabled  # noqa: E402
 from decky_toolkit.settings import Settings  # noqa: E402
 
-from test_routes import TOKEN, H, FakeCapturer, with_server  # noqa: E402
+from test_routes import H, FakeCapturer, with_server  # noqa: E402
 
 LOG = logging.getLogger("t")
 
@@ -58,7 +58,7 @@ def chunk(i: int) -> bytes:
 
 def test_chunking_and_fan_out():
     async def run():
-        cap = Cap(Settings(token=TOKEN))
+        cap = Cap(Settings())
         a, b = cap.subscribe(), cap.subscribe()
         fa, fb = asyncio.ensure_future(a.__anext__()), asyncio.ensure_future(b.__anext__())
         await asyncio.sleep(0.02)
@@ -95,7 +95,7 @@ def test_chunking_and_fan_out():
 
 def test_idle_stop_and_disable():
     async def run():
-        settings = Settings(token=TOKEN)
+        settings = Settings()
         cap = Cap(settings, idle_stop=0.05)
         sub = cap.subscribe()
         first = asyncio.ensure_future(sub.__anext__())
@@ -128,7 +128,7 @@ def test_idle_stop_and_disable():
 
 def test_falls_back_to_gamescope_sink():
     async def run():
-        cap = Cap(Settings(token=TOKEN))
+        cap = Cap(Settings())
         sub = cap.subscribe()
         nxt = asyncio.ensure_future(sub.__anext__())
         await asyncio.sleep(0.02)
@@ -213,7 +213,7 @@ def test_audio_ws_auth_and_404():
             assert r.status == 401
         async with s.get(f"{base}/audio", headers={**H, "Origin": "http://evil.example"}) as r:
             assert r.status == 403
-    asyncio.run(with_server(run, audio=FakeAudio(Settings(token=TOKEN))))
+    asyncio.run(with_server(run, audio=FakeAudio(Settings())))
 
     async def missing(s, base):
         async with s.get(f"{base}/audio", headers=H) as r:

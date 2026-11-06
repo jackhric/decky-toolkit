@@ -1,7 +1,6 @@
 import json
 import os
-import secrets
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 
 DEFAULT_PORT = 8765
 STREAM_LIMITS = {"fps": [1, 60], "quality": [10, 100], "widths": [0, 1600, 1280, 960, 640], "audio": [False, True]}
@@ -13,7 +12,6 @@ class Settings:
     enabled: bool = True
     bind: str = "0.0.0.0"
     port: int = DEFAULT_PORT
-    token: str = field(default_factory=lambda: secrets.token_urlsafe(32))
     stream_fps: int = 30
     stream_quality: int = 70
     stream_width: int = 0  # 0 = native resolution
@@ -38,7 +36,6 @@ class Settings:
         tmp = path + ".tmp"
         with open(tmp, "w") as f:
             json.dump(asdict(self), f, indent=2)
-        # The token is a credential: keep the file owner-only readable.
         os.chmod(tmp, 0o600)
         os.replace(tmp, path)
 

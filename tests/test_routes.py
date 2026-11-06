@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
 from aiohttp import ClientSession, ClientTimeout, CookieJar, FormData, web  # noqa: E402
 
-from decky_toolkit.auth import TokenAuth  # noqa: E402
+from certauth import H, PUBLIC_KEY, stub_auth  # noqa: E402
 from decky_toolkit.capture import ScreenCapturer  # noqa: E402
 from decky_toolkit.http import Api  # noqa: E402
 from decky_toolkit.pairing import PairingRequests  # noqa: E402
@@ -23,8 +23,6 @@ from decky_toolkit.protocol import McpServer  # noqa: E402
 from decky_toolkit.settings import Settings  # noqa: E402
 from decky_toolkit.tools import ToolRegistry, build_registry  # noqa: E402
 
-TOKEN = "test-token"
-H = {"Authorization": f"Bearer {TOKEN}"}
 LOG = logging.getLogger("t")
 
 
@@ -36,8 +34,7 @@ def decky_home(tmp_path, monkeypatch):
 
 
 async def with_server(fn, capturer=None, **api_kwargs):
-    api = Api(auth=TokenAuth(TOKEN), mcp=McpServer(ToolRegistry(), LOG), capturer=capturer, logger=LOG,
-              base_url=lambda: "http://10.1.2.3:8765", **api_kwargs)
+    api = Api(auth=stub_auth(), mcp=McpServer(ToolRegistry(), LOG), capturer=capturer, logger=LOG, **api_kwargs)
     runner = web.AppRunner(api.build_app())
     await runner.setup()
     await web.TCPSite(runner, "127.0.0.1", 0).start()
@@ -59,11 +56,11 @@ def write_log(home: Path, plugin: str, name: str, lines: list[str], mtime: float
     return p
 
 
-VS = {"client_name": "VS Code on box", "client_kind": "vscode"}
+VS = {"client_name": "VS Code on box", "client_kind": "vscode", "public_key": PUBLIC_KEY}
 
 
-def test_pair_request_approve_delivers_token_once():
-    pairing = PairingRequests()
+def test_pair_request_approve_delivers_credentials_once():
+    pairing = PairingRequests("")
 
     async def run(s, base):
         async with s.get(f"{base}/pair") as r:
@@ -86,17 +83,21 @@ def test_pair_request_approve_delivers_token_once():
         poll = asyncio.ensure_future(s.get(f"{base}/pair/request/{rid}?wait=5"))
         await asyncio.sleep(0.2)
         assert not poll.done(), "a long poll waits for the decision"
-        pairing.approve(rid)
+        pairing.approve(rid, "CLIENT CERT")
         async with await asyncio.wait_for(poll, 2) as r:
-            assert await r.json() == {"status": "approved", "token": TOKEN, "url": "http://10.1.2.3:8765", "api_version": 1}
+            assert await r.json() == {"status": "approved", "client_cert": "CLIENT CERT", "server_cert": "",
+                                      "api_version": 2}
         async with s.get(f"{base}/pair/request/{rid}") as r:
             assert await r.json() == {"status": "approved"}
         async with s.get(f"{base}/pair/request/nope") as r:
             assert r.status == 404
         async with s.post(f"{base}/pair/request", json={"client_name": "", "client_kind": "vscode"}) as r:
             assert r.status == 400
-        async with s.post(f"{base}/pair/request", json={"client_name": "x", "client_kind": "toaster"}) as r:
+        async with s.post(f"{base}/pair/request", json={**VS, "client_kind": "toaster"}) as r:
             assert r.status == 400
+        for key in (None, "", "nope", PUBLIC_KEY.replace("PUBLIC KEY", "CERTIFICATE"), PUBLIC_KEY[:60] + "A" + PUBLIC_KEY[61:]):
+            async with s.post(f"{base}/pair/request", json={**VS, "public_key": key}) as r:
+                assert r.status == 400, key
         async with s.post(f"{base}/pair/request", data=b"nope") as r:
             assert r.status == 400
         async with s.get(f"{base}/pair/request/{rid}?wait=soon") as r:
@@ -105,7 +106,7 @@ def test_pair_request_approve_delivers_token_once():
 
 
 def test_pair_request_deny_cancel_and_limits():
-    pairing = PairingRequests()
+    pairing = PairingRequests("")
 
     async def run(s, base):
         async with s.post(f"{base}/pair/request", json=VS) as r:
@@ -143,7 +144,7 @@ def test_root_is_plain_text_and_viewer_is_gone():
     async def run(s, base):
         async with s.get(base + "/") as r:
             assert r.status == 200 and "VS Code" in await r.text()
-        for path in ("/viewer", "/viewer?token=" + TOKEN):
+        for path in ("/viewer", "/viewer?token=test-token"):
             async with s.get(base + path, allow_redirects=False) as r:
                 assert r.status == 404 and "Set-Cookie" not in r.headers, path
     asyncio.run(with_server(run))
@@ -232,7 +233,7 @@ def test_plugins_install_list_and_bearer_only(decky_home):
         return f
 
     async def run(s, base):
-        async with s.post(f"{base}/plugins/install?restart=none", data=form(), cookies={"decky_toolkit_token": TOKEN}) as r:
+        async with s.post(f"{base}/plugins/install?restart=none", data=form(), cookies={"decky_toolkit_token": "test-token"}) as r:
             assert r.status == 401
         async with s.post(f"{base}/plugins/install?restart=bogus", data=form(), headers=H) as r:
             assert r.status == 400
@@ -253,7 +254,7 @@ def test_plugins_install_list_and_bearer_only(decky_home):
 
 class FakeCapturer(ScreenCapturer):
     def __init__(self, running: bool):
-        self.settings = Settings(token=TOKEN)
+        self.settings = Settings()
         self.saved = 0
         self.restarts = 0
         self.fake_running = running
@@ -309,7 +310,7 @@ def test_stream_settings_bearer_only_and_origin():
     cap = FakeCapturer(running=False)
 
     async def run(s, base):
-        async with s.get(f"{base}/stream/settings", cookies={"decky_toolkit_token": TOKEN}) as r:
+        async with s.get(f"{base}/stream/settings", cookies={"decky_toolkit_token": "test-token"}) as r:
             assert r.status == 401, "the old viewer cookie authorises nothing"
         async with s.get(f"{base}/stream/settings", headers=H) as r:
             assert r.status == 200
@@ -371,7 +372,7 @@ def test_restart_keeps_subscribers_attached():
             await asyncio.sleep(0.05)
 
     async def run():
-        cap = Cap(lambda: Settings(token=TOKEN), LOG)
+        cap = Cap(lambda: Settings(), LOG)
         agen = cap.subscribe()
         first = asyncio.ensure_future(agen.__anext__())
         await asyncio.sleep(0.01)

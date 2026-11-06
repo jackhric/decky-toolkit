@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
 from aiohttp import ClientSession, ClientTimeout, WSMsgType, WSServerHandshakeError, web  # noqa: E402
 
-from decky_toolkit.auth import TokenAuth  # noqa: E402
+from certauth import H, stub_auth  # noqa: E402
 from decky_toolkit.http import Api  # noqa: E402
 from decky_toolkit.input import keymap, uinput  # noqa: E402
 from decky_toolkit.input.service import InputDisabled, InputService, InputUnavailable, pad_values  # noqa: E402
@@ -19,8 +19,6 @@ from decky_toolkit.protocol import McpServer  # noqa: E402
 from decky_toolkit.settings import Settings  # noqa: E402
 from decky_toolkit.tools import ToolRegistry, build_registry  # noqa: E402
 
-TOKEN = "test-token"
-H = {"Authorization": f"Bearer {TOKEN}"}
 LOG = logging.getLogger("t")
 
 
@@ -125,7 +123,7 @@ class FakePad:
 
 
 def make_service(tmp_path, *, ei_socket=True, uinput_ok=True, enabled=True, fail_ei=False, pad_idle=60.0):
-    settings = Settings(token=TOKEN, input_enabled=enabled)
+    settings = Settings(input_enabled=enabled)
     if ei_socket:
         (tmp_path / "gamescope-0-ei").touch()
     backends: list[FakeBackend] = []
@@ -267,7 +265,7 @@ def test_gamepad_removed_after_idle(tmp_path):
 
 
 async def with_server(fn, svc):
-    api = Api(auth=TokenAuth(TOKEN), mcp=McpServer(ToolRegistry(), LOG), capturer=None, logger=LOG,
+    api = Api(auth=stub_auth(), mcp=McpServer(ToolRegistry(), LOG), capturer=None, logger=LOG,
               input_service=svc)
     runner = web.AppRunner(api.build_app())
     await runner.setup()
@@ -288,7 +286,7 @@ def test_input_settings_bearer_only(tmp_path):
             assert r.status == 401
         async with s.get(f"{base}/input/settings", headers=H) as r:
             assert await r.json() == {"enabled": False, "backend": "ei", "available": True, "reason": None}
-        async with s.put(f"{base}/input/settings", json={"enabled": True}, cookies={"decky_toolkit_token": TOKEN}) as r:
+        async with s.put(f"{base}/input/settings", json={"enabled": True}, cookies={"decky_toolkit_token": "test-token"}) as r:
             assert r.status == 401, "the old viewer cookie authorises nothing"
         async with s.put(f"{base}/input/settings", json={"enabled": True}, headers=H) as r:
             assert r.status == 200 and (await r.json())["enabled"] is True

@@ -1,9 +1,12 @@
-"""Pairing requests: a client asks for the token, the device owner allows or denies it in the Decky panel."""
+"""Pairing requests: a client asks for a certificate, the device owner allows or denies it in the Decky panel."""
 import asyncio
+import hashlib
 import secrets
 import time
 from dataclasses import dataclass, field
 from typing import Callable
+
+from .tls import der_to_pem, parse_public_key, pem_to_der
 
 CLIENT_KINDS = ("vscode", "mcp", "other")
 MAX_PENDING = 10
@@ -19,6 +22,12 @@ POLL_AFTER_MS = 1000
 OnChange = Callable[[str, "PairingRequest | None"], None]
 
 
+def pairing_code(server_cert_der: bytes, client_spki_der: bytes, request_id: str) -> str:
+    """Both ends derive this from what they saw, so a relay that swaps either key shows a different code."""
+    digest = hashlib.sha256(server_cert_der + client_spki_der + request_id.encode()).digest()
+    return f"{int.from_bytes(digest[:4], 'big') % 10000:04d}"
+
+
 class PairingLimit(Exception):
     """Too many pending requests overall or from one address."""
 
@@ -29,12 +38,14 @@ class PairingRequest:
     code: str
     client_name: str
     client_kind: str
+    public_key: str
     remote: str
     created_at: float
     last_poll: float
     status: str = "pending"
     resolved_at: float | None = None
-    token_delivered: bool = False
+    client_cert: str | None = None
+    credentials_delivered: bool = False
     waiters: int = 0
     changed: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
 
@@ -46,7 +57,10 @@ class PairingRequest:
 
 
 class PairingRequests:
-    def __init__(self, clock: Callable[[], float] = time.monotonic, on_change: OnChange | None = None):
+    def __init__(self, server_cert: str = "", clock: Callable[[], float] = time.monotonic,
+                 on_change: OnChange | None = None):
+        self.server_cert = server_cert
+        self._server_cert_der = pem_to_der(server_cert, "CERTIFICATE") if server_cert else b""
         self.clock = clock
         self.on_change = on_change
         self._requests: dict[str, PairingRequest] = {}
@@ -65,7 +79,7 @@ class PairingRequests:
     def get(self, request_id: str) -> PairingRequest | None:
         return self._requests.get(request_id)
 
-    def create(self, client_name: object, client_kind: object, remote: str) -> PairingRequest:
+    def create(self, client_name: object, client_kind: object, public_key: object, remote: str) -> PairingRequest:
         if not isinstance(client_name, str) or not client_name.strip():
             raise ValueError("client_name must be a non-empty string")
         client_name = " ".join(client_name.split())
@@ -73,6 +87,7 @@ class PairingRequests:
             raise ValueError(f"client_name must be at most {MAX_NAME_LEN} characters")
         if client_kind not in CLIENT_KINDS:
             raise ValueError(f"client_kind must be one of {', '.join(CLIENT_KINDS)}")
+        spki = parse_public_key(public_key)
         pending = self.pending()
         # A client that retries (restart, reload) replaces its own request instead of piling up codes.
         replaced = next((r for r in pending if r.remote == remote and r.client_name == client_name), None)
@@ -84,13 +99,11 @@ class PairingRequests:
             raise PairingLimit("too many pending pairing requests from this address")
         if replaced:
             self._drop(replaced)
-        taken = {r.code for r in pending}
-        code = f"{secrets.randbelow(10000):04d}"
-        while code in taken:
-            code = f"{secrets.randbelow(10000):04d}"
         now = self.clock()
-        req = PairingRequest(id=secrets.token_urlsafe(16), code=code, client_name=client_name,
-                             client_kind=client_kind, remote=remote, created_at=now, last_poll=now)
+        request_id = secrets.token_urlsafe(16)
+        req = PairingRequest(id=request_id, code=pairing_code(self._server_cert_der, spki, request_id),
+                             client_name=client_name, client_kind=client_kind,
+                             public_key=der_to_pem(spki, "PUBLIC KEY"), remote=remote, created_at=now, last_poll=now)
         self._requests[req.id] = req
         self._notify("create", req)
         return req
@@ -114,19 +127,24 @@ class PairingRequests:
             req.waiters -= 1
             req.last_poll = self.clock()
 
-    def _resolve(self, request_id: str, status: str) -> PairingRequest:
+    def pending_request(self, request_id: str) -> PairingRequest:
         req = self._requests.get(request_id)
         if req is None:
             raise ValueError("unknown or expired pairing request")
         if req.status != "pending":
             raise ValueError(f"pairing request already {req.status}")
+        return req
+
+    def _resolve(self, request_id: str, status: str) -> PairingRequest:
+        req = self.pending_request(request_id)
         req.status = status
         req.resolved_at = self.clock()
         req.changed.set()
         self._notify("approve" if status == "approved" else "deny", req)
         return req
 
-    def approve(self, request_id: str) -> PairingRequest:
+    def approve(self, request_id: str, client_cert: str) -> PairingRequest:
+        self.pending_request(request_id).client_cert = client_cert
         return self._resolve(request_id, "approved")
 
     def deny(self, request_id: str) -> PairingRequest:
@@ -144,11 +162,11 @@ class PairingRequests:
         self._notify("cancel", req)
         return True
 
-    def claim_token(self, req: PairingRequest) -> bool:
+    def claim_credentials(self, req: PairingRequest) -> bool:
         """True exactly once per approved request."""
-        if req.status != "approved" or req.token_delivered:
+        if req.status != "approved" or req.credentials_delivered:
             return False
-        req.token_delivered = True
+        req.credentials_delivered = True
         return True
 
     def prune(self) -> int:

@@ -4,7 +4,6 @@ import json
 import logging
 import os
 import tempfile
-from typing import Callable
 
 from aiohttp import web
 
@@ -12,7 +11,7 @@ from . import audit, cdp, games, logs
 from .identity import identity
 from .apps import Apps
 from .audio import FORMAT as AUDIO_FORMAT, AudioCapturer, AudioDisabled, AudioUnavailable
-from .auth import TokenAuth
+from .auth import CertAuth
 from .capture import BOUNDARY, CaptureUnavailable, ScreenCapturer
 from .console import DEFAULT_LEVEL, ConsoleCollector
 from .controllers import ControllerService
@@ -25,21 +24,18 @@ from .tools import plugins
 from .tools.system import list_plugins, schedule_loader_restart
 from .ui import UiNavigator
 
-API_VERSION = 1
+API_VERSION = 2
 LOG_KEEPALIVE_SECONDS = 15.0
 INPUT_REFUSED = 4003
 AUDIO_REFUSED = 4003
 FOCUS_REFRESH_SECONDS = 3.0
-
-BaseUrl = Callable[[], str]
-
 
 def _error(status: int, message: str) -> web.Response:
     return web.json_response({"error": message}, status=status)
 
 
 class Api:
-    def __init__(self, *, auth: TokenAuth, mcp: McpServer, capturer: ScreenCapturer | None, logger: logging.Logger, pairing: PairingRequests | None = None, base_url: BaseUrl | None = None, log_keepalive: float = LOG_KEEPALIVE_SECONDS,
+    def __init__(self, *, auth: CertAuth, mcp: McpServer, capturer: ScreenCapturer | None, logger: logging.Logger, pairing: PairingRequests | None = None, log_keepalive: float = LOG_KEEPALIVE_SECONDS,
                  input_service: InputService | None = None, audio: AudioCapturer | None = None,
                  controllers: ControllerService | None = None, ui: UiNavigator | None = None,
                  console: ConsoleCollector | None = None):
@@ -48,7 +44,6 @@ class Api:
         self.capturer = capturer
         self.log = logger
         self.pairing = pairing or PairingRequests()
-        self.base_url = base_url
         self.log_keepalive = log_keepalive
         self.input = input_service
         self.audio = audio
@@ -118,7 +113,7 @@ class Api:
 
     def _foreign_origin(self, request: web.Request) -> web.Response | None:
         # The request routes skip the auth middleware, so apply its Origin guard here: otherwise any
-        # web page a LAN browser has open could file requests or read an approved token.
+        # web page a LAN browser has open could file requests or read an approved certificate.
         origin = request.headers.get("Origin")
         if origin and not self.auth.origin_allowed(origin, request.host):
             return _error(403, "origin not allowed")
@@ -134,7 +129,8 @@ class Api:
         if not isinstance(body, dict):
             return _error(400, "expected a JSON object")
         try:
-            req = self.pairing.create(body.get("client_name"), body.get("client_kind", "other"), request.remote or "?")
+            req = self.pairing.create(body.get("client_name"), body.get("client_kind", "other"), body.get("public_key"),
+                                      request.remote or "?")
         except ValueError as e:
             return _error(400, str(e))
         except PairingLimit as e:
@@ -158,11 +154,11 @@ class Api:
         if req is None:
             return _error(404, "unknown or expired pairing request")
         no_store = {"Cache-Control": "no-store"}
-        if self.pairing.claim_token(req):
-            self.log.info("pairing: delivered token to %s (%s)", req.remote, req.client_name)
-            url = self.base_url() if self.base_url else f"{request.scheme}://{request.host}"
-            return web.json_response({"status": "approved", "token": self.auth.token, "url": url,
-                                      "api_version": API_VERSION}, headers=no_store)
+        if self.pairing.claim_credentials(req):
+            self.log.info("pairing: delivered credentials to %s (%s)", req.remote, req.client_name)
+            return web.json_response({"status": "approved", "client_cert": req.client_cert,
+                                      "server_cert": self.pairing.server_cert, "api_version": API_VERSION},
+                                     headers=no_store)
         return web.json_response({"status": req.status}, headers=no_store)
 
     async def handle_pair_cancel(self, request: web.Request) -> web.Response:

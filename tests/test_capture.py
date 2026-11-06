@@ -12,7 +12,6 @@ from decky_toolkit.capture import ScreenCapturer, parse_node_info  # noqa: E402
 from decky_toolkit.settings import Settings  # noqa: E402
 
 from test_audio import FakeProc  # noqa: E402
-from test_routes import TOKEN  # noqa: E402
 
 LOG = logging.getLogger("t")
 
@@ -23,7 +22,7 @@ def part(data: bytes) -> bytes:
 
 class Cap(ScreenCapturer):
     def __init__(self) -> None:
-        super().__init__(lambda: Settings(token=TOKEN), LOG)
+        super().__init__(lambda: Settings(), LOG)
         self.procs: list[FakeProc] = []
 
     def unavailable_reason(self):
