@@ -17,6 +17,7 @@ from .console import DEFAULT_LEVEL, ConsoleCollector
 from .controllers import ControllerService
 from .input.ei import EiError
 from .input.service import InputDisabled, InputService, InputUnavailable
+from .long_lived import LongLivedRequests
 from .pairing import MAX_WAIT_SECONDS, POLL_AFTER_MS, PairingLimit, PairingRequests
 from .protocol import SERVER_INFO, McpServer
 from .record import check_name, recorder_for
@@ -50,31 +51,34 @@ class Api:
         self.controllers = controllers
         self.ui = ui
         self.console = console
+        self.long_lived = LongLivedRequests()
 
     def build_app(self) -> web.Application:
         app = web.Application(client_max_size=64 * 1024 * 1024,
                               middlewares=[self.auth.middleware(), audit.middleware(self.log)])
+        self.long_lived.install(app)
+        live = self.long_lived.track
         app.add_routes([
             web.get("/", self.handle_root),
             web.get("/health", self.handle_health),
             web.post("/pair/request", self.handle_pair_request),
-            web.get("/pair/request/{id}", self.handle_pair_poll),
+            web.get("/pair/request/{id}", live(self.handle_pair_poll)),
             web.delete("/pair/request/{id}", self.handle_pair_cancel),
             web.get("/pair/requests", self.handle_pair_list),
-            web.get("/stream.mjpeg", self.handle_stream),
+            web.get("/stream.mjpeg", live(self.handle_stream)),
             web.get("/frame.jpg", self.handle_frame),
             web.get("/stream/stats", self.handle_stream_stats),
             web.get("/stream/settings", self.handle_stream_settings_get),
             web.put("/stream/settings", self.handle_stream_settings_put),
-            web.get("/audio", self.handle_audio_ws),
+            web.get("/audio", live(self.handle_audio_ws)),
             web.get("/audio/stats", self.handle_audio_stats),
-            web.get("/input", self.handle_input_ws),
+            web.get("/input", live(self.handle_input_ws)),
             web.get("/input/settings", self.handle_input_settings_get),
             web.put("/input/settings", self.handle_input_settings_put),
             web.get("/controllers", self.handle_controllers),
             web.post("/controllers/virtual", self.handle_controller_add),
             web.delete("/controllers/virtual/{id}", self.handle_controller_remove),
-            web.get("/controllers/events", self.handle_controller_events),
+            web.get("/controllers/events", live(self.handle_controller_events)),
             web.get("/ui/routes", self.handle_ui_routes),
             web.post("/ui/navigate", self.handle_ui_navigate),
             web.get("/plugins", self.handle_plugins),
@@ -82,9 +86,9 @@ class Api:
             web.post("/plugins/{dir}/reload", self.handle_plugin_reload),
             web.post("/loader/restart", self.handle_loader_restart),
             web.get("/logs/tail", self.handle_logs_tail),
-            web.get("/logs/stream", self.handle_logs_stream),
+            web.get("/logs/stream", live(self.handle_logs_stream)),
             web.get("/cef/console", self.handle_console),
-            web.get("/cef/console/stream", self.handle_console_stream),
+            web.get("/cef/console/stream", live(self.handle_console_stream)),
             web.get("/apps", self.handle_apps),
             web.get("/apps/{appid}", self.handle_app),
             web.get("/apps/{appid}/dirs", self.handle_app_dirs),

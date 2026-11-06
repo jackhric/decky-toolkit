@@ -21,6 +21,7 @@ from decky_toolkit.http import API_VERSION, Api  # noqa: E402
 from decky_toolkit.identity import identity  # noqa: E402
 from decky_toolkit.controllers import ControllerService  # noqa: E402
 from decky_toolkit.input.service import InputService  # noqa: E402
+from decky_toolkit import loader_fixes  # noqa: E402
 from decky_toolkit.pairing import PairingRequest, PairingRequests  # noqa: E402
 from decky_toolkit.protocol import SERVER_INFO, McpServer  # noqa: E402
 from decky_toolkit.settings import Settings  # noqa: E402
@@ -258,6 +259,7 @@ class Plugin:
     async def _main(self) -> None:
         self.settings = Settings.load(decky.DECKY_PLUGIN_SETTINGS_DIR)
         decky.logger.info("Decky Toolkit starting (python %s)", sys.version.split()[0])
+        loader_fixes.patch_socket_eof(decky.logger)
         threading.Thread(target=_loader_watchdog, name="loader-watchdog", daemon=True).start()
         save = lambda: self.settings.save(decky.DECKY_PLUGIN_SETTINGS_DIR)  # noqa: E731
         self.identity = Identity(decky.DECKY_PLUGIN_SETTINGS_DIR)
