@@ -1,6 +1,6 @@
 {
   "name": "decky-toolkit",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Pair with a Steam Deck running the Decky Toolkit plugin, deploy Decky plugins and give coding agents the device's MCP tools over stdio.",
   "license": "MIT",
   "author": "jackhric",
