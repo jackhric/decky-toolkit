@@ -98,9 +98,9 @@ evdev change or pad add/remove), so it runs only while at least one stream is op
 | Route | Auth | Status | Notes |
 | --- | --- | --- | --- |
 | `GET /api/v1/stream` | client cert | live | `multipart/x-mixed-replace; boundary=frame`, JPEG parts with `Content-Length`. 30 fps default; see `/stream/settings`. A settings change keeps the connection open (about 0.1 s without frames, then the new rate/size). If the pipeline exits or goes 1.5 s without a frame (gamescope's stream renegotiating when Steam Game Recording starts or stops), the device restarts it with backoff and the connection stays open; clients see a pause, not an end. |
-| `GET /api/v1/stream/frame` | client cert | live | One current JPEG frame (`image/jpeg`): the sidebar preview and "Snapshot to file". `503` with a reason if capture is unavailable, `404` without capture. |
-| `GET /api/v1/stream/stats` | client cert | live | `{available, running, subscribers, fps, kbps, frames_total, uptime_s, width, height, settings{fps,quality,width,audio}, limits, restarts, last_restart_reason, node, audio, error}`. `restarts` counts automatic pipeline restarts since the plugin started. `node` (while running, refreshed at most every 5 s) is gamescope's PipeWire node: `{node_id, format, width, height, focus_appid, consumers}`; a nonzero `focus_appid` (set by Steam Game Recording, consumer `steam`) means gamescope paints only that app into the stream, without the Steam overlay. `audio`: see [Audio](#audio) (`null` without audio support). `{available: false, error}` without capture. |
-| `GET /api/v1/stream/settings` | client cert | live | `{fps, quality, width, audio, limits: {fps: [1, 60], quality: [10, 100], widths: [0, 1600, 1280, 960, 640], audio: [false, true]}}`. `width` 0 = native; height follows the aspect ratio. `widths` lists suggested values; any width up to 3840 is accepted. `audio` (default `true`) streams what the device plays on `/audio`. `404` if capture is not configured. |
+| `GET /api/v1/stream/frame` | client cert | live | One current JPEG frame (`image/jpeg`): the sidebar preview and "Snapshot to file". `503` with a reason if capture is unavailable. |
+| `GET /api/v1/stream/stats` | client cert | live | `{available, running, subscribers, fps, kbps, frames_total, uptime_s, width, height, settings{fps,quality,width,audio}, limits, restarts, last_restart_reason, node, audio, error}`. `restarts` counts automatic pipeline restarts since the plugin started. `node` (while running, refreshed at most every 5 s) is gamescope's PipeWire node: `{node_id, format, width, height, focus_appid, consumers}`; a nonzero `focus_appid` (set by Steam Game Recording, consumer `steam`) means gamescope paints only that app into the stream, without the Steam overlay. `audio`: see [Audio](#audio) (`null` without audio support). |
+| `GET /api/v1/stream/settings` | client cert | live | `{fps, quality, width, audio, limits: {fps: [1, 60], quality: [10, 100], widths: [0, 1600, 1280, 960, 640], audio: [false, true]}}`. `width` 0 = native; height follows the aspect ratio. `widths` lists suggested values; any width up to 3840 is accepted. `audio` (default `true`) streams what the device plays on `/audio`. |
 | `PUT /api/v1/stream/settings` | client cert | live | JSON object with any subset of `fps`, `quality`, `width` (integers or integer strings) and `audio` (strict boolean). Out-of-range values are clamped (fps 1-60, quality 10-100, width 0-3840); non-integers, a non-boolean `audio` or unknown fields get `400 {"error"}` and change nothing. Persists to `settings.json` and, if the video pipeline is running and fps/quality/width changed, restarts it. `audio: false` closes every `/audio` socket with `4003` and stops the audio pipeline. Response: same shape as `GET`. Settings are device-wide: one pipeline serves every client, the last change wins. |
 
 ## Audio
@@ -127,7 +127,7 @@ removed 60 s after the last gamepad message.
 
 | Route | Auth | Status | Notes |
 | --- | --- | --- | --- |
-| `GET /api/v1/input/settings` | client cert | live | `{enabled, backend: "ei"\|"uinput"\|null, available, reason}`. `reason` explains `available: false`. `404` on servers without input support. |
+| `GET /api/v1/input/settings` | client cert | live | `{enabled, backend: "ei"\|"uinput"\|null, available, reason}`. `reason` explains `available: false`. |
 | `PUT /api/v1/input/settings` | client cert | live | `{"enabled": true\|false}` (strict boolean; anything else or extra fields: `400`). Persists. Disabling releases every held key/button, removes the keyboard/mouse devices and the implicit `auto` pad (pads from `/controllers/virtual` stay, back at neutral) and closes open `/input` sockets with `4003`. Same shape as `GET`. |
 | `GET /api/v1/input` | client cert | live | WebSocket. Closes with code `4003` (reason text) while input is disabled. On connect and whenever it changes the server sends `{"type":"state","enabled","backend","focus_size":[w,h]}`. Invalid messages get `{"type":"error","message"}`; the socket stays open. Any message with an `id` field is answered with `{"type":"ack","id"}` once injected. Everything the socket still holds (keys, mouse buttons, pad state) is released when it closes. The first input of a session from a new address logs it and emits `decky_toolkit_input_session` (at most once per address per 60 s). Rate cap about 1000 events/s; releases are never dropped. |
 
@@ -167,7 +167,7 @@ Changes arrive as the `controllers` event of the [event stream](#event-stream).
 
 | Route | Auth | Status | Notes |
 | --- | --- | --- | --- |
-| `GET /api/v1/controllers` | client cert | live | `{controllers: [Controller], virtual: [VirtualPad], input_enabled, steam_available}`. `404` on servers without input support. |
+| `GET /api/v1/controllers` | client cert | live | `{controllers: [Controller], virtual: [VirtualPad], input_enabled, steam_available}`. |
 | `POST /api/v1/controllers/virtual` | client cert | live | Body `{"name"?: str}` (optional; empty body allowed). Creates a pad, then waits up to 3 s for Steam Input to list it: `201 {id, name, type: "x360"}`. `503 {"error"}` if Steam Input is unreachable or never lists it (the pad is removed again) or uinput is unavailable; `400` for a bad body or when 4 explicit pads exist. Works while input is disabled (the pad exists; sending events needs input enabled). Explicit pads are never idle-removed. |
 | `DELETE /api/v1/controllers/virtual/{id}` | client cert | live | `200 {"removed": id}`, `404` if unknown. `auto` removes the implicit pad. |
 
@@ -235,8 +235,8 @@ Errors: `400` bad argument, `403` sensitive path, `404` unknown app/path, `502` 
 | `POST /api/v1/fs/rename` | client cert | live | JSON `{from, to, overwrite?}`. Both paths must be inside the write roots (a symlink is moved, not its target); `409` `EEXIST` unless `overwrite`, `404` if `from` or the parent of `to` is missing; refuses a directory holding sensitive files. `{from, to}`. |
 | `DELETE /api/v1/fs` | client cert | live | Query `path`, `confirm=1` required (`400` without). Same rules as the `fs_delete` tool (game dir contents, compatdata/shadercache entries, `userdata/<account>/<appid>`, the plugin runtime dir); elsewhere `403`. `{deleted, files, bytes}`. |
 
-`/fs/*` errors are `{"error", "code"}` with `code` one of `ENOENT` (404), `EACCES` (403), `EEXIST`, `EISDIR`, `ENOTDIR`
-(409), `EFBIG` (413). These routes are audit-logged like every `POST`/`PUT`/`DELETE`.
+`/fs/*` errors carry a `code` (see [Errors](#errors)), which the extension's file system maps to VS Code's file errors.
+These routes are audit-logged like every `POST`/`PUT`/`DELETE`.
 
 ### File writes
 
@@ -496,7 +496,21 @@ The backend sends these to its own panel through the same event hub (`server/eve
 
 ## Errors
 
-Client API routes return `{"error": "<message>"}` (or plain text from aiohttp for unknown paths) with a conventional
-status code: `400` bad input, `403` refused path, `404` unknown thing, `502` Steam UI unreachable, `503` capture or input
-unavailable.
-MCP tool failures are returned inside the JSON-RPC result with `isError: true`, never as HTTP errors.
+Client API routes return `{"error": "<message>"}`, plus `"code"` where the table gives one, from one exception table
+(`py_modules/decky_toolkit/errors.py`) that every route goes through:
+
+| Status | `code` | Meaning |
+|---|---|---|
+| `400` | | bad input |
+| `413` | `EFBIG` | a file over 64 MiB |
+| `403` | `EACCES` | refused path (sensitive file, outside the write roots) |
+| `404` | `ENOENT` | unknown file, plugin or app; routes that look something up by id answer `404 {"error"}` |
+| `409` | `EEXIST`, `EISDIR`, `ENOTDIR` | the path is in the way |
+| `429` | | too many pending pairing requests |
+| `502` | | Steam UI unreachable |
+| `503` | | capture or input unavailable, or remote input disabled |
+| `500` | | any other OS error |
+
+MCP tool failures are returned inside the JSON-RPC result with `isError: true`, never as HTTP errors. The same table
+decides which failures are expected: those come back as `<Exception>: <message>`, everything else (including the `500`
+row) with a traceback.

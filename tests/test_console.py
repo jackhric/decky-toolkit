@@ -9,13 +9,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
-from aiohttp import ClientSession, ClientTimeout, web  # noqa: E402
-
-from certauth import H, stub_auth  # noqa: E402
+from certauth import H  # noqa: E402
 from decky_toolkit.steam.console import ConsoleCollector, parse_event, render_args, render_remote_object  # noqa: E402
-from decky_toolkit.server.http import Api  # noqa: E402
-from decky_toolkit.server.protocol import McpServer  # noqa: E402
-from decky_toolkit.tools import build_registry  # noqa: E402
+from harness import make_registry, with_server  # noqa: E402
 
 LOG = logging.getLogger("t")
 TS = 1_793_000_000_000.0  # ms, as CDP sends
@@ -191,19 +187,6 @@ def test_start_without_cef_does_not_block(monkeypatch):
     asyncio.run(run())
 
 
-async def with_api(fn, console):
-    api = Api(auth=stub_auth(), mcp=McpServer(build_registry(console=console), LOG), capturer=None,
-              logger=LOG)
-    runner = web.AppRunner(api.build_app())
-    await runner.setup()
-    await web.TCPSite(runner, "127.0.0.1", 0).start()
-    try:
-        async with ClientSession(timeout=ClientTimeout(total=5)) as session:
-            await fn(session, f"http://127.0.0.1:{runner.addresses[0][1]}")
-    finally:
-        await runner.cleanup()
-
-
 def test_console_through_mcp():
     c = ConsoleCollector(LOG)
     c.handle_message("SharedJSContext", console_msg("warning", s("decky-toolkit test")))
@@ -222,4 +205,4 @@ def test_console_through_mcp():
         assert [e["text"] for e in json.loads(result["content"][0]["text"])["entries"]] == ["live one"]
         assert (await logs_read(level="nope"))["isError"]
 
-    asyncio.run(with_api(run, c))
+    asyncio.run(with_server(run, mcp=make_registry(console=c)))

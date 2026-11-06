@@ -10,7 +10,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
 from decky_toolkit.steam import cdp  # noqa: E402
-from decky_toolkit.tools import build_registry, plugin_api  # noqa: E402
+from decky_toolkit.tools import plugin_api  # noqa: E402
+from harness import make_registry  # noqa: E402
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "sample_plugin"
 
@@ -24,7 +25,7 @@ def plugins(tmp_path, monkeypatch):
 
 
 def call(name, **arguments):
-    return asyncio.run(build_registry().call(name, arguments))
+    return asyncio.run(make_registry().call(name, arguments))
 
 
 def test_plugin_methods_parses_public_async_methods(plugins):

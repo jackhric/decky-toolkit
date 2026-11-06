@@ -7,7 +7,10 @@ See README.md for setup and docs/reference.md for the tool list and architecture
 
 ## Layout
 - `main.py` — Decky `Plugin` class: settings, aiohttp server lifecycle, frontend-callable methods.
-- `py_modules/decky_toolkit/` — grouped by area; `settings.py` and `diagnostics.py` (thread/task stacks for the
+- `py_modules/decky_toolkit/` — grouped by area; `services.py` (the one `Services` container `main.py` builds and both
+  `server/http.py` `Api` and `tools.build_registry` take; services report changes to its `EventHub` themselves; tests
+  build it with `tests/harness.py`), `errors.py` (the one exception -> status/code table: the routes' error middleware
+  and which tool errors skip the traceback), `settings.py` and `diagnostics.py` (thread/task stacks for the
   `toolkit_stacks` tool, a watchdog thread that logs the loop thread's stack when the event loop stops answering
   for 2 s, SIGUSR1 faulthandler dump to `<runtime dir>/stacks.txt`) and `shell.py` (`device_run`:
   bash as the desktop user, or root with `root: true`; every command logged), `system.py` (`run`, `clean_env`, `tail`, the desktop user,

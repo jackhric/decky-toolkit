@@ -11,10 +11,13 @@ import os
 import shutil
 import signal
 import time
-from typing import Any, AsyncIterator, Callable
+from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 
 from ..settings import STREAM_LIMITS, Settings
 from ..system import clean_env, user_runtime_dir
+
+if TYPE_CHECKING:
+    from ..server.events import EventHub
 
 IDLE_STOP_SECONDS = 10
 BOUNDARY = b"frame"
@@ -85,13 +88,14 @@ def parse_node_info(dump: list[dict[str, Any]]) -> dict[str, Any] | None:
 
 
 class ScreenCapturer:
-    def __init__(self, get_settings: Callable[[], Settings], logger, save_settings: Callable[[], None] | None = None) -> None:
+    def __init__(self, get_settings: Callable[[], Settings], logger, events: "EventHub",
+                 save_settings: Callable[[], None] | None = None) -> None:
         self._get_settings = get_settings
         self._save_settings = save_settings
         self._restarting = False
         # The AudioCapturer, if any: audio is part of the stream settings but runs its own pipeline.
         self.audio = None
-        self.on_settings_change: Callable[[], None] | None = None
+        self.events = events
         self.log = logger
         self._proc: asyncio.subprocess.Process | None = None
         self._reader_task: asyncio.Task[None] | None = None
@@ -229,8 +233,7 @@ class ScreenCapturer:
         if video_changed or audio_changed:
             if self._save_settings:
                 self._save_settings()
-            if self.on_settings_change:
-                self.on_settings_change()
+            self.events.refresh("stream_settings")
         if audio_changed and self.audio is not None:
             await self.audio.apply_enabled()
         if video_changed:

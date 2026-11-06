@@ -12,7 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 from decky_toolkit.games import files as games, vdf  # noqa: E402
 from decky_toolkit.guard import SensitivePath  # noqa: E402
 
-from test_routes import H, with_server  # noqa: E402
+from certauth import H  # noqa: E402
+from harness import with_server  # noqa: E402
 
 ACCOUNT = "95599472"
 PROTON_APP, NATIVE_APP = 2567870, 70300

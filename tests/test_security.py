@@ -14,10 +14,9 @@ from aiohttp import ClientError, ClientSession, ClientTimeout, web  # noqa: E402
 
 from decky_toolkit.server import audit  # noqa: E402
 from certauth import H, PEER_HEADER, stub_auth  # noqa: E402
-from decky_toolkit.server.http import Api  # noqa: E402
-from decky_toolkit.server.protocol import McpServer  # noqa: E402
 from decky_toolkit import guard  # noqa: E402
-from decky_toolkit.tools import ToolRegistry, build_registry, system  # noqa: E402
+from decky_toolkit.tools import ToolRegistry, system  # noqa: E402
+from harness import make_registry, with_server  # noqa: E402
 
 STEAM = "/home/deck/.local/share/Steam"
 
@@ -77,7 +76,7 @@ def test_symlink_to_sensitive_file_is_refused(tmp_path):
 
 
 def call(name, **arguments):
-    return asyncio.run(build_registry().call(name, arguments))
+    return asyncio.run(make_registry().call(name, arguments))
 
 
 def test_file_tools_apply_the_guard(tmp_path):
@@ -121,7 +120,7 @@ def test_confirm_required(monkeypatch):
     res = call("plugin_install", path="/nonexistent.zip", restart="none")
     assert res["isError"] and res["content"][0]["text"].startswith("FileNotFoundError")
 
-    described = {t["name"]: t for t in build_registry().describe()}
+    described = {t["name"]: t for t in make_registry().describe()}
     assert "confirm: true" in described["loader_restart"]["description"]
     assert "confirm: true" in described["plugin_install"]["description"]
     assert described["loader_restart"]["inputSchema"]["required"] == ["confirm"]
@@ -154,27 +153,18 @@ def test_audit_log_lines_over_http(caplog):
     async def cef_targets() -> list:
         return []
 
-    async def run():
-        api = Api(auth=stub_auth(), mcp=McpServer(reg, log), capturer=None, logger=log)
-        runner = web.AppRunner(api.build_app())
-        await runner.setup()
-        await web.TCPSite(runner, "127.0.0.1", 0).start()
-        base = f"http://127.0.0.1:{runner.addresses[0][1]}"
-        try:
-            async with ClientSession(timeout=ClientTimeout(total=5)) as s:
-                for name, args in (("cef_evaluate", {"expression": "document.cookie"}), ("cef_targets", {})):
-                    rpc = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": args}}
-                    async with s.post(f"{base}/mcp", json=rpc, headers=H) as r:
-                        assert not (await r.json())["result"]["isError"]
-                async with s.post(f"{base}/api/v1/plugins/nope/reload", headers=H) as r:
-                    assert r.status in (400, 404, 502)
-                async with s.post(f"{base}/mcp", json={}) as r:
-                    assert r.status == 401
-        finally:
-            await runner.cleanup()
+    async def run(s, base):
+        for name, args in (("cef_evaluate", {"expression": "document.cookie"}), ("cef_targets", {})):
+            rpc = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": args}}
+            async with s.post(f"{base}/mcp", json=rpc, headers=H) as r:
+                assert not (await r.json())["result"]["isError"]
+        async with s.post(f"{base}/api/v1/plugins/nope/reload", headers=H) as r:
+            assert r.status in (400, 404, 502)
+        async with s.post(f"{base}/mcp", json={}) as r:
+            assert r.status == 401
 
     with caplog.at_level(logging.INFO, logger="audit-test"):
-        asyncio.run(run())
+        asyncio.run(with_server(run, mcp=reg, logger=log))
     lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("audit")]
     assert lines == ['audit tool=cef_evaluate origin=127.0.0.1 client="test client" via=mcp args=expression',
                      'audit route=POST /api/v1/plugins/nope/reload origin=127.0.0.1 client="test client" via=http']

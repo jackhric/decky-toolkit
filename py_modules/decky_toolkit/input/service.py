@@ -5,10 +5,13 @@ import os
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Protocol
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Protocol
 
 from . import ei, keymap, uinput
 from ..system import clean_env, desktop_user, user_runtime_dir
+
+if TYPE_CHECKING:
+    from ..server.events import EventHub
 
 PAD_IDLE_SECONDS = 60.0
 MAX_PADS = 4
@@ -32,9 +35,6 @@ PAD_BUTTON_ALIASES = {"tl": "lb", "tr": "rb", "l1": "lb", "r1": "rb", "select": 
 PAD_DPAD = {"dpad_up": (1, -1), "dpad_down": (1, 1), "dpad_left": (0, -1), "dpad_right": (0, 1)}
 PAD_STICKS = {"lx": uinput.ABS_X, "ly": uinput.ABS_Y, "rx": uinput.ABS_RX, "ry": uinput.ABS_RY}
 PAD_TRIGGERS = {"lt": uinput.ABS_Z, "rt": uinput.ABS_RZ}
-
-OnSession = Callable[[str], Awaitable[None]]
-
 
 class InputDisabled(RuntimeError):
     pass
@@ -297,7 +297,7 @@ async def xdotool_focus_size() -> tuple[int, int] | None:
 
 class InputService:
     def __init__(self, get_settings: Callable[[], Any], save_settings: Callable[[], None] | None, logger: logging.Logger,
-                 on_session: OnSession | None = None, *, runtime_dir: Callable[[], str] = user_runtime_dir,
+                 events: "EventHub", *, runtime_dir: Callable[[], str] = user_runtime_dir,
                  make_backend: Callable[[str], Backend] | None = None, make_gamepad: Callable[[], Gamepad] | None = None,
                  uinput_available: Callable[[], bool] = uinput.available,
                  focus_probe: Callable[[], Awaitable[tuple[int, int] | None]] = xdotool_focus_size,
@@ -305,7 +305,7 @@ class InputService:
         self._get_settings = get_settings
         self._save_settings = save_settings
         self.log = logger
-        self.on_session = on_session
+        self.events = events
         self._runtime_dir = runtime_dir
         self._make_backend = make_backend or self._default_backend
         self._make_gamepad = make_gamepad or Gamepad
@@ -372,6 +372,9 @@ class InputService:
         st = self.state()
         for fn in list(self._listeners):
             fn(st)
+        # The panel mirrors a setting that remote clients usually change.
+        self.events.frontend("decky_toolkit_input_state", st["enabled"])
+        self.events.refresh("input_settings")
 
     async def set_enabled(self, enabled: Any) -> dict[str, Any]:
         if self._get_settings().update_input(enabled):
@@ -584,11 +587,7 @@ class InputService:
             last = self._announced.get(s.remote, -ANNOUNCE_EVERY_SECONDS)
             if time.monotonic() - last >= ANNOUNCE_EVERY_SECONDS:
                 self._announced[s.remote] = time.monotonic()
-                if self.on_session:
-                    try:
-                        await self.on_session(s.remote)
-                    except Exception as e:  # noqa: BLE001
-                        self.log.warning("input session callback failed: %s", e)
+                self.events.frontend("decky_toolkit_input_session", s.remote)
 
     # ---- primitives ----
 

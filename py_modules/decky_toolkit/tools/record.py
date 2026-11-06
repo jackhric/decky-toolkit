@@ -2,15 +2,13 @@
 import asyncio
 from typing import Any
 
-from ..media.capture import CaptureUnavailable, ScreenCapturer
+from ..media.capture import ScreenCapturer
 from ..media.record import MAX_SECONDS, recorder_for
 from . import ToolRegistry
 
 
-def register(reg: ToolRegistry, capturer: ScreenCapturer | None) -> None:
+def register(reg: ToolRegistry, capturer: ScreenCapturer) -> None:
     def rec():
-        if capturer is None:
-            raise CaptureUnavailable("screen capture not configured")
         return recorder_for(capturer)
 
     @reg.add(

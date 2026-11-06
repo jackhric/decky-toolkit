@@ -10,13 +10,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
-from aiohttp import ClientSession, ClientTimeout, web  # noqa: E402
-
-from certauth import H, stub_auth  # noqa: E402
+from certauth import H  # noqa: E402
 from decky_toolkit.loader import live  # noqa: E402
-from decky_toolkit.server.http import Api  # noqa: E402
-from decky_toolkit.server.protocol import McpServer  # noqa: E402
-from decky_toolkit.tools import ToolRegistry  # noqa: E402
+from harness import with_server  # noqa: E402
 
 LOG = logging.getLogger("t")
 
@@ -104,28 +100,19 @@ def test_reload_leaves_focus_alone_outside_the_plugin(plugin, monkeypatch):
 
 
 def test_routes(plugin):
-    async def run():
-        api = Api(auth=stub_auth(), mcp=McpServer(ToolRegistry(), LOG), capturer=None, logger=LOG)
-        runner = web.AppRunner(api.build_app())
-        await runner.setup()
-        await web.TCPSite(runner, "127.0.0.1", 0).start()
-        base = f"http://127.0.0.1:{runner.addresses[0][1]}"
-        try:
-            async with ClientSession(timeout=ClientTimeout(total=10)) as s:
-                async with s.put(f"{base}/api/v1/plugins/demo/files?path=dist/index.js", data=b"fresh", headers=H) as r:
-                    assert r.status == 200 and (await r.json())["bytes"] == 5
-                async with s.put(f"{base}/api/v1/plugins/demo/files?path=../x", data=b"x", headers=H) as r:
-                    assert r.status == 400
-                async with s.put(f"{base}/api/v1/plugins/demo/files?path=config/loginusers.vdf", data=b"x", headers=H) as r:
-                    assert r.status == 403
-                async with s.put(f"{base}/api/v1/plugins/missing/files?path=a", data=b"x", headers=H) as r:
-                    assert r.status == 404
-                async with s.put(f"{base}/api/v1/plugins/demo/files?path=dist/index.js", data=b"x") as r:
-                    assert r.status == 401
-                async with s.post(f"{base}/api/v1/plugins/demo/reload?mode=bogus", headers=H) as r:
-                    assert r.status == 400
-        finally:
-            await runner.cleanup()
-        assert (plugin / "dist" / "index.js").read_bytes() == b"fresh"
+    async def run(s, base):
+        async with s.put(f"{base}/api/v1/plugins/demo/files?path=dist/index.js", data=b"fresh", headers=H) as r:
+            assert r.status == 200 and (await r.json())["bytes"] == 5
+        async with s.put(f"{base}/api/v1/plugins/demo/files?path=../x", data=b"x", headers=H) as r:
+            assert r.status == 400
+        async with s.put(f"{base}/api/v1/plugins/demo/files?path=config/loginusers.vdf", data=b"x", headers=H) as r:
+            assert r.status == 403
+        async with s.put(f"{base}/api/v1/plugins/missing/files?path=a", data=b"x", headers=H) as r:
+            assert r.status == 404
+        async with s.put(f"{base}/api/v1/plugins/demo/files?path=dist/index.js", data=b"x") as r:
+            assert r.status == 401
+        async with s.post(f"{base}/api/v1/plugins/demo/reload?mode=bogus", headers=H) as r:
+            assert r.status == 400
 
-    asyncio.run(run())
+    asyncio.run(with_server(run))
+    assert (plugin / "dist" / "index.js").read_bytes() == b"fresh"

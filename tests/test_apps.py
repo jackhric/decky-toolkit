@@ -11,10 +11,10 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
 from decky_toolkit.steam import apps as apps_mod, cdp  # noqa: E402
-from decky_toolkit.server import http as http_mod  # noqa: E402
 from decky_toolkit.steam.apps import Apps  # noqa: E402
 
-from test_routes import H, with_server  # noqa: E402
+from certauth import H  # noqa: E402
+from harness import with_server  # noqa: E402
 
 ROW = {"appid": 70300, "name": "VVVVVV", "app_type": 1, "gameid": "70300", "installed": True, "installed_elsewhere": [],
        "size_on_disk": 75883262, "last_played": 1793779877, "playtime_minutes": 10,
@@ -127,7 +127,6 @@ def test_apps_routes(monkeypatch, tmp_path):
     monkeypatch.setenv("DECKY_USER_HOME", str(tmp_path))
     monkeypatch.setattr(apps_mod, "_proc_pids", lambda appid: [{"pid": 42, "cmdline": "reaper", "reaper": True}])
     steam = FakeSteam()
-    monkeypatch.setattr(http_mod, "Apps", lambda: Apps(steam))
 
     async def run(s, base):
         async with s.get(f"{base}/api/v1/apps") as r:
@@ -152,7 +151,7 @@ def test_apps_routes(monkeypatch, tmp_path):
             assert r.status == 400
         async with s.get(f"{base}/api/v1/apps/70300/proton-log?lines=5", headers=H) as r:
             assert r.status == 200 and (await r.json())["appid"] == 70300
-    asyncio.run(with_server(run))
+    asyncio.run(with_server(run, apps=Apps(steam)))
 
 
 def test_cef_evaluate_and_toast_routes(monkeypatch):
@@ -177,9 +176,8 @@ def test_cef_evaluate_and_toast_routes(monkeypatch):
 def test_apps_route_without_steam(monkeypatch):
     async def down(js):
         raise cdp.CdpError("Steam CEF debugger not reachable")
-    monkeypatch.setattr(http_mod, "Apps", lambda: Apps(down))
 
     async def run(s, base):
         async with s.get(f"{base}/api/v1/apps", headers=H) as r:
             assert r.status == 502
-    asyncio.run(with_server(run))
+    asyncio.run(with_server(run, apps=Apps(down)))
