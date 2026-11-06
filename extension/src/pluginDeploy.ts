@@ -97,7 +97,7 @@ async function newestMtime(p: string): Promise<number> {
   return newest;
 }
 
-const FRONTEND_INPUTS = ['src', 'tsconfig.json', 'rollup.config.js', 'rollup.config.mjs', 'rollup.config.ts'];
+const FRONTEND_INPUTS = ['src', 'tsconfig.json', 'rollup.config.js', 'rollup.config.mjs', 'rollup.config.ts', 'vite.config.js', 'vite.config.mjs', 'vite.config.ts'];
 
 /** Python files ship as they are; only the frontend (`src/` → `dist/index.js`) ever needs a build. */
 export async function buildDecision(root: string, mode: BuildMode): Promise<{ build: boolean; reason: string }> {
