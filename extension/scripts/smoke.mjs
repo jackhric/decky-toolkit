@@ -826,7 +826,7 @@ await check('package.json: container, activation, commands, menus, version', asy
   };
   for (const [view, want] of Object.entries(titles)) assert.deepEqual(titleMenu(view), want, `${view} title`);
   for (const view of Object.keys(titles)) {
-    for (const viewItem of ['plugin', 'deck.unpaired', 'deck.paired', 'deck.session', 'deck.busy', 'deck.found', 'deck.found.saved', 'discovery.group', 'discovery.add', 'action', 'group.screen', 'controller.virtual', 'controller.physical', 'controller.unsupported',
+    for (const viewItem of ['plugin', 'deck.unpaired', 'deck.paired', 'deck.session', 'deck.busy', 'deck.found', 'discovery.group', 'discovery.add', 'action', 'group.screen', 'controller.virtual', 'controller.physical', 'controller.unsupported',
       'game', 'game.running', 'game.unsupported', 'deckyDir', 'deckyFile', 'gameGroup', 'gameLog']) {
       for (const inline of [true, false]) assert.deepEqual(dupes(itemMenu(view, viewItem, inline)), [], `${view} ${viewItem}`);
     }
@@ -2481,26 +2481,21 @@ await check('discovery: Search network finds devices via mDNS and the subnet swe
   const g = groupNode();
   assert.equal(g.label, 'On this network');
   assert.equal(g.iconPath.id, 'radio-tower');
-  assert.equal(g.description, '3 found');
+  assert.equal(g.description, '2 found');
   assert.equal(g.collapsibleState, 2);
   assert.deepEqual(itemMenu('decky-toolkit.devices', g.contextValue, true), ['decky-toolkit.searchNetwork']);
   const kids = devicesProvider().getChildren(g);
   assert.deepEqual(kids.map(k => [k.label, k.description, k.iconPath.id, k.contextValue]), [
     ['bazzite', '10.0.70.18 · v0.3.0', 'vm', 'deck.found'],
     ['10.0.70.40', '10.0.70.40 · v0.2.0', 'vm', 'deck.found'],
-    ['steamdeck', '10.1.2.3 · v0.3.0 · saved', 'pass', 'deck.found.saved'],
     ['Add a device by address…', undefined, 'add', 'discovery.add'],
-  ], 'the saved 10.1.2.3 is marked; the other service, the HTML page and the slow host are left out');
-  assert.deepEqual(kids[2].command, { command: 'decky-toolkit.connect', title: 'Connect', arguments: [seedId()] }, 'the saved one connects, no replace');
-  assert.match(kids[2].tooltip.value, /Saved as \*\*10\.1\.2\.3\*\*/);
-  assert.deepEqual(itemMenu('decky-toolkit.devices', 'deck.found.saved', true), [], 'no Add on the saved one');
-  assert.deepEqual(itemMenu('decky-toolkit.devices', 'deck.found.saved', false), []);
+  ], 'saved 10.1.2.3, the other service, the HTML page and the slow host are left out');
   assert.match(kids[0].tooltip.value, /Decky Toolkit 0\.3\.0, API v1 · Bazzite/);
   assert.match(kids[1].tooltip.value, /decky-mcp 0\.2\.0/);
   assert.deepEqual(kids[0].command, { command: 'decky-toolkit.connectFound', title: 'Connect', arguments: ['10.0.70.18:8765'] });
   assert.deepEqual(itemMenu('decky-toolkit.devices', 'deck.found', true), ['decky-toolkit.connectFound']);
   assert.deepEqual(itemMenu('decky-toolkit.devices', 'deck.found', false), ['decky-toolkit.connectFound']);
-  assert.equal(kids[3].command.command, 'decky-toolkit.addDevice');
+  assert.equal(kids[2].command.command, 'decky-toolkit.addDevice');
   return `${kids.length - 1} found from ${net.probed.length} probes and ${net.queries.length} mDNS queries`;
 });
 
@@ -2566,9 +2561,10 @@ await check('discovery: Add on a found device asks to replace the saved one; Rep
   assert.equal(storedIdentity(), undefined, 'the replaced device\'s pairing is deleted');
   assert.equal(device.pairRequests.length, reqs + 1, 'a pairing request was filed');
   assertPaired('decky-toolkit.identity:10.0.70.18:8765');
-  const marked = devicesProvider().getChildren(groupNode()).find(k => k.label === 'bazzite');
-  assert.equal(marked.contextValue, 'deck.found.saved', 'the saved device is marked in the group');
-  assert.ok(devicesProvider().getChildren(groupNode()).some(k => k.label === 'steamdeck' && k.contextValue === 'deck.found'), 'the replaced one is just found now');
+  const group = devicesProvider().getChildren(groupNode());
+  assert.ok(!group.some(k => k.label === 'bazzite'), 'the saved device leaves the group; it has its own row');
+  assert.ok(group.some(k => k.label === 'steamdeck' && k.contextValue === 'deck.found'), 'the replaced one is listed as found again');
+  assert.equal(groupNode().description, '2 found', 'only unsaved devices are counted');
   const rows = devicesProvider().getChildren().filter(r => r.device);
   assert.deepEqual(rows.map(r => [r.device.host, r.contextValue]), [['10.0.70.18', 'deck.session']]);
   return `replaced 10.1.2.3 with ${list[0].name} and paired`;

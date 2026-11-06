@@ -355,11 +355,10 @@ export async function scanNetwork(signal: AbortSignal): Promise<ScanResult> {
   };
 }
 
-/** The saved device a found one is (same address or host name, and port). */
-export function savedMatch(d: DiscoveredDevice, saved: SavedDevice[]): SavedDevice | undefined {
+function isSaved(d: DiscoveredDevice, saved: SavedDevice[]): boolean {
   const names = new Set([d.host, d.hostname, d.hostname?.split('.')[0], d.hostname && `${d.hostname.split('.')[0]}.local`]
     .filter((x): x is string => !!x).map(x => x.toLowerCase()));
-  return saved.find(s => s.port === d.port && names.has(s.host.toLowerCase()));
+  return saved.some(s => s.port === d.port && names.has(s.host.toLowerCase()));
 }
 
 /**
@@ -405,16 +404,7 @@ export class DeviceDiscovery implements vscode.Disposable {
   /** Found devices minus saved ones (matched by address or host name, and port). */
   get devices(): DiscoveredDevice[] {
     const saved = this.saved();
-    return this.found.filter(d => !savedMatch(d, saved));
-  }
-
-  /** Every found device, saved ones included. */
-  get all(): DiscoveredDevice[] {
-    return this.found;
-  }
-
-  savedMatch(d: DiscoveredDevice): SavedDevice | undefined {
-    return savedMatch(d, this.saved());
+    return this.found.filter(d => !isSaved(d, saved));
   }
 
   /** The view opened: scan unless a scan is running or finished recently. */

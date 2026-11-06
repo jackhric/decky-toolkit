@@ -89,11 +89,10 @@ device, approve it, open the screen). The welcome view and the Devices tree swit
 
 #### Discovery
 
-Below the saved device, an **On this network** group lists Decky Toolkit devices on the local network,
-the way Moonlight finds its hosts. Each row shows the device's host name with `ip · vX.Y.Z` (`ip:port`
-when the port is not 8765) and the `vm` icon; the one that is saved says `· saved` with the `pass` icon,
-and a click connects to it. Click any other row, or its plug icon, to save the device and connect; an
-unpaired device goes straight into [pairing](#pairing). When a device is already saved, a modal asks
+Below the saved device, an **On this network** group lists Decky Toolkit devices on the local network
+that are not saved, the way Moonlight finds its hosts. Each row shows the device's host name with
+`ip · vX.Y.Z` (`ip:port` when the port is not 8765) and the `vm` icon. Click it, or its plug icon,
+to save the device and connect; an unpaired device goes straight into [pairing](#pairing). When a device is already saved, a modal asks
 **Replace <name>?** first, because the saved device and its pairing are forgotten. The group's
 last row is **Add a device by address…**. While a search runs the group shows a spinner and
 `searching…`; afterwards `N found` or `none found`.
@@ -109,8 +108,8 @@ How devices are found:
   A /24 takes about 2.5 s.
 
 Only answers whose `/health` identifies Decky Toolkit (or its old name `decky-mcp`) are listed. The saved
-device is recognised by its address or host name, and port; a second address of the same device
-(`device_id`) is left out. Loopback, link-local, container, VM and VPN interfaces (`docker*`, `br-*`, `virbr*`,
+device (same address or host name, and port) and a second address of the same device (`device_id`)
+are left out. Loopback, link-local, container, VM and VPN interfaces (`docker*`, `br-*`, `virbr*`,
 `veth*`, `tun*`, `wg*`, `tailscale*`, …) are skipped.
 
 Discovery covers the local network only: mDNS does not cross routers, and the probe never leaves
@@ -477,7 +476,7 @@ All of these are also in the command palette under the `Decky:` category.
 | Decky: Disconnect | Ends the session; keeps the pairing |
 | Decky: Reconnect | Connects to the device of the last session again (pairs again when it was rejected) |
 | Decky: Add device… / Rename device / Forget device | Add a device (replacing the saved one), rename it, or forget it and its pairing |
-| Decky: Search network | Look for Decky Toolkit devices on the local network ([Discovery](#discovery)) |
+| Decky: Search network | Look for unsaved Decky Toolkit devices on the local network ([Discovery](#discovery)) |
 | Decky: Open screen | Live screen panel with sound; remote input, mute, stream settings, pause and snapshot as tab bar icons |
 | Decky: Snapshot to file | Saves the current `/frame.jpg` with a Save dialog |
 | Decky: Deploy plugin | Build if needed, zip, `POST /plugins/install`, reload just this plugin and confirm it (<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd>) |
@@ -516,7 +515,7 @@ All of these are also in the command palette under the `Decky:` category.
 | `decky-toolkit.pluginDirName` | (empty) | Target dir under `~/homebrew/plugins` for deploy; empty means the plugin folder's name |
 | `decky-toolkit.deploy.build` | `auto` | `auto`: build only when `src/` is newer than `dist/index.js`; `always`; `never` |
 | `decky-toolkit.deploy.onChange` | `false` | Fast-deploy (without building) when `dist/index.js`, `main.py` or `py_modules/**/*.py` change |
-| `decky-toolkit.discovery.enabled` | `true` | List Decky Toolkit devices on the local network under **On this network** (see [Discovery](#discovery)) |
+| `decky-toolkit.discovery.enabled` | `true` | List unsaved Decky Toolkit devices on the local network under **On this network** (see [Discovery](#discovery)) |
 
 The saved device lives in VS Code's global state (`decky-toolkit.devices`), so all windows share it. A
 list with several devices saved by an older version is cut down to the last connected one at startup.
