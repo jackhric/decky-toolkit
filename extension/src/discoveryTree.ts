@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { Connection, SavedDevice, newDeviceId } from './connection';
+import { confirmReplace, replaceWith } from './devices';
 import { DEFAULT_PORT, DeviceDiscovery, DiscoveredDevice } from './discovery';
 
 export class DiscoveryNode extends vscode.TreeItem {
@@ -48,15 +49,19 @@ export function discoveryChildren(discovery: DeviceDiscovery): DiscoveryNode[] {
   return [...discovery.devices.map(foundRow), add];
 }
 
-/** Saves a found device (or reuses the saved one with its address) and connects, which starts pairing. */
+/**
+ * Connects to a found device, which starts pairing; one that is not saved replaces the saved device after
+ * a confirmation.
+ */
 export async function connectFound(conn: Connection, discovery: DeviceDiscovery, arg: unknown): Promise<void> {
   const key = typeof arg === 'string' ? arg : (arg as DiscoveryNode | undefined)?.found?.key;
   const d = key ? discovery.find(key) : undefined;
   if (!d) throw new Error('that device is no longer in the network list; search again.');
   let saved: SavedDevice | undefined = conn.devices.find(x => x.host === d.host && x.port === d.port);
   if (!saved) {
+    if (!(await confirmReplace(conn))) return;
     saved = { id: newDeviceId(), name: d.name, host: d.host, port: d.port };
-    await conn.saveDevices([...conn.devices, saved]);
+    await replaceWith(conn, saved);
   }
   await vscode.commands.executeCommand('decky-toolkit.connect', saved.id);
 }

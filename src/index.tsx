@@ -1,17 +1,22 @@
 import {
-  ButtonItem,
   ConfirmModal,
+  DialogBody,
   DialogButton,
+  DialogButtonPrimary,
+  DialogControlsSection,
   Field,
   Focusable,
-  PanelSection,
-  PanelSectionRow,
+  Navigation,
+  TextField,
   ToggleField,
+  SidebarNavigation,
   showModal,
+  staticClasses,
 } from "@decky/ui";
-import { addEventListener, callable, definePlugin, removeEventListener, toaster } from "@decky/api";
-import { useEffect, useState } from "react";
-import { FaPlug } from "react-icons/fa";
+import { addEventListener, callable, definePlugin, removeEventListener, routerHook, toaster } from "@decky/api";
+import { ReactNode, useEffect, useState } from "react";
+import { FaCog, FaGamepad, FaLaptop, FaPlug, FaServer } from "react-icons/fa";
+import { SteamingMark } from "./SteamingMark";
 
 type Status = {
   enabled: boolean;
@@ -23,6 +28,7 @@ type Status = {
   stream: { running: boolean; fps: number; subscribers: number; available: boolean; error: string | null } | null;
   input: InputSettings | null;
   error: string | null;
+  connected?: boolean;
 };
 
 type PairRequest = {
@@ -41,9 +47,29 @@ type PairedClient = {
   kind: string;
   added_at: number;
   last_seen: number | null;
+  connected?: boolean;
 };
 
+type InputSettings = { enabled: boolean; backend: "ei" | "uinput" | null; available: boolean; reason: string | null };
+
+const SETTINGS_ROUTE = "/decky-toolkit/settings";
+const MUTED = "#8b929a";
+const LINK = "#1a9fff";
 const KIND_LABELS: Record<string, string> = { vscode: "VS Code", mcp: "MCP client", other: "Other" };
+
+const getStatus = callable<[], Status>("get_status");
+const setEnabled = callable<[enabled: boolean], Status>("set_enabled");
+const setPort = callable<[port: number], Status>("set_port");
+const restartServer = callable<[], Status>("restart_server");
+const listPairRequests = callable<[], PairRequest[]>("list_pair_requests");
+const approvePairRequest = callable<[id: string], PairRequest[]>("approve_pair_request");
+const denyPairRequest = callable<[id: string], PairRequest[]>("deny_pair_request");
+const listPairedClients = callable<[], PairedClient[]>("list_paired_clients");
+const forgetPairedClient = callable<[fingerprint: string], PairedClient[]>("forget_paired_client");
+const setInputEnabled = callable<[enabled: boolean], InputSettings>("set_input_enabled");
+
+const toast = (body: string) => toaster.toast({ title: "Decky Toolkit", body });
+const toastError = (e: unknown) => toaster.toast({ title: "Decky Toolkit error", body: String(e) });
 
 function lastSeen(at: number | null): string {
   if (at === null) return "never seen";
@@ -54,39 +80,34 @@ function lastSeen(at: number | null): string {
   return `seen ${Math.floor(minutes / 1440)} days ago`;
 }
 
-type InputSettings = { enabled: boolean; backend: "ei" | "uinput" | null; available: boolean; reason: string | null };
+function serverState(s: Status): string {
+  if (s.error) return s.error;
+  if (!s.enabled) return "Disabled";
+  return s.running ? "Running" : "Stopped";
+}
 
-const getStatus = callable<[], Status>("get_status");
-const setEnabled = callable<[enabled: boolean], Status>("set_enabled");
-const restartServer = callable<[], Status>("restart_server");
-const listPairRequests = callable<[], PairRequest[]>("list_pair_requests");
-const approvePairRequest = callable<[id: string], PairRequest[]>("approve_pair_request");
-const denyPairRequest = callable<[id: string], PairRequest[]>("deny_pair_request");
-const listPairedClients = callable<[], PairedClient[]>("list_paired_clients");
-const forgetPairedClient = callable<[fingerprint: string], PairedClient[]>("forget_paired_client");
-const getInputSettings = callable<[], InputSettings>("get_input_settings");
-const setInputEnabled = callable<[enabled: boolean], InputSettings>("set_input_enabled");
-
-function Content() {
+function useToolkit() {
   const [status, setStatus] = useState<Status | null>(null);
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [busy, setBusy] = useState(false);
-
   const [requests, setRequests] = useState<PairRequest[]>([]);
   const [clients, setClients] = useState<PairedClient[]>([]);
+  const [busy, setBusy] = useState(false);
 
-  const refresh = async () => setStatus(await getStatus());
+  const refresh = async () => {
+    setStatus(await getStatus());
+    setClients(await listPairedClients());
+  };
   const refreshRequests = async () => setRequests(await listPairRequests());
-
-  const pending = requests.filter((r) => r.status === "pending");
+  const pending = requests.filter((r) => r.status === "pending").sort((a, b) => b.age_s - a.age_s);
 
   useEffect(() => {
     const onInput = addEventListener<[enabled: boolean]>("decky_toolkit_input_state", () => refresh());
     const onRequest = addEventListener<[info: unknown]>("decky_toolkit_pair_request", () => refreshRequests());
-    const onRequests = addEventListener<[list: PairRequest[]]>("decky_toolkit_pair_requests", (list) => setRequests(list));
-    const onClients = addEventListener<[list: PairedClient[]]>("decky_toolkit_paired_clients", (list) => setClients(list));
-    listPairedClients().then(setClients);
+    const onRequests = addEventListener<[list: PairRequest[]]>("decky_toolkit_pair_requests", setRequests);
+    const onClients = addEventListener<[list: PairedClient[]]>("decky_toolkit_paired_clients", setClients);
+    refresh();
+    const id = setInterval(refresh, 5000);
     return () => {
+      clearInterval(id);
       removeEventListener("decky_toolkit_input_state", onInput);
       removeEventListener("decky_toolkit_pair_request", onRequest);
       removeEventListener("decky_toolkit_pair_requests", onRequests);
@@ -95,175 +116,295 @@ function Content() {
   }, []);
 
   useEffect(() => {
-    refresh();
-    const id = setInterval(refresh, 5000);
-    return () => clearInterval(id);
-  }, []);
-
-  useEffect(() => {
     refreshRequests();
     const id = setInterval(refreshRequests, pending.length ? 2000 : 10000);
     return () => clearInterval(id);
   }, [pending.length > 0]);
 
-  const decide = async (r: PairRequest, allow: boolean) => {
+  const guarded = async (fn: () => Promise<void>) => {
     setBusy(true);
     try {
-      setRequests(await (allow ? approvePairRequest(r.id) : denyPairRequest(r.id)));
-      toaster.toast({ title: "Decky Toolkit", body: `${allow ? "Approved" : "Denied"} ${r.client_name}` });
+      await fn();
     } catch (e) {
-      toaster.toast({ title: "Decky Toolkit error", body: String(e) });
-      refreshRequests();
+      toastError(e);
     } finally {
       setBusy(false);
     }
   };
 
-  const forget = (c: PairedClient) =>
-    showModal(
-      <ConfirmModal
-        strTitle={`Forget ${c.name}?`}
-        strDescription="It has to pair again to connect to this device."
-        strOKButtonText="Forget"
-        onOK={async () => {
-          try {
-            setClients(await forgetPairedClient(c.fingerprint));
-            toaster.toast({ title: "Decky Toolkit", body: `Forgot ${c.name}` });
-          } catch (e) {
-            toaster.toast({ title: "Decky Toolkit error", body: String(e) });
+  return {
+    status,
+    pending,
+    clients,
+    busy,
+    decide: (r: PairRequest, allow: boolean) =>
+      guarded(async () => {
+        try {
+          setRequests(await (allow ? approvePairRequest(r.id) : denyPairRequest(r.id)));
+          toast(`${allow ? "Approved" : "Denied"} ${r.client_name}`);
+        } catch (e) {
+          refreshRequests();
+          throw e;
+        }
+      }),
+    run: (fn: () => Promise<Status>, okMsg?: string) =>
+      guarded(async () => {
+        setStatus(await fn());
+        if (okMsg) toast(okMsg);
+      }),
+    setInput: (enabled: boolean) =>
+      guarded(async () => {
+        const input = await setInputEnabled(enabled);
+        setStatus((s) => (s ? { ...s, input } : s));
+      }),
+    forget: (c: PairedClient) =>
+      showModal(
+        <ConfirmModal
+          strTitle={`Forget ${c.name}?`}
+          strDescription="It has to pair again to connect to this device."
+          strOKButtonText="Forget"
+          onOK={() =>
+            guarded(async () => {
+              setClients(await forgetPairedClient(c.fingerprint));
+              toast(`Forgot ${c.name}`);
+            })
           }
-        }}
-      />,
-    );
-
-  const run = async (fn: () => Promise<Status>, okMsg: string) => {
-    setBusy(true);
-    try {
-      setStatus(await fn());
-      toaster.toast({ title: "Decky Toolkit", body: okMsg });
-    } catch (e) {
-      toaster.toast({ title: "Decky Toolkit error", body: String(e) });
-    } finally {
-      setBusy(false);
-    }
+        />,
+      ),
   };
+}
 
-  // Oldest first; one at a time so the owner always sees which client the code belongs to.
-  const current = [...pending].sort((a, b) => b.age_s - a.age_s)[0];
+const showPairingHelp = () =>
+  showModal(
+    <ConfirmModal
+      bAlertDialog
+      strTitle="How pairing works"
+      strOKButtonText="OK"
+      strDescription={
+        <ol style={{ margin: 0, paddingLeft: "1.4em", lineHeight: 1.6 }}>
+          <li>Install the Decky Toolkit extension in VS Code on your computer.</li>
+          <li>In the extension, add the address shown in the Decky Toolkit panel.</li>
+          <li>A request appears here. Approve it if its code matches the one on your computer.</li>
+        </ol>
+      }
+    />,
+  );
+
+const STYLE = `
+.dtk-card { border-radius: 4px; background: rgba(255,255,255,0.04); transition: background 0.15s; }
+.dtk-card.dtk-focus { background: rgba(255,255,255,0.2); box-shadow: inset 0 0 0 2px rgba(255,255,255,0.45); }
+.dtk-link.dtk-focus { text-decoration: underline; color: #fff !important; }
+.dtk-primary { background: #1a9fff !important; color: #fff !important; }
+.dtk-primary.gpfocus { background: #4fb4ff !important; box-shadow: 0 0 0 2px #fff; }
+.dtk-mark { color: #7a7f86; transition: color 0.4s; }
+.dtk-mark.connected { color: #4fa83a; }
+.dtk-mark.pending { animation: dtk-breathe 2s ease-in-out infinite; }
+@keyframes dtk-breathe { 0%, 100% { color: #3a5f80; opacity: 0.75; } 50% { color: #1a9fff; opacity: 1; } }
+`;
+
+type MarkState = "idle" | "pending" | "connected";
+
+function Centered({ children, mark = "idle" }: { children: ReactNode; mark?: MarkState }) {
+  return (
+    <Focusable
+      flow-children="column"
+      // Quick Access gives plugin content no height of its own; 72px is the panel header above it.
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        textAlign: "center",
+        gap: "16px",
+        padding: "16px",
+        minHeight: "calc(100vh - 72px)",
+        boxSizing: "border-box",
+      }}
+    >
+      <style>{STYLE}</style>
+      <SteamingMark size={96} steaming={mark === "connected"} className={`dtk-mark ${mark}`} style={{ marginBottom: "8px" }} />
+      {children}
+      <Focusable
+        className="dtk-link"
+        focusClassName="dtk-focus"
+        noFocusRing
+        onActivate={showPairingHelp}
+        onClick={showPairingHelp}
+        style={{ color: LINK, fontSize: "15px", padding: "4px 8px", cursor: "pointer" }}
+      >
+        How pairing works
+      </Focusable>
+    </Focusable>
+  );
+}
+
+const hint = { color: MUTED, fontSize: "15px", lineHeight: 1.45, margin: 0, maxWidth: "260px" } as const;
+
+function Panel() {
+  const { status, pending, clients, busy, decide } = useToolkit();
+  const current = pending[0];
+  const up = !!status && status.enabled && status.running && !status.error;
+
   if (current) {
     return (
-      <PanelSection title="Pairing">
-        <PanelSectionRow>
-          <Field label={current.client_name} description={`${current.remote} · code ${current.code}`} focusable bottomSeparator="none" />
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <Focusable style={{ display: "flex", gap: "8px" }}>
-            <DialogButton style={{ flex: 1, minWidth: 0 }} disabled={busy} onClick={() => decide(current, true)}>
-              Approve
-            </DialogButton>
-            <DialogButton style={{ flex: 1, minWidth: 0 }} disabled={busy} onClick={() => decide(current, false)}>
-              Deny
-            </DialogButton>
-          </Focusable>
-        </PanelSectionRow>
-        {pending.length > 1 && (
-          <PanelSectionRow>
-            <Field label="Requests" focusable>{`1 of ${pending.length}`}</Field>
-          </PanelSectionRow>
-        )}
-      </PanelSection>
+      <Centered mark="pending">
+        <DialogButtonPrimary className="dtk-primary" style={{ width: "100%" }} disabled={busy} onClick={() => decide(current, true)}>
+          Approve {current.client_name}
+        </DialogButtonPrimary>
+        <div style={{ color: MUTED, fontSize: "14px", marginTop: "-6px" }}>
+          Code <span style={{ color: "#fff", fontSize: "18px", fontWeight: 600, letterSpacing: "0.12em" }}>{current.code}</span>
+          {" · "}
+          {current.remote}
+          {clients.length > 0 && <div style={{ marginTop: "4px" }}>Replaces {clients.map((c) => c.name).join(", ")}</div>}
+        </div>
+        <DialogButton style={{ width: "100%" }} disabled={busy} onClick={() => decide(current, false)}>
+          Deny
+        </DialogButton>
+        <p style={hint}>
+          Approve only if the code matches the one shown on your computer.
+          {pending.length > 1 && ` Request 1 of ${pending.length}.`}
+        </p>
+      </Centered>
     );
   }
 
   if (!status) {
     return (
-      <PanelSection>
-        <PanelSectionRow>
-          <Field label="Status">Loading…</Field>
-        </PanelSectionRow>
-      </PanelSection>
+      <Centered>
+        <p style={hint}>Loading…</p>
+      </Centered>
     );
   }
 
-  const serverState = status.error ?? (!status.enabled ? "disabled" : status.running ? "running" : "stopped");
+  return (
+    <Centered mark={up && status.connected ? "connected" : "idle"}>
+      <Focusable
+        className="dtk-card"
+        focusClassName="dtk-focus"
+        noFocusRing
+        onActivate={() => {}}
+        style={{ width: "100%", padding: "14px 8px", boxSizing: "border-box" }}
+      >
+        <div style={{ fontSize: "26px", fontWeight: 600, color: up ? "#fff" : MUTED, letterSpacing: "0.02em" }}>{status.ip}</div>
+        <div style={{ fontSize: "14px", color: MUTED, marginTop: "2px" }}>port {status.port}</div>
+      </Focusable>
+      <p style={hint}>
+        {up
+          ? "Add this address in the Decky Toolkit extension."
+          : status.error
+            ? `The server is not running: ${status.error}`
+            : !status.enabled
+              ? "The server is turned off. Turn it on in settings."
+              : "The server is stopped. Restart it in settings."}
+      </p>
+    </Centered>
+  );
+}
+
+function SettingsPage() {
+  const { status, clients, busy, run, setInput, forget } = useToolkit();
+  const [port, setPortDraft] = useState("");
+  useEffect(() => {
+    if (status) setPortDraft(String(status.port));
+  }, [status?.port]);
+
+  const applyPort = () => {
+    const n = Number(port);
+    if (!status || n === status.port) return;
+    if (!Number.isInteger(n) || n < 1024 || n > 65535) {
+      toastError("Port must be 1024-65535");
+      setPortDraft(String(status.port));
+      return;
+    }
+    run(() => setPort(n), `Server moved to port ${n}`);
+  };
+
+  const server = (
+    <DialogBody>
+      <DialogControlsSection>
+        <ToggleField
+          label="Enable server"
+          description="Lets paired computers connect to this device."
+          checked={!!status?.enabled}
+          disabled={busy || !status}
+          onChange={(v) => run(() => setEnabled(v), v ? "Server enabled" : "Server disabled")}
+        />
+        <Field label="Status" focusable>
+          {status ? serverState(status) : "Loading…"}
+        </Field>
+        <Field label="Address" focusable>
+          {status ? `${status.ip}:${status.port}` : "…"}
+        </Field>
+        <Field label="Port" description="1024-65535. Changing it restarts the server." childrenContainerWidth="fixed">
+          <TextField
+            mustBeNumeric
+            rangeMin={1024}
+            rangeMax={65535}
+            value={port}
+            disabled={busy || !status}
+            onChange={(e) => setPortDraft(e.target.value)}
+            onBlur={applyPort}
+            onKeyDown={(e) => e.key === "Enter" && applyPort()}
+          />
+        </Field>
+        <Field label="Restart server" description="Stops and starts the server; connected computers reconnect.">
+          <DialogButton style={{ minWidth: "160px" }} disabled={busy} onClick={() => run(restartServer, "Server restarted")}>
+            Restart
+          </DialogButton>
+        </Field>
+      </DialogControlsSection>
+    </DialogBody>
+  );
+
+  const input = (
+    <DialogBody>
+      <DialogControlsSection>
+        <ToggleField
+          label="Allow remote input"
+          description={
+            status?.input && !status.input.available
+              ? status.input.reason ?? "Unavailable"
+              : "Lets paired computers send keyboard, mouse and controller input."
+          }
+          checked={!!status?.input?.enabled}
+          disabled={busy || !status?.input?.available}
+          onChange={setInput}
+        />
+      </DialogControlsSection>
+    </DialogBody>
+  );
+
+  const devices = (
+    <DialogBody>
+      <DialogControlsSection>
+        {clients.length === 0 && <Field label="None yet" focusable />}
+        {clients.map((c) => (
+          <Field key={c.fingerprint} label={c.name} description={`${KIND_LABELS[c.kind] ?? c.kind} · ${c.connected ? "connected" : lastSeen(c.last_seen)}`}>
+            <DialogButton style={{ minWidth: "160px" }} disabled={busy} onClick={() => forget(c)}>
+              Forget
+            </DialogButton>
+          </Field>
+        ))}
+      </DialogControlsSection>
+    </DialogBody>
+  );
 
   return (
-    <>
-      <PanelSection title="Connect">
-        <PanelSectionRow>
-          <Field label={status.ip} description={`Port ${status.port} · add this address in the Decky Toolkit extension`} focusable />
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <Field label="Server" focusable>{serverState}</Field>
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <ButtonItem layout="below" onClick={() => setShowAdvanced((s) => !s)}>
-            {showAdvanced ? "Hide advanced" : "Advanced"}
-          </ButtonItem>
-        </PanelSectionRow>
-      </PanelSection>
-
-      <PanelSection title="Paired clients">
-        {clients.length === 0 && (
-          <PanelSectionRow>
-            <Field label="None yet" focusable />
-          </PanelSectionRow>
-        )}
-        {clients.map((c) => (
-          <PanelSectionRow key={c.fingerprint}>
-            <Field label={c.name} description={`${KIND_LABELS[c.kind] ?? c.kind} · ${lastSeen(c.last_seen)}`}>
-              <DialogButton style={{ minWidth: 0, padding: "0 16px" }} disabled={busy} onClick={() => forget(c)}>
-                Forget
-              </DialogButton>
-            </Field>
-          </PanelSectionRow>
-        ))}
-      </PanelSection>
-
-      {showAdvanced && (
-        <PanelSection title="Advanced">
-          <PanelSectionRow>
-            <ToggleField
-              label="Enable MCP server"
-              checked={status.enabled}
-              disabled={busy}
-              onChange={(v) => run(() => setEnabled(v), v ? "Server enabled" : "Server disabled")}
-            />
-          </PanelSectionRow>
-          <PanelSectionRow>
-            <ToggleField
-              label="Allow remote input"
-              description={status.input && !status.input.available ? status.input.reason ?? "Unavailable" : undefined}
-              checked={!!status.input?.enabled}
-              disabled={busy || !status.input?.available}
-              onChange={async (v) => {
-                setBusy(true);
-                try {
-                  await setInputEnabled(v);
-                  const input = await getInputSettings();
-                  setStatus((s) => (s ? { ...s, input } : s));
-                } catch (e) {
-                  toaster.toast({ title: "Decky Toolkit error", body: String(e) });
-                } finally {
-                  setBusy(false);
-                }
-              }}
-            />
-          </PanelSectionRow>
-          <PanelSectionRow>
-            <ButtonItem layout="below" disabled={busy} onClick={() => run(restartServer, "Server restarted")}>
-              Restart server
-            </ButtonItem>
-          </PanelSectionRow>
-        </PanelSection>
-      )}
-    </>
+    <SidebarNavigation
+      title="Decky Toolkit"
+      showTitle
+      pages={[
+        { title: "Server", icon: <FaServer />, content: server, identifier: "server" },
+        { title: "Remote input", icon: <FaGamepad />, content: input, identifier: "input" },
+        { title: "Paired devices", icon: <FaLaptop />, content: devices, identifier: "devices" },
+      ]}
+    />
   );
 }
 
 export default definePlugin(() => {
   const paired = addEventListener<[remote: string, clientName?: string]>("decky_toolkit_paired", (remote, clientName) => {
-    toaster.toast({ title: "Decky Toolkit", body: `${clientName ?? "Client"} paired from ${remote}` });
+    toast(`${clientName ?? "Client"} paired from ${remote}`);
   });
   // Registered here rather than in the panel so the toast shows while Quick Access is closed.
   const pairRequest = addEventListener<[info: { client_name: string; code: string }]>("decky_toolkit_pair_request", (info) => {
@@ -273,16 +414,32 @@ export default definePlugin(() => {
     });
   });
   const inputSession = addEventListener<[remote: string]>("decky_toolkit_input_session", (remote) => {
-    toaster.toast({ title: "Decky Toolkit", body: `Remote input from ${remote}` });
+    toast(`Remote input from ${remote}`);
   });
+  routerHook.addRoute(SETTINGS_ROUTE, SettingsPage);
   return {
     name: "Decky Toolkit",
-    content: <Content />,
+    titleView: (
+      <div className={staticClasses.Title} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flex: 1, padding: 0 }}>
+        <div>Decky Toolkit</div>
+        <DialogButton
+          style={{ height: "28px", width: "40px", minWidth: 0, padding: "10px 12px", display: "flex", alignItems: "center", justifyContent: "center" }}
+          onClick={() => {
+            Navigation.CloseSideMenus();
+            Navigation.Navigate(SETTINGS_ROUTE);
+          }}
+        >
+          <FaCog style={{ display: "block" }} />
+        </DialogButton>
+      </div>
+    ),
+    content: <Panel />,
     icon: <FaPlug />,
     onDismount() {
       removeEventListener("decky_toolkit_paired", paired);
       removeEventListener("decky_toolkit_pair_request", pairRequest);
       removeEventListener("decky_toolkit_input_session", inputSession);
+      routerHook.removeRoute(SETTINGS_ROUTE);
     },
   };
 });
