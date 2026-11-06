@@ -14,7 +14,10 @@ tools (the CLI's `mcp` and `call` commands only relay them for agents and people
 Top level: `GET /`, `GET /health` and `/mcp`. Everything else is under `/api/v1`; prose below writes those paths
 relative to it (`/stream/settings` means `/api/v1/stream/settings`). `GET /health` lists the client API versions the
 device serves (`"api": ["v1"]`); the extension and the CLI need `v1` and otherwise ask the user to update the plugin
-(Decky → Install Plugin from URL). They have no fallback for older devices.
+(Decky → Install Plugin from URL). They have no fallback for older devices. The other way round, any unknown path
+outside `/api/v1` (a client from before the API version, e.g. `/stream/stats`) gets `404 {"error": "This client is
+older than the Decky Toolkit plugin <version>: ..."}` before authentication; unknown paths under `/api/v1` get
+`404 {"error": "Not found"}`.
 
 Everything except `/`, `/health` and the pairing request routes (`/api/v1/pair/request...`) requires a client
 certificate issued at pairing (see [Authentication](#authentication)). There is no browser viewer, no
@@ -46,7 +49,7 @@ Status key: **live** = implemented and deployed, **planned** = agreed design, no
 
 | Route | Auth | Status | Notes |
 | --- | --- | --- | --- |
-| `GET /health` | none | live | `{ok, name, version, api, tools, tools_hash, hostname, device_id, os}`. `api` lists the client API versions served (`["v1"]`). `tools_hash` (16 hex digits) changes whenever a tool, its description or its schema changes; the CLI's stdio MCP server compares it to send `notifications/tools/list_changed`. The agent instructions are not here: they come with `initialize` on `/mcp`, which needs a paired client. The last three identify the device to network discovery and hold nothing secret: `hostname` is the system hostname, `device_id` a 16-hex-digit SHA-256 of a namespace plus `/etc/machine-id` (stable per install, not reversible to the machine-id; `null` if unreadable), `os` the `PRETTY_NAME` from `/etc/os-release` (`null` if missing). Builds from before the rename report `name` `decky-mcp`. |
+| `GET /health` | none | live | `{ok, name, version, api, tools, tools_hash, hostname, device_id, os}`. `api` lists the client API versions served (`["v1"]`). `tools_hash` (16 hex digits) changes whenever a tool, its description or its schema changes; the CLI's stdio MCP server compares it to send `notifications/tools/list_changed`. The agent instructions are not here: they come with `initialize` on `/mcp`, which needs a paired client. The last three identify the device to network discovery and hold nothing secret: `hostname` is the system hostname, `device_id` a 16-hex-digit SHA-256 of a namespace plus `/etc/machine-id` (stable per install, not reversible to the machine-id; `null` if unreadable), `os` the `PRETTY_NAME` from `/etc/os-release` (`null` if missing). |
 | mDNS `_decky-toolkit._tcp` | none | live | While the server listens on a non-loopback address, the plugin advertises it through the device's avahi-daemon (`avahi-publish`): instance name = short host name, SRV port = the server port, TXT `api=v1` (the served versions, comma-separated), `version=<version>`, `id=<device_id>`. Nothing is advertised if `avahi-publish` is missing. |
 | `GET /` | none | live | one line of plain text saying the server runs and to connect with the VS Code extension |
 
@@ -220,7 +223,6 @@ Errors: `400` bad argument, `403` sensitive path, `404` unknown app/path, `502` 
 | Route | Auth | Status | Notes |
 | --- | --- | --- | --- |
 | `GET /api/v1/apps` | client cert | live | Query: `installed_only=1` (default; installed on this device), `query=<name substring or appid>`, `include_tools=1` (Proton, runtimes). `{count, apps: [{appid, name, type: game\|tool\|shortcut\|application\|..., installed, running, install_dir, compat_tool (e.g. "proton_11", "steamlinuxruntime_sniper" for native titles), compat_tool_display, size_on_disk, library, last_played (ISO), installed_elsewhere?, shortcut_exe?}]}` |
-| `GET /api/v1/apps/{appid}` | client cert | live | `app_info`: the list fields plus `gameid, developer, platforms, playtime_minutes, launch_options, build_id, cloud, processes` (when running) and `dirs` (as below). |
 | `GET /api/v1/apps/{appid}/dirs` | client cert | live | `app_dirs`: `{appid, name, developer, platform: proton\|native, compat_tool, steam_root, library, libraries, install_dir, manifest, compatdata, prefix, prefix_user_dirs: {appdata_roaming, appdata_local, appdata_locallow, documents, saved_games}, account_id, userdata, cloud_remote, remotecache, shader_cache, xdg, match_keys}`. Each dir is `{path, exists, mtime?}`; prefix user dirs add `matches` (subdirs named after the game or developer, two levels deep for Company/Product); `xdg` (native titles only) lists matching entries of `~/.local/share`, `~/.config`, `~/.config/unity3d` and `~`. |
 | `GET /api/v1/apps/{appid}/saves` | client cert | live | `app_saves`. Query `limit` (default 40). `{appid, name, steam_cloud: [{name, root, size, time, local_path, candidates}], candidates: [{path, size, mtime, found_by, rank, score}], notes}`. Rank 0: files in Steam Cloud's `remotecache.vdf` mapped to local paths by their root (0 userdata remote, 2 Documents, 3 AppData/Local, ...; native titles also try the XDG dirs) and the cloud `remote/` dir; 1: files next to a `steam_autocloud.vdf` marker; 2: save-like files under dirs named after the game; 3: save-like names in the install dir. |
 | `GET /api/v1/apps/{appid}/proton-log` | client cert | live | Query `lines` (default 200). `{appid, proton_log: {path, exists, lines?, mtime?, hint?}, steam_logs: [{file, mtime, lines}]}`: `~/steam-<appid>.log` (written with the launch option `PROTON_LOG=1 %command%`) and the lines of Steam's `logs/` that mention the app. As `logs_read(source="proton")`. |
@@ -229,7 +231,7 @@ Errors: `400` bad argument, `403` sensitive path, `404` unknown app/path, `502` 
 | `GET /api/v1/fs` | client cert | live | `fs_list`. Query: `path` (absolute or `~/...`), `depth` 1-5 (default 1), `glob` (on the name, or on the relative path if it has a `/`). `{path, depth, glob, entries: [{path, type: file\|dir\|symlink\|other, size, mtime, target?, sensitive?}], count, truncated}`, at most 2000 entries. Sensitive files (Steam `config/loginusers.vdf`, `config/config.vdf`, `ssfn*`) are flagged in listings and refused (`403`) as the path itself, also through symlinks. |
 | `GET /api/v1/fs/read` | client cert | live | Query `path`. The file's bytes, `Content-Type: application/octet-stream`. Up to 64 MiB (`413`, code `EFBIG`, above). `403` for sensitive files, `404` missing, `409` `EISDIR` for a directory, `400` for a non-regular file. |
 | `PUT /api/v1/fs/write` | client cert | live | Query `path`, `create=1` (default; `0`: `404` if missing), `overwrite=1` (default; `0`: `409` `EEXIST` if present); body: the raw bytes (at most 64 MiB). Writes a temp file next to the target and renames it over; an existing file keeps its mode and owner, a new file is `0644` and, like any parent dirs it creates, owned by its parent dir's owner (the server runs as root, the game must still write its saves). `{path, bytes, created}`. Only inside the [write roots](#file-writes); `403` elsewhere and for `tools/guard` write-protected files. |
-| `POST /api/v1/fs/mkdir` | client cert | live | JSON `{path, parents?}` (or query `path`, `parents=1`). `409` `EEXIST` if it exists, `404` if the parent is missing without `parents`. Write roots apply. `{path, created}`. |
+| `POST /api/v1/fs/mkdir` | client cert | live | JSON `{path, parents?}`. `409` `EEXIST` if it exists, `404` if the parent is missing without `parents`. Write roots apply. `{path, created}`. |
 | `POST /api/v1/fs/rename` | client cert | live | JSON `{from, to, overwrite?}`. Both paths must be inside the write roots (a symlink is moved, not its target); `409` `EEXIST` unless `overwrite`, `404` if `from` or the parent of `to` is missing; refuses a directory holding sensitive files. `{from, to}`. |
 | `DELETE /api/v1/fs` | client cert | live | Query `path`, `confirm=1` required (`400` without). Same rules as the `fs_delete` tool (game dir contents, compatdata/shadercache entries, `userdata/<account>/<appid>`, the plugin runtime dir); elsewhere `403`. `{deleted, files, bytes}`. |
 
@@ -244,7 +246,8 @@ inside `steamapps/common/<game>/` of any library, inside a Proton prefix `steama
 `~/.config/<dir>/...` (`~/.config/unity3d/<company>/<product>/...`) where `<dir>` matches an installed title's name or
 install dir as `app_dirs` matches them (not Steam's own dir or desktop config such as `systemd`, `autostart`, `fish`).
 The entries themselves (a game dir, a prefix, a `~/.local/share/<Game>` dir) cannot be replaced. Everything in
-`tools/guard.py` (`is_write_protected`) is refused everywhere.
+`tools/guard.py` (`is_write_protected`) is refused everywhere. These roots apply to the `/fs` routes; the `fs_write`
+tool writes anywhere except guarded files.
 
 ## Recordings
 
@@ -357,36 +360,38 @@ MCP tools only.
 
 | Tool | Notes |
 | --- | --- |
-| `plugin_methods(dir)` | Parses (does not import) `<dir>/main.py` with `ast`: public `async def` methods of the top-level `class Plugin`. `{dir, file, methods: [{name, args: [{name, annotation?, default?}], doc, line}]}`; `*args`/`**kw` appear as `*name`/`**name`, `doc` is the first docstring line. |
-| `call_plugin_method(plugin, method, args=[], timeout=30)` | `plugin` is the `plugin.json` name (e.g. `Decky Toolkit`). Keys named `token` are removed from `result` at any depth. Runs `window.DeckyBackend.call('loader/call_plugin_method', plugin, method, ...args)` in SharedJSContext, i.e. exactly what the plugin's frontend `callable()` does, over the frontend's existing loader connection. `{ok: true, result}`, or `{ok: false, error, traceback}`: Decky rejects with a `PyError` whose message is empty and whose `pythonTraceback` ends in the exception line (e.g. `Exception: port must be 1024-65535`); an unknown method also fails this way. Methods starting with `_` (lifecycle hooks) are refused before anything is sent. |
-| `plugin_frontend_check(dir)` | Scans `<dir>/src/**/*.ts(x)` when sources are installed, else `dist/index.js`, for `callable("x")` / `call("x", ...)` (also `callable$1` and TS generics), and compares with `plugin_methods`. `{source: "src"\|"dist", files_scanned, frontend_calls: {name: ["file:line"]}, backend_methods, missing_backend, unused_backend}`. `missing_backend` entries fail at runtime. |
+| `plugin_methods(plugin)` | Parses (does not import) the plugin's `main.py` with `ast`: public `async def` methods of the top-level `class Plugin`. `{dir, file, methods: [{name, args: [{name, annotation?, default?}], doc, line}]}`; `*args`/`**kw` appear as `*name`/`**name`, `doc` is the first docstring line. |
+| `plugin_call(plugin, method, args=[], timeout=30)` | `plugin` is the directory or `plugin.json` name, as for every `plugin_*` tool. Keys named `token` are removed from `result` at any depth. Runs `window.DeckyBackend.call('loader/call_plugin_method', plugin, method, ...args)` in SharedJSContext, i.e. exactly what the plugin's frontend `callable()` does, over the frontend's existing loader connection. `{ok: true, result}`, or `{ok: false, error, traceback}`: Decky rejects with a `PyError` whose message is empty and whose `pythonTraceback` ends in the exception line (e.g. `Exception: port must be 1024-65535`); an unknown method also fails this way. Methods starting with `_` (lifecycle hooks) are refused before anything is sent. |
+| `plugin_frontend_check(plugin)` | Scans the plugin's `src/**/*.ts(x)` when sources are installed, else `dist/index.js`, for `callable("x")` / `call("x", ...)` (also `callable$1` and TS generics), and compares with `plugin_methods`. `{source: "src"\|"dist", files_scanned, frontend_calls: {name: ["file:line"]}, backend_methods, missing_backend, unused_backend}`. `missing_backend` entries fail at runtime. |
 
 ## Security
 
 - Every route except the public ones needs a paired client certificate (see [Authentication](#authentication)).
-- **Sensitive files.** `fs_read` refuses, and `fs_write` refuses to write, Steam login/session
+- **Sensitive files.** Every file tool and `/fs` route refuses to read or write Steam login/session
   material and keys: `*/config/loginusers.vdf`, `*/config/config.vdf`, `ssfn*`, `*/local.vdf`, Steam's
   CEF cookie store (`*/htmlcache/*Cookies*`), `~/.ssh/id_*` (not `.pub`), `/etc/shadow`, `/etc/gshadow`.
-  `fs_write` also refuses `*/config/libraryfolders.vdf` and `*/steamapps/libraryfolders.vdf` (readable).
+  Writes also refuse `*/config/libraryfolders.vdf` and `*/steamapps/libraryfolders.vdf` (readable).
   Matching is case-insensitive on both the given and the symlink-resolved path. The list lives in
   `py_modules/decky_toolkit/tools/guard.py` (`is_sensitive`, `is_write_protected`, `check_read`,
-  `check_write`); every tool that takes a device path calls it. The error is `PermissionError: refusing
-  to read ...`.
+  `check_write`); every tool and route that takes a device path calls it. The error is `SensitivePath`
+  (a `PermissionError`, `403` on the routes): `refusing to read ...`.
+- **File writes.** The tools and routes share one implementation (`games/files.py`: atomic replace,
+  ownership kept, `~` is the desktop user's home). The `/fs` routes write only inside the
+  [write roots](#file-writes); the `fs_write` tool writes anywhere except guarded files, since an agent can run
+  root shell commands with `device_run` anyway. `fs_delete` and `DELETE /fs` are limited to the delete roots.
 - **Confirm.** `loader_restart` and `plugin_install` with `restart: "loader"` (the default) need
   `confirm: true`; without it they fail with a message saying so and do nothing. Future delete-type
   tools follow the same rule. The client API's `POST /api/v1/loader/restart` and `POST /api/v1/plugins/install` need a
   paired client certificate instead; `POST /api/v1/apps/{appid}/terminate` and `DELETE /api/v1/fs` need a confirm field.
-- **Audit log.** Calls of `cef_evaluate`, `fs_write`, `plugin_install`, `plugin_reload`,
-  `loader_restart`, `plugin_call`, `input_*`, `input_settings`, `controller_remove` and
+- **Audit log.** Calls of `cef_evaluate`, `fs_write`, `fs_delete`, `plugin_install`, `plugin_reload`,
+  `loader_restart`, `plugin_call`, `app_terminate`, `recording_delete`, `input_*`, `controller_remove` and
   `ui_navigate` write one line to the plugin log (and the loader journal), before the tool runs:
   `audit tool=fs_write origin=10.0.0.30 via=mcp args=content,path`. Only argument names the tool's
   schema declares are listed (others are counted, `+1 unknown`); values never are. Every authenticated
   `POST`/`PUT`/`DELETE` request except `/mcp` logs `audit route=POST /api/v1/plugins/install origin=<ip>
   via=http`. The origin comes from the `audit.request_origin` context variable, set per request by an
   app middleware (`via=mcp` for `/mcp`, `http` otherwise).
-- **Remote files.** `GET /fs/read`, `PUT /fs/write`, `POST /fs/mkdir`, `POST /fs/rename` and `DELETE /fs` need a
-  paired client certificate, apply the sensitive-path guard, and write only inside the
-  [write roots](#file-writes); `DELETE /fs` needs `confirm=1`.
+- **Remote files.** The `/api/v1/fs` routes need a paired client certificate; `DELETE /api/v1/fs` needs `confirm=1`.
 - **Planned: per-client access levels.** Not implemented. A pairing could grant `observe` (screen, logs,
   console, routes, status), `standard` (plus input and navigation) or `full` (plus `cef_evaluate`,
   file writes, installs, plugin calls), checked in the tool registry and the REST routes, with the
@@ -427,10 +432,13 @@ someone_at_device}`; `dialog` is the open Steam dialog, `keyboard` whether the o
 `ui_query`, `ui_focus`, `ui_wait`: see [UI query](#ui-query). `plugin_methods`, `plugin_call`, `plugin_frontend_check`:
 see [Plugin calls](#plugin-calls). `loader_restart` and `plugin_install` with `restart: "loader"` need
 `confirm: true` (see [Security](#security)). `app_list` (`installed_only`, `query`, `include_tools`; `running: true`:
-`{running: [{appid, name, pid, processes}], main_appid}`), `app_info` (`appid`), `app_dirs` (`appid`), `app_saves`
+`{running: [{appid, name, pid, processes}], main_appid}`), `app_info` (`appid`: the list fields plus `gameid, developer, platforms, playtime_minutes, launch_options,
+build_id, cloud, processes` (when running) and `dirs`), `app_dirs` (`appid`), `app_saves`
 (`appid`, `limit`): as `/apps...`. `app_launch` (`appid`, `wait` s, default 15): `{launched, running}`, plus
 `game_actions` and a note when Steam did not start it (a dialog). `app_terminate` (`appid`, `confirm: true` required,
-`wait`). `fs_list` (`path`, `depth`, `glob`): as `/fs`. `fs_stat` (`path`). `fs_read`, `fs_write`. `fs_delete` (`path`,
+`wait`). `fs_list` (`path`, `depth`, `glob`): as `/fs`. `fs_stat` (`path`). `fs_read` (`path`, `max_bytes` (default 200000)): `{path, text|base64, truncated}`, cut to
+`max_bytes`. `fs_write` (`path`, `content`): `{path, bytes, created}`, anywhere except guarded files, as `/fs/write`
+otherwise. `fs_delete` (`path`,
 `confirm: true` required; only inside `steamapps/common/<game>/...`, a `compatdata/<appid>` or `shadercache/<appid>`
 entry, `userdata/<account>/<appid>/...` or the plugin runtime dir). `screen_record` (`seconds` up to 120, `fps`,
 `with_audio`, `name`, `wait`), `screen_record_stop`, `recording_list`, `recording_delete` (`name`, `confirm: true`

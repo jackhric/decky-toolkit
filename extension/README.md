@@ -111,7 +111,7 @@ How devices are found:
   This also finds older plugin builds that do not advertise, and networks that filter multicast.
   A /24 takes about 2.5 s.
 
-Only answers whose `/health` identifies Decky Toolkit (or its old name `decky-mcp`) are listed. The saved
+Only answers whose `/health` identifies Decky Toolkit are listed. The saved
 device (same address or host name, and port) and a second address of the same device (`device_id`)
 are left out. Loopback, link-local, container, VM and VPN interfaces (`docker*`, `br-*`, `virbr*`,
 `veth*`, `tun*`, `wg*`, `tailscale*`, …) are skipped.
@@ -529,8 +529,7 @@ All of these are also in the command palette under the `Decky:` category.
 | `decky-toolkit.deploy.watchBuild` | `true` | While auto-deploy is on, run the plugin's `watch` script in the background |
 | `decky-toolkit.discovery.enabled` | `true` | List unsaved Decky Toolkit devices on the local network under **On this network** (see [Discovery](#discovery)) |
 
-The saved device lives in VS Code's global state (`decky-toolkit.devices`), so all windows share it. A
-list with several devices saved by an older version is cut down to the last connected one at startup.
+The saved device lives in VS Code's global state (`decky-toolkit.devices`), so all windows share it.
 The pairing is kept in `~/.config/decky-toolkit/identity.json` (`%APPDATA%\decky-toolkit\identity.json` on
 Windows), one device per machine, and shared with the upcoming CLI.
 

@@ -83,7 +83,7 @@ def test_file_tools_apply_the_guard(tmp_path):
     secret.parent.mkdir(parents=True)
     secret.write_text("users")
     res = call("fs_read", path=str(secret))
-    assert res["isError"] and res["content"][0]["text"].startswith("PermissionError: refusing to read")
+    assert res["isError"] and res["content"][0]["text"].startswith("SensitivePath: refusing to read")
     assert "Traceback" not in res["content"][0]["text"]
     res = call("fs_write", path=str(tmp_path / "Steam" / "config" / "libraryfolders.vdf"), content="x")
     assert res["isError"] and "refusing to write" in res["content"][0]["text"]
@@ -129,6 +129,7 @@ def test_audit_line_lists_known_keys_only():
     assert "s3cret" not in line and "/x" not in line
     assert audit.tool_line("loader_restart", {}, []) == 'audit tool=loader_restart origin=- client="-" via=local args=-'
     assert audit.is_audited("input_mouse") and audit.is_audited("cef_evaluate") and not audit.is_audited("logs_read")
+    assert all(audit.is_audited(t) for t in ("input_settings", "fs_delete", "app_terminate", "recording_delete", "fs_write"))
 
 
 

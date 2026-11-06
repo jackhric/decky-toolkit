@@ -1,6 +1,5 @@
-"""Tools about the loader, plugins, logs and files on the device."""
+"""Tools about the loader, plugins and the device itself."""
 import asyncio
-import base64
 import json
 import os
 import platform
@@ -8,7 +7,6 @@ import sys
 from typing import Any
 
 from . import ToolRegistry
-from .guard import check_read, check_write
 
 
 def _env(name: str, default: str = "") -> str:
@@ -138,39 +136,3 @@ def register(reg: ToolRegistry) -> None:
         require_confirm(confirm, "loader_restart restarts every plugin and drops this connection for a few seconds")
         await schedule_loader_restart()
         return "plugin_loader restart scheduled in ~1s. The MCP server will drop and come back on the same port."
-
-    @reg.add(
-        "fs_write",
-        "Write a text file on the device (runs as root). Intended for dropping config or test fixtures during development. "
-        "Refuses Steam credential/session files, Steam library folder lists and SSH keys.",
-        {"properties": {"path": {"type": "string"}, "content": {"type": "string"}, "mode": {"type": "string", "default": "0644"}},
-         "required": ["path", "content"]},
-    )
-    async def fs_write(path: str, content: str, mode: str = "0644") -> str:
-        if not os.path.isabs(path):
-            raise ValueError("path must be absolute")
-        check_write(path)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w") as f:
-            f.write(content)
-        os.chmod(path, int(mode, 8))
-        return f"wrote {len(content.encode())} bytes to {path}"
-
-    @reg.add(
-        "fs_read",
-        "Read a text file on the device (runs as root). Large files are truncated to max_bytes from the start. "
-        "Refuses Steam credential/session files (loginusers.vdf, config.vdf, local.vdf, ssfn*) and SSH keys.",
-        {"properties": {"path": {"type": "string"}, "max_bytes": {"type": "integer", "default": 200000}}, "required": ["path"]},
-    )
-    async def fs_read(path: str, max_bytes: int = 200_000) -> dict[str, Any]:
-        if not os.path.isabs(path):
-            raise ValueError("path must be absolute")
-        check_read(path)
-        size = os.path.getsize(path)
-        with open(path, "rb") as f:
-            data = f.read(max_bytes)
-        try:
-            text = data.decode()
-        except UnicodeDecodeError:
-            return {"path": path, "size": size, "base64": base64.b64encode(data).decode(), "truncated": size > max_bytes}
-        return {"path": path, "size": size, "text": text, "truncated": size > max_bytes}

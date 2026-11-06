@@ -460,9 +460,6 @@ class InputService:
     def add_pad_listener(self, fn: Callable[[], None]) -> None:
         self._pad_listeners.add(fn)
 
-    def remove_pad_listener(self, fn: Callable[[], None]) -> None:
-        self._pad_listeners.discard(fn)
-
     def _pads_changed(self) -> None:
         for fn in list(self._pad_listeners):
             fn()

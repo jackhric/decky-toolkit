@@ -240,10 +240,6 @@ class Plugin:
 
     # ---- methods callable from the frontend ----
 
-    async def get_input_settings(self) -> dict[str, Any]:
-        assert self.input is not None  # created in _main
-        return self.input.status()
-
     async def set_input_enabled(self, enabled: bool) -> dict[str, Any]:
         assert self.input is not None
         return await self.input.set_enabled(bool(enabled))
@@ -267,12 +263,6 @@ class Plugin:
             "connected": self.clients.any_connected(),
             "clients": self._connected_clients(),
         }
-
-    async def set_stream_settings(self, fps: int | None = None, quality: int | None = None, width: int | None = None,
-                                  audio: bool | None = None) -> dict[str, Any]:
-        assert self.capturer is not None  # created in _main
-        await self.capturer.update_settings(fps, quality, width, audio)
-        return await self.get_status()
 
     async def set_enabled(self, enabled: bool) -> dict[str, Any]:
         self.settings.enabled = bool(enabled)
