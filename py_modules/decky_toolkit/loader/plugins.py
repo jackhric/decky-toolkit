@@ -21,10 +21,15 @@ def plugins_dir() -> str:
     return os.path.join(os.environ.get("DECKY_HOME", ""), "plugins")
 
 
+def check_dir_name(dirname: str) -> str:
+    """A plugin directory name as it appears under plugins/ and logs/: no path separators, not hidden."""
+    if not isinstance(dirname, str) or not dirname or "/" in dirname or dirname.startswith("."):
+        raise ValueError(f"{dirname!r} is not a bare plugin directory name")
+    return dirname
+
+
 def plugin_name(dirname: str) -> str:
-    if not dirname or "/" in dirname or dirname.startswith("."):
-        raise ValueError("dir must be a bare plugin directory name")
-    path = os.path.join(plugins_dir(), dirname, "plugin.json")
+    path = os.path.join(plugins_dir(), check_dir_name(dirname), "plugin.json")
     try:
         with open(path) as f:
             name = json.load(f).get("name")

@@ -10,8 +10,8 @@ See README.md for setup and docs/reference.md for the tool list and architecture
 - `py_modules/decky_toolkit/` — grouped by area; `settings.py` and `diagnostics.py` (thread/task stacks for the
   `toolkit_stacks` tool, a watchdog thread that logs the loop thread's stack when the event loop stops answering
   for 2 s, SIGUSR1 faulthandler dump to `<runtime dir>/stacks.txt`) and `shell.py` (`device_run`:
-  bash as the desktop user, or root with `root: true`; every command logged), `system.py` (`run`, `clean_env`,
-  `tail`) and `guard.py` (sensitive-path deny list) at the top.
+  bash as the desktop user, or root with `root: true`; every command logged), `system.py` (`run`, `clean_env`, `tail`, the desktop user,
+  its home and runtime dir) and `guard.py` (sensitive-path deny list) at the top.
   - `server/`: `protocol.py` (JSON-RPC + HTTP transport), `http.py` (the versioned client API under `/api/v1`, see `docs/api.md`;
     `server/__init__.py` holds `API_PREFIX`/`API_VERSIONS`), `auth.py`
     (client-certificate auth), `tls.py` (device identity, client certs, paired-client store), `pairing.py`,

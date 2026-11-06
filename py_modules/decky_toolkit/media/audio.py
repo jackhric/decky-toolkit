@@ -14,7 +14,8 @@ import sys
 import time
 from typing import AsyncIterator, Callable
 
-from .capture import IDLE_STOP_SECONDS, _user_runtime_dir
+from ..system import clean_env, user_runtime_dir
+from .capture import IDLE_STOP_SECONDS
 from ..settings import Settings
 
 RATE = 48000
@@ -64,8 +65,8 @@ class AudioCapturer:
     def unavailable_reason(self) -> str | None:
         if shutil.which("gst-launch-1.0") is None:
             return "gst-launch-1.0 not found on this OS image"
-        if not os.path.exists(os.path.join(_user_runtime_dir(), "pipewire-0")):
-            return f"PipeWire socket not found in {_user_runtime_dir()} (is the user session running?)"
+        if not os.path.exists(os.path.join(user_runtime_dir(), "pipewire-0")):
+            return f"PipeWire socket not found in {user_runtime_dir()} (is the user session running?)"
         return None
 
     @property
@@ -86,8 +87,8 @@ class AudioCapturer:
         ]
 
     def _env(self) -> dict[str, str]:
-        env = {k: v for k, v in os.environ.items() if k != "LD_LIBRARY_PATH"}
-        env["XDG_RUNTIME_DIR"] = _user_runtime_dir()
+        env = clean_env()
+        env["XDG_RUNTIME_DIR"] = user_runtime_dir()
         env.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin")
         return env
 
