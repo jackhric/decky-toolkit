@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
 import { hostname } from 'os';
-import { DeckyClient, describeError, isRejection } from '@decky-toolkit/client/client';
+import { DeckyClient, describeError } from '@decky-toolkit/client/client';
 import { PairOutcome, requestApproval } from '@decky-toolkit/client/pairing';
-import { Identity, isPlainHttpDevice } from '@decky-toolkit/client/transport';
+import { isPlainHttpDevice } from '@decky-toolkit/client/transport';
 import type { Connection, SavedDevice } from './connection';
 
 export { pairingCode, pairingTimings } from '@decky-toolkit/client/pairing';
@@ -22,17 +22,6 @@ async function reachable(c: Connection, d: SavedDevice): Promise<boolean> {
   } catch (e) {
     // An older plugin still answers; pairing then says it needs an update.
     return isPlainHttpDevice(e);
-  }
-}
-
-/** `/health` needs no pairing, so check one paired route; only a rejection means the pairing is gone. */
-async function identityAccepted(d: SavedDevice, identity: Identity): Promise<boolean> {
-  try {
-    const res = await new DeckyClient(d, identity).fetch('/stream/stats', { timeoutMs: 5000 });
-    await res.text();
-    return res.status !== 401;
-  } catch (e) {
-    return !(isRejection(e) || isPlainHttpDevice(e));
   }
 }
 
@@ -80,7 +69,9 @@ export async function connect(c: Connection, device: SavedDevice, interactive = 
       outcome = 'unreachable';
     } else {
       const identity = await c.identityFor(d);
-      outcome = identity && (await identityAccepted(d, identity)) ? 'connected' : 'pair';
+      // The device answered /health just now, so a check that fails for another reason still counts as accepted.
+      const check = identity && await new DeckyClient(d, identity).acceptsIdentity();
+      outcome = check && check !== 'rejected' && check !== 'unsupported' ? 'connected' : 'pair';
       if (outcome === 'connected') await c.markConnected(d.id);
     }
   } finally {
