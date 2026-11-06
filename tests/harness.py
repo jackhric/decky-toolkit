@@ -38,10 +38,12 @@ def make_registry(**overrides) -> ToolRegistry:
     return build_registry(make_services(**overrides))
 
 
-async def with_server(fn, *, mcp: ToolRegistry | None = None, auth=None, ssl_context=None, logger=LOG,
-                      log_keepalive: float = LOG_KEEPALIVE_SECONDS, heartbeat: float = HEARTBEAT_SECONDS, **services):
-    """Run the app on a free port and call `fn(session, base_url)`; keyword arguments replace services."""
-    api = Api(make_services(**services), auth=auth or stub_auth(), mcp=McpServer(mcp or ToolRegistry(), logger),
+async def with_server(fn, *, services: Services | None = None, mcp: ToolRegistry | None = None, auth=None,
+                      ssl_context=None, logger=LOG, log_keepalive: float = LOG_KEEPALIVE_SECONDS,
+                      heartbeat: float = HEARTBEAT_SECONDS, **overrides):
+    """Run the app on a free port and call `fn(session, base_url)`; `services`, or keyword arguments that replace
+    single services."""
+    api = Api(services or make_services(**overrides), auth=auth or stub_auth(), mcp=McpServer(mcp or ToolRegistry(), logger),
               logger=logger, log_keepalive=log_keepalive, heartbeat=heartbeat)
     runner = web.AppRunner(api.build_app(), shutdown_timeout=2)
     await runner.setup()

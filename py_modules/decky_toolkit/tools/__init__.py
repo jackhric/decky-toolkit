@@ -142,13 +142,11 @@ def error_result(text: str) -> dict[str, Any]:
 
 
 def build_registry(services: "Services") -> ToolRegistry:
-    from ..steam.ui import UiInspector
     from . import (activity, apps, cef, controllers, games, input, logs, perf, plugin_api, plugins, record, screen,
                    shell, system, ui)
 
     s = services
-    inspector = UiInspector(s.ui)
-    orient = ui.Orientation(inspector, s.activity)
+    orient = ui.Orientation(s.inspector, s.activity)
     reg = ToolRegistry()
     system.register(reg)
     plugins.register(reg, s.events)
@@ -158,7 +156,7 @@ def build_registry(services: "Services") -> ToolRegistry:
     screen.register(reg, s.capturer, orient)
     input.register(reg, s.input, s.capturer, orient)
     controllers.register(reg, s.controllers)
-    ui.register(reg, inspector, s.capturer, orient)
+    ui.register(reg, s.ui, s.inspector, s.capturer, orient)
     apps.register(reg, s.apps)
     games.register(reg, s.apps)
     record.register(reg, s.capturer)
