@@ -140,9 +140,7 @@ def test_run_command_does_not_wait_for_background_children():
     t = time.monotonic()
     r = run(shell.run_command("sleep 30 & echo $!", logger=LOG))
     pid = int(r["stdout"])
-    # Whether the child still holds the pipes (and "background" is set) depends on the runner; that it keeps
-    # running and the call returns anyway does not.
-    assert r["exit_code"] == 0 and time.monotonic() - t < 4
+    assert r["exit_code"] == 0 and "background" in r and time.monotonic() - t < 4
     os.kill(pid, 0)  # still running
     os.kill(pid, 15)
 

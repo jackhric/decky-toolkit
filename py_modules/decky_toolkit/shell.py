@@ -8,6 +8,7 @@ import logging
 import os
 import pwd
 import signal
+import tempfile
 import time
 from typing import Any
 
@@ -59,11 +60,32 @@ class _Capped:
     def __init__(self, cap: int):
         self.cap, self.kept, self.total = cap, bytearray(), 0
 
-    async def read(self, stream: asyncio.StreamReader) -> None:
-        while chunk := await stream.read(65536):
-            self.total += len(chunk)
-            if len(self.kept) < self.cap:
-                self.kept += chunk[: self.cap - len(self.kept)]
+    async def read(self, fd: int) -> None:
+        """Reads `fd` (non-blocking) to EOF, then closes it; cancelling stops reading and closes it too."""
+        loop = asyncio.get_running_loop()
+        done = loop.create_future()
+
+        def readable() -> None:
+            try:
+                while chunk := os.read(fd, 65536):
+                    self.total += len(chunk)
+                    if len(self.kept) < self.cap:
+                        self.kept += chunk[: self.cap - len(self.kept)]
+                if not done.done():
+                    done.set_result(None)
+            except BlockingIOError:
+                pass
+            except OSError as e:
+                if not done.done():
+                    done.set_exception(e)
+
+        os.set_blocking(fd, False)
+        loop.add_reader(fd, readable)
+        try:
+            await done
+        finally:
+            loop.remove_reader(fd)
+            os.close(fd)
 
 
 def _kill_group(proc: asyncio.subprocess.Process, sig: int) -> None:
@@ -97,18 +119,31 @@ async def run_command(command: str, cwd: str | None = None, timeout: float = DEF
     if switch:
         kwargs = {"user": user.pw_uid, "group": user.pw_gid,
                   "extra_groups": [g for g in os.getgrouplist(user.pw_name, user.pw_gid) if g != user.pw_gid]}
+    # Our own pipes, not asyncio's: Process.wait() waits until its pipes close, which a backgrounded child
+    # (`server &`) holding them would delay until it exits (seen on CI's Python 3.14 build).
+    out_r, out_w = os.pipe()
+    err_r, err_w = os.pipe()
+    stdin_file = tempfile.TemporaryFile() if stdin is not None else None
+    if stdin_file is not None:
+        stdin_file.write(stdin.encode())
+        stdin_file.seek(0)
     t0 = time.monotonic()
-    proc = await asyncio.create_subprocess_exec(
-        "/bin/bash", "-c", command, cwd=workdir, env=_env(user, as_root), start_new_session=True,
-        stdin=asyncio.subprocess.PIPE if stdin is not None else asyncio.subprocess.DEVNULL,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, **kwargs)
-    assert proc.stdout is not None and proc.stderr is not None
-    if stdin is not None and proc.stdin is not None:
-        proc.stdin.write(stdin.encode())
-        await proc.stdin.drain()
-        proc.stdin.close()
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "/bin/bash", "-c", command, cwd=workdir, env=_env(user, as_root), start_new_session=True,
+            stdin=stdin_file if stdin_file is not None else asyncio.subprocess.DEVNULL,
+            stdout=out_w, stderr=err_w, **kwargs)
+    except BaseException:
+        os.close(out_r)
+        os.close(err_r)
+        raise
+    finally:
+        os.close(out_w)
+        os.close(err_w)
+        if stdin_file is not None:
+            stdin_file.close()
     out, err = _Capped(cap), _Capped(cap)
-    readers = [asyncio.create_task(out.read(proc.stdout)), asyncio.create_task(err.read(proc.stderr))]
+    readers = [asyncio.create_task(out.read(out_r)), asyncio.create_task(err.read(err_r))]
     timed_out = False
     try:
         await asyncio.wait_for(proc.wait(), timeout)
