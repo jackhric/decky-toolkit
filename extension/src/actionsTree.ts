@@ -115,8 +115,8 @@ export class ActionsTreeProvider implements vscode.TreeDataProvider<ActionNode>,
     children[0].tooltip = 'Build if sources changed, install and reload only this plugin (no loader restart)';
     children[1].tooltip = 'Build if sources changed, install and restart Decky Loader (reloads the Steam UI)';
     children[4].tooltip = auto
-      ? 'On: every change to dist/index.js, main.py or py_modules/**/*.py deploys (no build; keep `pnpm run watch` running). Click to turn off'
-      : 'Off. Click to deploy automatically whenever dist/index.js, main.py or py_modules/**/*.py change';
+      ? 'On: runs the watch build; the first change deploys, later ones push the changed files and reload the plugin in place. Click to turn off'
+      : 'Off. Click to run the watch build and keep the device in step: changed files are pushed and the plugin reloads in place';
     const g = group('plugin', 'Plugin', 'package', true, children);
     if (plugins.length === 0) {
       g.description = 'no plugin.json in workspace';

@@ -232,7 +232,7 @@ const vscode = {
       const change = new EventEmitter();
       const w = {
         pattern, disposed: false, onDidCreate: change.event, onDidDelete: noopEvent, onDidChange: change.event,
-        fire: () => change.fire(), dispose() { this.disposed = true; },
+        fire: uri => change.fire(uri), dispose() { this.disposed = true; },
       };
       calls.watchers.push(w);
       return w;
@@ -585,8 +585,19 @@ const deviceFetch = async (url, init = {}) => {
   }
   if (u.pathname === '/fs' || u.pathname.startsWith('/fs/')) return fsRoute(u, init, json);
   if (u.pathname === '/frame.jpg') return new Response(frameJpeg, { headers: { 'content-type': 'image/jpeg' } });
+  const files = /^\/plugins\/([^/]+)\/files$/.exec(u.pathname);
+  if (files && init.method === 'PUT') {
+    device.filePuts = [...(device.filePuts ?? []), { dir: decodeURIComponent(files[1]), path: u.searchParams.get('path'), bytes: init.body.length }];
+    return json({ dir: decodeURIComponent(files[1]), path: u.searchParams.get('path'), bytes: init.body.length });
+  }
   const reload = /^\/plugins\/([^/]+)\/reload$/.exec(u.pathname);
-  if (reload && init.method === 'POST') return json({ ok: true, dir: decodeURIComponent(reload[1]) });
+  if (reload && init.method === 'POST') {
+    const dir = decodeURIComponent(reload[1]);
+    const mode = u.searchParams.get('mode');
+    if (!mode) return json({ ok: true, dir });
+    device.liveReloads = [...(device.liveReloads ?? []), { dir, mode }];
+    return json({ dir, name: device.installMeta.name, mode, load_ms: 9, reloaded: true, errors: [], restored: ['panel'], routes: [] });
+  }
   return new Response('not found', { status: 404 });
 };
 globalThis.fetch = deviceFetch;
@@ -973,7 +984,7 @@ await check('package.json: container, activation, commands, menus, version', asy
     assert.deepEqual(welcomeFor(view, new Map([['decky-toolkit.link', 'connected']])).filter(t => /device/.test(t) && !/controllers/.test(t)), [], `${view} connected: no lost-connection text`);
   }
   assert.deepEqual(Object.keys(pkg.contributes.configuration.properties).sort(),
-    ['decky-toolkit.deploy.build', 'decky-toolkit.deploy.onChange', 'decky-toolkit.discovery.enabled', 'decky-toolkit.host', 'decky-toolkit.mcpPort', 'decky-toolkit.openScreenOnConnect', 'decky-toolkit.pluginDirName', 'decky-toolkit.port']);
+    ['decky-toolkit.deploy.build', 'decky-toolkit.deploy.onChange', 'decky-toolkit.deploy.watchBuild', 'decky-toolkit.discovery.enabled', 'decky-toolkit.host', 'decky-toolkit.mcpPort', 'decky-toolkit.openScreenOnConnect', 'decky-toolkit.pluginDirName', 'decky-toolkit.port']);
   assert.equal(pkg.contributes.configuration.properties['decky-toolkit.mcpPort'].default, 8766);
   assert.doesNotMatch(JSON.stringify(pkg.contributes), /\btoken\b|TLS|certificate|encrypted/i, 'user-facing strings name no mechanism');
   assert.deepEqual(pkg.contributes.configuration.properties['decky-toolkit.deploy.build'].enum, ['auto', 'always', 'never']);
@@ -1378,11 +1389,11 @@ await check('auto-deploy on change: toggle leaf, watchers, one debounced deploy 
   assert.equal(toggle.iconPath.id, 'sync');
   const live = calls.watchers.filter(w => w.pattern instanceof RelativePattern && !w.disposed);
   assert.deepEqual(live.map(w => [w.pattern.base.fsPath, w.pattern.pattern]),
-    [[root, 'dist/index.js'], [root, 'main.py'], [root, 'py_modules/**/*.py']]);
+    [[root, '{dist/**,py_modules/**,assets/**,defaults/**,main.py,plugin.json,package.json}']]);
   const installs = device.installs.length;
   calls.statusMessages.length = 0;
   live[0].fire();
-  live[1].fire();
+  live[0].fire();
   await settle(200);
   live[0].fire();
   await settle(ext.AUTO_DEPLOY_DEBOUNCE_MS + 2500);
@@ -1393,6 +1404,40 @@ await check('auto-deploy on change: toggle leaf, watchers, one debounced deploy 
   assert.equal(settings['deploy.onChange'], false);
   assert.ok(live.every(w => w.disposed), 'watchers disposed when turned off');
   return `3 changes → 1 install (restart=${device.installs.at(-1).restart}, build skipped despite deploy.build=always); "${deployed}"`;
+});
+
+await check('auto-deploy on a device with live sync: first change deploys, later ones push and reload in place', async () => {
+  const root = path.join(scratch, 'ws', 'my-plugin');
+  const apiBefore = health.api_version;
+  health.api_version = 3;
+  device.filePuts = [];
+  device.liveReloads = [];
+  mkdirSync(path.join(root, 'dist'), { recursive: true });
+  writeFileSync(path.join(root, 'dist', 'index.js'), 'export default 1;\n');
+  await run('decky-toolkit.toggleAutoDeploy');
+  const watcher = calls.watchers.filter(w => w.pattern instanceof RelativePattern && !w.disposed)[0];
+  const installs = device.installs.length;
+  watcher.fire(Uri.file(path.join(root, 'dist', 'index.js')));
+  await settle(ext.AUTO_DEPLOY_DEBOUNCE_MS + 2500);
+  assert.equal(device.installs.length, installs + 1, 'the first change deploys');
+  assert.match(output(), /Live sync on for My Plugin/);
+  writeFileSync(path.join(root, 'dist', 'index.js'), 'export default 2;\n');
+  watcher.fire(Uri.file(path.join(root, 'dist', 'index.js')));
+  writeFileSync(path.join(root, 'dist', 'index.js.map'), '{}');
+  watcher.fire(Uri.file(path.join(root, 'dist', 'index.js.map')));
+  await settle(400);
+  assert.equal(device.installs.length, installs + 1, 'no second install');
+  assert.deepEqual(device.filePuts.map(f => f.path), ['dist/index.js', 'dist/index.js.map']);
+  assert.deepEqual(device.liveReloads, [{ dir: 'my-plugin', mode: 'frontend' }]);
+  const status = calls.statusMessages.at(-1);
+  assert.match(status, /^\$\(check\) Decky: reloaded My Plugin \(frontend\) in \d+ ms$/);
+  writeFileSync(path.join(root, 'plugin.json'), JSON.stringify({ name: 'My Plugin', author: 'me', flags: [], api_version: 1, x: 1 }));
+  watcher.fire(Uri.file(path.join(root, 'plugin.json')));
+  await settle(ext.AUTO_DEPLOY_DEBOUNCE_MS + 2500);
+  assert.equal(device.installs.length, installs + 2, 'a manifest change deploys in full');
+  await run('decky-toolkit.toggleAutoDeploy');
+  health.api_version = apiBefore;
+  return `deploy, then push ${device.filePuts.map(f => f.path).join(' + ')} and a frontend reload ("${status}"), plugin.json → deploy`;
 });
 
 await check('decky-toolkit.pluginDirName overrides the deploy dir', async () => {

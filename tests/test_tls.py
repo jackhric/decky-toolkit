@@ -216,7 +216,7 @@ def test_mutual_tls_end_to_end(tmp_path):
                     approved = await r.json()
                 async with s.get(f"{base}/pair/request/{req.id}") as r:
                     assert await r.json() == {"status": "approved"}, "credentials go out once"
-            assert approved == {"status": "approved", "client_cert": cert, "server_cert": ident.cert_pem, "api_version": 2}
+            assert approved == {"status": "approved", "client_cert": cert, "server_cert": ident.cert_pem, "api_version": 3}
 
             (tmp_path / "client.crt").write_text(approved["client_cert"])
             paired = client_context(approved["server_cert"], (tmp_path / "client.crt", key))

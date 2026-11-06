@@ -10,7 +10,7 @@ from aiohttp import web
 from . import audit
 from ..steam import cdp
 from ..games import files as games
-from ..loader import logs
+from ..loader import live, logs
 from .identity import identity
 from ..steam.apps import Apps
 from ..media.audio import FORMAT as AUDIO_FORMAT, AudioCapturer, AudioDisabled, AudioUnavailable
@@ -28,7 +28,7 @@ from ..tools import plugins
 from ..tools.system import list_plugins, schedule_loader_restart
 from ..steam.ui import UiNavigator
 
-API_VERSION = 2
+API_VERSION = 3
 LOG_KEEPALIVE_SECONDS = 15.0
 INPUT_REFUSED = 4003
 AUDIO_REFUSED = 4003
@@ -87,6 +87,7 @@ class Api:
             web.get("/plugins", self.handle_plugins),
             web.post("/plugins/install", self.handle_plugin_install),
             web.post("/plugins/{dir}/reload", self.handle_plugin_reload),
+            web.put("/plugins/{dir}/files", self.handle_plugin_file_put),
             web.post("/loader/restart", self.handle_loader_restart),
             web.get("/logs/tail", self.handle_logs_tail),
             web.get("/logs/stream", live(self.handle_logs_stream)),
@@ -477,14 +478,29 @@ class Api:
         return web.json_response(result)
 
     async def handle_plugin_reload(self, request: web.Request) -> web.Response:
+        mode = request.query.get("mode")
         try:
-            return web.json_response(await plugins.reload_plugin(request.match_info["dir"]))
+            if mode is None:
+                return web.json_response(await plugins.reload_plugin(request.match_info["dir"]))
+            return web.json_response(await live.reload(request.match_info["dir"], mode))
         except ValueError as e:
             return _error(400, str(e))
         except FileNotFoundError as e:
             return _error(404, str(e))
         except cdp.CdpError as e:
             return _error(502, str(e))
+
+    async def handle_plugin_file_put(self, request: web.Request) -> web.Response:
+        rel = request.query.get("path", "")
+        data = await request.read()
+        try:
+            return web.json_response(await asyncio.to_thread(live.write_file, request.match_info["dir"], rel, data))
+        except ValueError as e:
+            return _error(400, str(e))
+        except PermissionError as e:
+            return _error(403, str(e))
+        except FileNotFoundError as e:
+            return _error(404, str(e))
 
     async def handle_loader_restart(self, request: web.Request) -> web.Response:
         await schedule_loader_restart()

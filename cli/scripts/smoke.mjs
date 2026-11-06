@@ -243,6 +243,38 @@ async function mcp(messages) {
   return { ...r, replies, lines, trailing };
 }
 
+await check('dev: deploy, then push changed files and reload in place until Ctrl-C', async () => {
+  const old = await cli(['dev', '--no-build', plugin]);
+  assert.equal(old.code, 1);
+  assert.match(old.stderr, /has no live sync yet; update it on the device/);
+  setState({ health: { ...health, api_version: 3 }, filePuts: [], liveReloads: [], installMeta: { name: 'My Plugin', version: '1.2.3' } });
+  writeFileSync(path.join(plugin, 'dist', 'index.js.map'), JSON.stringify({ version: 3, sources: ['../src/index.tsx'], mappings: 'AAAA' }));
+  const installs = state().installs.length;
+  let edited = false, stopped = false;
+  const r = await cli(['dev', '--no-build', plugin], {
+    timeoutMs: 30000,
+    onStdout: (stdout, child) => {
+      if (!edited && stdout.includes('Edit away')) {
+        edited = true;
+        writeFileSync(path.join(plugin, 'dist', 'index.js'), 'export default () => ({ name: "changed" });\n');
+      }
+      if (!stopped && /frontend reload of My Plugin/.test(stdout)) {
+        stopped = true;
+        setTimeout(() => child.kill('SIGINT'), 200);
+      }
+    },
+  });
+  setState({ health });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(state().installs.length, installs + 1, 'one full deploy at the start');
+  assert.deepEqual(state().filePuts.map(f => f.path), ['dist/index.js']);
+  assert.match(state().filePuts[0].text, /changed/);
+  assert.deepEqual(state().liveReloads, [{ dir: 'my-plugin', mode: 'frontend' }]);
+  assert.match(r.stdout, /frontend reload of My Plugin: dist\/index\.js, push \d+ ms, reload \d+ ms .*restored panel/);
+  assert.match(r.stdout, /Error: boom\n {4}at src\/index\.tsx:1:1/, 'bundle positions mapped to the source');
+  return r.stdout.split('\n').find(l => l.startsWith('frontend reload'));
+});
+
 await check('mcp over stdio', async () => {
   const t0 = Date.now();
   const r = await mcp([

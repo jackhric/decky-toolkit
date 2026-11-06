@@ -86,7 +86,7 @@ def test_pair_request_approve_delivers_credentials_once():
         pairing.approve(rid, "CLIENT CERT")
         async with await asyncio.wait_for(poll, 2) as r:
             assert await r.json() == {"status": "approved", "client_cert": "CLIENT CERT", "server_cert": "",
-                                      "api_version": 2}
+                                      "api_version": 3}
         async with s.get(f"{base}/pair/request/{rid}") as r:
             assert await r.json() == {"status": "approved"}
         async with s.get(f"{base}/pair/request/nope") as r:

@@ -32,6 +32,16 @@ of a new plugin always restarts the loader.
 
 ## Deploy on change
 
-Turn on **Plugin → Auto-deploy on change** (setting `decky-toolkit.deploy.onChange`). Changes to
-`dist/index.js`, `main.py` or `py_modules/**/*.py` trigger a deploy shortly after the last change.
-Keep `pnpm run watch` running so every save rebuilds the bundle.
+Turn on **Plugin → Auto-deploy on change** (setting `decky-toolkit.deploy.onChange`). The extension
+runs your plugin's `watch` script and deploys on the first change. From then on, each save is pushed and
+the plugin reloads in place, usually within 100 ms of the build:
+
+- A frontend change re-imports only the bundle; the backend keeps running.
+- A Python change restarts the backend.
+- A `plugin.json` or `package.json` change deploys again.
+
+You stay where you were: the plugin's Quick Access panel, its own page, the selected settings tab and the
+focused control. If the plugin fails to load, the error shows in the **Decky Toolkit** output with the
+line in your source.
+
+Outside VS Code, `npx decky-toolkit dev` in your plugin folder does the same until you press Ctrl-C.

@@ -8,6 +8,8 @@ import type {
   InputSettings,
   InstallResult,
   JsonRpcResponse,
+  LiveReloadMode,
+  LiveReloadResult,
   LogQuery,
   LogTail,
   NavigateRequest,
@@ -308,6 +310,21 @@ export class DeckyClient {
 
   async reloadPlugin(dir: string): Promise<unknown> {
     return this.json<unknown>(`/plugins/${encodeURIComponent(dir)}/reload`, { method: 'POST', timeoutMs: 30000 });
+  }
+
+  /** Reload in place and restore the UI around it (`mode` needs a device with live sync). */
+  liveReload(dir: string, mode: LiveReloadMode): Promise<LiveReloadResult> {
+    return this.json<LiveReloadResult>(`/plugins/${encodeURIComponent(dir)}/reload?mode=${mode}`, { method: 'POST', timeoutMs: 30000 });
+  }
+
+  /** Atomically replace one file inside an installed plugin; `path` is relative to the plugin directory. */
+  putPluginFile(dir: string, path: string, data: Uint8Array): Promise<{ dir: string; path: string; bytes: number }> {
+    return this.json(`/plugins/${encodeURIComponent(dir)}/files?${new URLSearchParams({ path })}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: new Uint8Array(data),
+      timeoutMs: 60000,
+    });
   }
 
   /** Falls back to the `restart_loader` tool on devices without the REST route. */
