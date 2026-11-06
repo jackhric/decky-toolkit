@@ -21,6 +21,8 @@ See README.md for setup and docs/reference.md for the tool list and architecture
   parses KeyValues; tools in `tools/games.py`), `record.py` (screen recording to MKV; tools in `tools/record.py`),
   `tools/perf.py` (Steam performance overlay), `advertise.py` (DNS-SD advertisement via `avahi-publish`) and
   `identity.py` (non-secret `hostname`/`device_id`/`os` for `/health`).
+- `packages/client/` — device client source shared by bundling (transport, API types, discovery, pairing,
+  identity file, plugin staging; no `vscode`); the extension imports it as `@decky-toolkit/client/*`.
 - `src/index.tsx` — Quick Access panel (React, `@decky/ui`, `@decky/api`). Built by `pnpm run build` (Vite,
   `vite.config.ts`) into `dist/index.js`.
 - `scripts/test.sh` — Python tests under uv with the loader's Python major (CI runs it). Deploying this repo to
