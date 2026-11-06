@@ -4,9 +4,9 @@ import base64
 import json
 from typing import TYPE_CHECKING, Any
 
-from ..media.capture import CaptureUnavailable, ScreenCapturer
+from ..media.capture import ScreenCapturer
 from ..input import keymap
-from ..input.service import InputDisabled, InputService, InputUnavailable, Session, mouse_button, pad_values
+from ..input.service import InputDisabled, InputService, Session, mouse_button, pad_values
 from . import ToolRegistry
 
 if TYPE_CHECKING:
@@ -20,29 +20,20 @@ CAPTURE_SETTLE_SECONDS = 0.25
 UI_SETTLE_SECONDS = 0.1
 
 
-def register(reg: ToolRegistry, service: InputService | None, capturer: ScreenCapturer | None,
-             orient: "Orientation") -> None:
-    def svc() -> InputService:
-        if service is None:
-            raise InputUnavailable("input service not configured")
-        return service
-
+def register(reg: ToolRegistry, service: InputService, capturer: ScreenCapturer, orient: "Orientation") -> None:
     async def run(fn, summary_fn, capture: bool) -> Any:
-        s = svc()
-        if not s.enabled:
+        if not service.enabled:
             raise InputDisabled("remote input is disabled; call input_settings(enabled=true) or use the Decky Toolkit panel")
-        session = s.open_session("MCP client", kind="mcp")
+        session = service.open_session("MCP client", kind="mcp")
         try:
-            result = await fn(s, session)
+            result = await fn(service, session)
         finally:
-            await s.close_session(session)
+            await service.close_session(session)
         summary = summary_fn(result) if summary_fn else result
         await asyncio.sleep(UI_SETTLE_SECONDS)
         out = {"done": summary, "ui": await orient.safe()}
         if not capture:
             return out
-        if capturer is None:
-            raise CaptureUnavailable("screen capture not configured")
         await asyncio.sleep(max(0.0, CAPTURE_SETTLE_SECONDS - UI_SETTLE_SECONDS))
         frame = await capturer.grab()
         return [{"type": "text", "text": json.dumps(out, indent=2)},
@@ -56,8 +47,8 @@ def register(reg: ToolRegistry, service: InputService | None, capturer: ScreenCa
     )
     async def input_settings(enabled: bool | None = None) -> dict[str, Any]:
         if enabled is None:
-            return svc().status()
-        return await svc().set_enabled(enabled)
+            return service.status()
+        return await service.set_enabled(enabled)
 
     @reg.add(
         "input_key",
@@ -94,7 +85,7 @@ def register(reg: ToolRegistry, service: InputService | None, capturer: ScreenCa
                     for code in reversed(codes):
                         await s.key(session, code, False)
 
-        return await run(act, lambda _: f"pressed {', '.join(combos)} via {svc().backend_name()}", capture)
+        return await run(act, lambda _: f"pressed {', '.join(combos)} via {service.backend_name()}", capture)
 
     @reg.add(
         "input_text",
@@ -114,7 +105,7 @@ def register(reg: ToolRegistry, service: InputService | None, capturer: ScreenCa
         async def act(s: InputService, session: Session) -> int:
             return await s.text(session, text, delay_ms=max(0, min(1000, int(delay_ms))))
 
-        return await run(act, lambda n: f"typed {n} characters via {svc().backend_name()}", capture)
+        return await run(act, lambda n: f"typed {n} characters via {service.backend_name()}", capture)
 
     @reg.add(
         "input_mouse",
@@ -191,8 +182,8 @@ def register(reg: ToolRegistry, service: InputService | None, capturer: ScreenCa
     async def input_gamepad(buttons: dict | None = None, axes: dict | None = None, hat: list | None = None,
                             hold_ms: int = 100, sequence: list | None = None, pad: str | None = None,
                             capture: bool = False) -> Any:
-        if pad is not None and (not isinstance(pad, str) or (pad != "auto" and svc().get_pad(pad) is None)):
-            raise ValueError(f"unknown virtual gamepad {pad!r}; have {', '.join(p.id for p in svc().pads()) or 'none'}")
+        if pad is not None and (not isinstance(pad, str) or (pad != "auto" and service.get_pad(pad) is None)):
+            raise ValueError(f"unknown virtual gamepad {pad!r}; have {', '.join(p.id for p in service.pads()) or 'none'}")
         steps: list[tuple[dict, float]] = []
         if sequence is not None:
             if not isinstance(sequence, list) or not sequence:

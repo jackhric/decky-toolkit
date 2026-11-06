@@ -12,7 +12,9 @@ from decky_toolkit.media import audio as audio_mod  # noqa: E402
 from decky_toolkit.media.audio import CHUNK_BYTES, FORMAT, MAX_BACKLOG_CHUNKS, AudioCapturer, AudioDisabled  # noqa: E402
 from decky_toolkit.settings import Settings  # noqa: E402
 
-from test_routes import H, FakeCapturer, with_server  # noqa: E402
+from certauth import H  # noqa: E402
+from harness import with_server  # noqa: E402
+from test_routes import FakeCapturer  # noqa: E402
 
 LOG = logging.getLogger("t")
 
@@ -205,15 +207,10 @@ def test_audio_ws_format_chunks_and_disable():
     asyncio.run(with_server(run_ok, capturer=cap, audio=aud))
 
 
-def test_audio_ws_auth_and_404():
+def test_audio_ws_auth():
     async def run(s, base):
         async with s.get(f"{base}/api/v1/audio") as r:
             assert r.status == 401
         async with s.get(f"{base}/api/v1/audio", headers={**H, "Origin": "http://evil.example"}) as r:
             assert r.status == 403
     asyncio.run(with_server(run, audio=FakeAudio(Settings())))
-
-    async def missing(s, base):
-        async with s.get(f"{base}/api/v1/audio", headers=H) as r:
-            assert r.status == 404
-    asyncio.run(with_server(missing))

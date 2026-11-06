@@ -9,15 +9,14 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
-from aiohttp import ClientSession, ClientTimeout, WSMsgType, WSServerHandshakeError, web  # noqa: E402
+from aiohttp import WSMsgType, WSServerHandshakeError  # noqa: E402
 
-from certauth import H, stub_auth  # noqa: E402
-from decky_toolkit.server.http import Api  # noqa: E402
+from certauth import H  # noqa: E402
 from decky_toolkit.input import keymap, uinput  # noqa: E402
 from decky_toolkit.input.service import InputDisabled, InputService, InputUnavailable, pad_values  # noqa: E402
-from decky_toolkit.server.protocol import McpServer  # noqa: E402
+from decky_toolkit.server.events import EventHub  # noqa: E402
 from decky_toolkit.settings import Settings  # noqa: E402
-from decky_toolkit.tools import ToolRegistry, build_registry  # noqa: E402
+from harness import make_registry, with_server as serve  # noqa: E402
 
 LOG = logging.getLogger("t")
 
@@ -139,14 +138,16 @@ def make_service(tmp_path, *, ei_socket=True, uinput_ok=True, enabled=True, fail
         pads.append(FakePad())
         return pads[-1]
 
-    async def on_session(remote):
-        sessions.append(remote)
+    def emit(name, *args):
+        if name == "decky_toolkit_input_session":
+            sessions.append(args[0])
+        return asyncio.sleep(0)
 
     async def focus():
         return (1280, 800)
 
     saved = []
-    svc = InputService(lambda: settings, lambda: saved.append(1), LOG, on_session, runtime_dir=lambda: str(tmp_path),
+    svc = InputService(lambda: settings, lambda: saved.append(1), LOG, EventHub(emit), runtime_dir=lambda: str(tmp_path),
                        make_backend=make_backend, make_gamepad=make_pad, uinput_available=lambda: uinput_ok,
                        focus_probe=focus, pad_idle=pad_idle)
     svc.t = type("T", (), {"backends": backends, "pads": pads, "sessions": sessions, "saved": saved, "settings": settings})
@@ -265,17 +266,7 @@ def test_gamepad_removed_after_idle(tmp_path):
 
 
 async def with_server(fn, svc):
-    api = Api(auth=stub_auth(), mcp=McpServer(ToolRegistry(), LOG), capturer=None, logger=LOG,
-              input_service=svc)
-    runner = web.AppRunner(api.build_app())
-    await runner.setup()
-    await web.TCPSite(runner, "127.0.0.1", 0).start()
-    base = f"http://127.0.0.1:{runner.addresses[0][1]}"
-    try:
-        async with ClientSession(timeout=ClientTimeout(total=10)) as s:
-            await fn(s, base)
-    finally:
-        await runner.cleanup()
+    await serve(fn, input=svc)
 
 
 def test_input_settings_bearer_only(tmp_path):
@@ -358,7 +349,7 @@ def test_input_ws_state_events_and_release(tmp_path):
 
 def test_input_tools_refuse_when_disabled_and_work_when_enabled(tmp_path):
     svc = make_service(tmp_path, enabled=False)
-    reg = build_registry(None, svc)
+    reg = make_registry(input=svc)
 
     async def run():
         for name, args in (("input_key", {"keys": "ctrl+a"}), ("input_text", {"text": "hi"}),

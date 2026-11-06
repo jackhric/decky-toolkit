@@ -112,8 +112,8 @@ class PluginTool:
 
 
 class PluginTools:
-    def __init__(self, logger: logging.Logger | None = None, events: "EventHub | None" = None):
-        self.log = logger or logging.getLogger("decky_toolkit.plugin_tools")
+    def __init__(self, logger: logging.Logger, events: "EventHub"):
+        self.log = logger
         self.events = events
         self.builtin: set[str] = set()
         self._registered: list[dict[str, Any]] = []
@@ -178,7 +178,7 @@ class PluginTools:
         added, removed = tools.keys() - self._tools.keys(), self._tools.keys() - tools.keys()
         if added or removed:
             self.log.info("plugin tools: %s", ", ".join([f"+{n}" for n in sorted(added)] + [f"-{n}" for n in sorted(removed)]))
-        if self.events is not None and tools != self._tools:
+        if tools != self._tools:
             self.events.refresh("tools")
         for r in refused:
             if r not in self._refused:
@@ -259,8 +259,7 @@ class PluginTools:
             await self._dirty.wait()
             self._dirty.clear()
             # Also woken when Decky loads or unloads any plugin (install, reload, its file watcher).
-            if self.events is not None:
-                self.events.refresh("plugins")
+            self.events.refresh("plugins")
             try:
                 await self.refresh()
             except (cdp.CdpError, asyncio.TimeoutError, ValueError) as e:

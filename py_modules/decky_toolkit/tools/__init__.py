@@ -7,23 +7,14 @@ import traceback
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Container
 
+from .. import errors
 from ..server import audit
-from ..steam import cdp
-from ..media.capture import CaptureUnavailable, ScreenCapturer
-from ..input.service import InputDisabled, InputService, InputUnavailable
 
 if TYPE_CHECKING:
-    from ..input.activity import InputActivity
-    from ..steam.console import ConsoleCollector
-    from ..input.controllers import ControllerService
-    from ..steam.ui import UiNavigator
+    from ..services import Services
     from .plugin_tools import PluginTools
-    from ..server.events import EventHub
 
 ToolFn = Callable[..., Awaitable[Any]]
-# Exceptions that are expected, user-facing failures: reported without a traceback.
-EXPECTED_ERRORS: tuple[type[BaseException], ...] = (ValueError, FileNotFoundError, PermissionError, cdp.CdpError,
-                                                     CaptureUnavailable, InputDisabled, InputUnavailable)
 _CONTENT_TYPES = {"text", "image", "audio", "resource", "resource_link"}
 
 
@@ -43,8 +34,6 @@ class ToolRegistry:
         self.audited: set[str] = set(audit.AUDITED_TOOLS)
         # Tools other plugins register from their frontend; set by PluginTools.attach.
         self.plugin_tools: "PluginTools | None" = None
-        # Where tools report device changes that are not visible to their own service (plugin installs).
-        self.events: "EventHub | None" = None
 
     def __len__(self) -> int:
         return len(self.describe())
@@ -89,7 +78,7 @@ class ToolRegistry:
             self.log.info(audit.tool_line(name, arguments, tool.input_schema.get("properties", {})))
         try:
             result = await tool.fn(**arguments)
-        except EXPECTED_ERRORS as e:
+        except errors.EXPECTED as e:
             return error_result(f"{type(e).__name__}: {e}")
         except Exception as e:  # noqa: BLE001
             return error_result(f"{type(e).__name__}: {e}\n{traceback.format_exc()}")
@@ -144,41 +133,29 @@ def error_result(text: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": text}], "isError": True}
 
 
-def build_registry(capturer: ScreenCapturer | None = None, input_service: InputService | None = None,
-                   controllers: "ControllerService | None" = None, navigator: "UiNavigator | None" = None,
-                   console: "ConsoleCollector | None" = None, activity: "InputActivity | None" = None,
-                   plugin_tools: "PluginTools | None" = None, events: "EventHub | None" = None) -> ToolRegistry:
-    from ..steam.apps import Apps as AppsLib
-    from . import (activity as activity_tools, apps, cef, controllers as controller_tools, games, input, logs, perf,
-                   plugin_api, plugins, record, screen, shell, system, ui)
+def build_registry(services: "Services") -> ToolRegistry:
+    from ..steam.ui import UiInspector
+    from . import (activity, apps, cef, controllers, games, input, logs, perf, plugin_api, plugins, record, screen,
+                   shell, system, ui)
 
-    if controllers is None and input_service is not None:
-        from ..input.controllers import ControllerService
-        controllers = ControllerService(input_service, input_service.log)
-
-    from ..steam.ui import UiInspector, UiNavigator
-    navigator = navigator or UiNavigator()
-    inspector = UiInspector(navigator)
-    orient = ui.Orientation(inspector, activity)
-
+    s = services
+    inspector = UiInspector(s.ui)
+    orient = ui.Orientation(inspector, s.activity)
     reg = ToolRegistry()
-    reg.events = events
     system.register(reg)
-    plugins.register(reg)
+    plugins.register(reg, s.events)
     cef.register(reg)
-    logs.register(reg, console)
+    logs.register(reg, s.console)
     plugin_api.register(reg)
-    screen.register(reg, capturer, orient)
-    input.register(reg, input_service, capturer, orient)
-    controller_tools.register(reg, controllers)
-    ui.register(reg, inspector, capturer, orient)
-    library = AppsLib()
-    apps.register(reg, library)
-    games.register(reg, library)
-    record.register(reg, capturer)
+    screen.register(reg, s.capturer, orient)
+    input.register(reg, s.input, s.capturer, orient)
+    controllers.register(reg, s.controllers)
+    ui.register(reg, inspector, s.capturer, orient)
+    apps.register(reg, s.apps)
+    games.register(reg, s.apps)
+    record.register(reg, s.capturer)
     perf.register(reg)
     shell.register(reg)
-    activity_tools.register(reg, activity, input_service, capturer, navigator)
-    if plugin_tools is not None:
-        plugin_tools.attach(reg)
+    activity.register(reg, s.activity, s.input, s.capturer, s.ui)
+    s.plugin_tools.attach(reg)
     return reg

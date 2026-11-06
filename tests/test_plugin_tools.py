@@ -11,7 +11,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
 from decky_toolkit.loader import sourcemap  # noqa: E402
-from decky_toolkit.tools import build_registry  # noqa: E402
+from decky_toolkit.server.events import EventHub  # noqa: E402
+from harness import make_registry  # noqa: E402
 from decky_toolkit.tools.plugin_tools import PluginTools, prefix_of  # noqa: E402
 
 URL = "http://127.0.0.1:1337/plugins/My%20Plugin/dist/index.js?t=1"
@@ -50,8 +51,8 @@ def registered(plugin: str, name: str, **extra) -> dict:
 
 
 def attached(*tools: dict, tab: FakeTab | None = None):
-    pt = PluginTools(logging.getLogger("t"))
-    reg = build_registry(plugin_tools=pt)
+    pt = PluginTools(logging.getLogger("t"), EventHub())
+    reg = make_registry(plugin_tools=pt)
     pt._registered = list(tools)
     pt._resolve()
     pt._tab = tab
@@ -142,7 +143,7 @@ def test_sourcemap_leaves_unknown_frames_alone(plugins):
 
 
 def test_navigation_and_binding_mark_the_registry_dirty():
-    pt = PluginTools(logging.getLogger("t"))
+    pt = PluginTools(logging.getLogger("t"), EventHub())
     pt._on_event({"method": "Page.frameNavigated", "params": {"frame": {"id": "a", "parentId": "b"}}})
     assert not pt._dirty.is_set()
     pt._on_event({"method": "Page.frameNavigated", "params": {"frame": {"id": "a"}}})

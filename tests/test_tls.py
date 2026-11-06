@@ -19,11 +19,13 @@ from aiohttp import ClientError, ClientSession, ClientTimeout, TCPConnector, web
 
 from decky_toolkit.server import tls  # noqa: E402
 from decky_toolkit.server.auth import CertAuth  # noqa: E402
+from decky_toolkit.server.events import EventHub  # noqa: E402
 from decky_toolkit.server.http import Api  # noqa: E402
 from decky_toolkit.server.pairing import PairingRequests, pairing_code  # noqa: E402
 from decky_toolkit.server.protocol import McpServer  # noqa: E402
 from decky_toolkit.server.tls import Identity, PairedClients  # noqa: E402
 from decky_toolkit.tools import ToolRegistry  # noqa: E402
+from harness import make_services  # noqa: E402
 
 LOG = logging.getLogger("t")
 
@@ -82,11 +84,25 @@ def test_parse_public_key_accepts_only_p256(tmp_path):
             tls.parse_public_key(bad)
 
 
+class Changes:
+    """Records the allow-list each change sends to the Decky panel."""
+
+    def __init__(self, into: list):
+        self.into = into
+
+    def frontend(self, name, clients):
+        assert name == "decky_toolkit_paired_clients"
+        self.into.append(clients)
+
+    def refresh(self, event):
+        pass
+
+
 def test_paired_clients_store(tmp_path):
     path = tmp_path / "clients.json"
     now = [1000.0]
     changes = []
-    clients = PairedClients(str(path), clock=lambda: now[0], on_change=changes.append)
+    clients = PairedClients(str(path), Changes(changes), clock=lambda: now[0])
     assert clients.list() == [] and clients.touch("aa") is None
     clients.add("aa", "VS Code on box", "vscode")
     clients.add("bb", "agent", "mcp")
@@ -98,7 +114,7 @@ def test_paired_clients_store(tmp_path):
     assert len(changes) == 3, "last_seen is written at most once a minute"
     now[0] += 31
     assert clients.touch("aa")["last_seen"] == 1061 and len(changes) == 4
-    again = PairedClients(str(path))
+    again = PairedClients(str(path), EventHub())
     assert [c["connected"] for c in clients.list()] == [True, False]
     in_memory = {"connected": None, "connected_since": None}
     assert [{**c, **in_memory} for c in again.list()] == [{**c, **in_memory} for c in clients.list()]
@@ -117,12 +133,12 @@ def test_paired_clients_store(tmp_path):
     assert len(clients.list()) == 3 and again["name"] == "VS Code renamed" and again["added_at"] == 1061, \
         "pairing the same key again keeps one entry"
     path.write_text("not json")
-    assert PairedClients(str(path)).list() == []
+    assert PairedClients(str(path), EventHub()).list() == []
 
 
 def test_paired_clients_connected(tmp_path):
     now = [1000.0]
-    clients = PairedClients(str(tmp_path / "clients.json"), clock=lambda: now[0])
+    clients = PairedClients(str(tmp_path / "clients.json"), EventHub(), clock=lambda: now[0])
     clients.add("aa", "VS Code on box", "vscode")
     assert not clients.any_connected() and clients.list()[0]["connected"] is False
     clients.touch("aa")
@@ -137,7 +153,7 @@ def test_paired_clients_connected(tmp_path):
 
 def test_paired_clients_session(tmp_path):
     now = [1000.0]
-    clients = PairedClients(str(tmp_path / "clients.json"), clock=lambda: now[0])
+    clients = PairedClients(str(tmp_path / "clients.json"), EventHub(), clock=lambda: now[0])
     clients.add("aa", "VS Code on box", "vscode")
     clients.add("bb", "agent", "mcp")
     assert clients.connected_clients() == []
@@ -180,8 +196,8 @@ def client_context(server_cert: str | None = None, cert: tuple[Path, Path] | Non
 def test_mutual_tls_end_to_end(tmp_path):
     ident = identity(tmp_path / "device")
     other = identity(tmp_path / "other")
-    clients = PairedClients(ident.clients_path)
-    pairing = PairingRequests(ident.cert_pem)
+    clients = PairedClients(ident.clients_path, EventHub())
+    pairing = PairingRequests(EventHub(), ident.cert_pem)
     key, pub = keypair(tmp_path)
 
     async def get(base: str, path: str, ctx: ssl.SSLContext) -> int:
@@ -190,7 +206,7 @@ def test_mutual_tls_end_to_end(tmp_path):
                 return r.status
 
     async def run():
-        api = Api(auth=CertAuth(clients), mcp=McpServer(ToolRegistry(), LOG), capturer=None, logger=LOG, pairing=pairing)
+        api = Api(make_services(pairing=pairing), auth=CertAuth(clients), mcp=McpServer(ToolRegistry(), LOG), logger=LOG)
         runner = web.AppRunner(api.build_app())
         await runner.setup()
         await web.TCPSite(runner, "127.0.0.1", 0, ssl_context=ident.server_context()).start()

@@ -2,7 +2,6 @@
 import asyncio
 import io
 import json
-import logging
 import os
 import sys
 import time
@@ -13,17 +12,14 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
-from aiohttp import ClientSession, ClientTimeout, CookieJar, FormData, web  # noqa: E402
+from aiohttp import FormData  # noqa: E402
 
-from certauth import H, PUBLIC_KEY, stub_auth  # noqa: E402
+from certauth import H, PUBLIC_KEY  # noqa: E402
 from decky_toolkit.media.capture import ScreenCapturer  # noqa: E402
-from decky_toolkit.server.http import Api  # noqa: E402
+from decky_toolkit.server.events import EventHub  # noqa: E402
 from decky_toolkit.server.pairing import PairingRequests  # noqa: E402
-from decky_toolkit.server.protocol import McpServer  # noqa: E402
 from decky_toolkit.settings import Settings  # noqa: E402
-from decky_toolkit.tools import ToolRegistry, build_registry  # noqa: E402
-
-LOG = logging.getLogger("t")
+from harness import LOG, make_registry, with_server  # noqa: E402
 
 
 @pytest.fixture
@@ -31,19 +27,6 @@ def decky_home(tmp_path, monkeypatch):
     monkeypatch.setenv("DECKY_HOME", str(tmp_path))
     (tmp_path / "plugins").mkdir()
     return tmp_path
-
-
-async def with_server(fn, capturer=None, **api_kwargs):
-    api = Api(auth=stub_auth(), mcp=McpServer(ToolRegistry(), LOG), capturer=capturer, logger=LOG, **api_kwargs)
-    runner = web.AppRunner(api.build_app())
-    await runner.setup()
-    await web.TCPSite(runner, "127.0.0.1", 0).start()
-    base = f"http://127.0.0.1:{runner.addresses[0][1]}"
-    try:
-        async with ClientSession(timeout=ClientTimeout(total=10), cookie_jar=CookieJar(unsafe=True)) as s:
-            await fn(s, base)
-    finally:
-        await runner.cleanup()
 
 
 def write_log(home: Path, plugin: str, name: str, lines: list[str], mtime: float | None = None) -> Path:
@@ -60,7 +43,7 @@ VS = {"client_name": "VS Code on box", "client_kind": "vscode", "public_key": PU
 
 
 def test_pair_request_approve_delivers_credentials_once():
-    pairing = PairingRequests("")
+    pairing = PairingRequests(EventHub())
 
     async def run(s, base):
         async with s.post(f"{base}/api/v1/pair/request", json=VS, headers={"Origin": "http://evil.example"}) as r:
@@ -100,7 +83,7 @@ def test_pair_request_approve_delivers_credentials_once():
 
 
 def test_pair_request_deny_cancel_and_limits():
-    pairing = PairingRequests("")
+    pairing = PairingRequests(EventHub())
 
     async def run(s, base):
         async with s.post(f"{base}/api/v1/pair/request", json=VS) as r:
@@ -284,7 +267,7 @@ class FakeCapturer(ScreenCapturer):
         self.saved = 0
         self.restarts = 0
         self.fake_running = running
-        super().__init__(lambda: self.settings, LOG, save_settings=self._save)
+        super().__init__(lambda: self.settings, LOG, EventHub(), save_settings=self._save)
 
     def _save(self) -> None:
         self.saved += 1
@@ -358,18 +341,9 @@ def test_stream_settings_restart_only_when_running():
     assert (live.saved, live.restarts) == (1, 1)
 
 
-def test_stream_settings_404_without_capturer():
-    async def run(s, base):
-        async with s.get(f"{base}/api/v1/stream/settings", headers=H) as r:
-            assert r.status == 404
-        async with s.put(f"{base}/api/v1/stream/settings", json={"fps": 60}, headers=H) as r:
-            assert r.status == 404
-    asyncio.run(with_server(run))
-
-
 def test_set_stream_settings_tool_and_status():
     cap = FakeCapturer(running=True)
-    reg = build_registry(cap)
+    reg = make_registry(capturer=cap)
     res = asyncio.run(reg.call("stream_settings", {"fps": 45, "quality": 80}))
     assert not res["isError"]
     assert json.loads(res["content"][0]["text"]) == {"fps": 45, "quality": 80, "width": 0, "audio": True, "limits": LIMITS}
@@ -398,7 +372,7 @@ def test_restart_keeps_subscribers_attached():
             await asyncio.sleep(0.05)
 
     async def run():
-        cap = Cap(lambda: Settings(), LOG)
+        cap = Cap(lambda: Settings(), LOG, EventHub())
         agen = cap.subscribe()
         first = asyncio.ensure_future(agen.__anext__())
         await asyncio.sleep(0.01)

@@ -2,14 +2,14 @@
 import base64
 from typing import TYPE_CHECKING, Any
 
-from ..media.capture import CaptureUnavailable, ScreenCapturer
+from ..media.capture import ScreenCapturer
 from . import ToolRegistry
 
 if TYPE_CHECKING:
     from .ui import Orientation
 
 
-def register(reg: ToolRegistry, capturer: ScreenCapturer | None, orient: "Orientation") -> None:
+def register(reg: ToolRegistry, capturer: ScreenCapturer, orient: "Orientation") -> None:
     @reg.add(
         "screen_capture",
         "Capture the full gamescope display (Steam UI, games, overlays: exactly what the screen shows) as a JPEG. "
@@ -17,8 +17,6 @@ def register(reg: ToolRegistry, capturer: ScreenCapturer | None, orient: "Orient
         "says where the Steam UI is; trust it over the picture (backgrounds can look like a running game).",
     )
     async def screen_capture() -> list[dict[str, Any]]:
-        if capturer is None:
-            raise CaptureUnavailable("screen capture not configured")
         frame = await capturer.grab()
         stats = capturer.stats()
         return [
@@ -33,8 +31,6 @@ def register(reg: ToolRegistry, capturer: ScreenCapturer | None, orient: "Orient
         "(enabled, running, kbps, rms_db level) and the settings (change them with stream_settings).",
     )
     async def stream_status() -> dict[str, Any]:
-        if capturer is None:
-            return {"available": False}
         return capturer.stats()
 
     @reg.add(
@@ -54,6 +50,4 @@ def register(reg: ToolRegistry, capturer: ScreenCapturer | None, orient: "Orient
     )
     async def stream_settings(fps: int | None = None, quality: int | None = None, width: int | None = None,
                               audio: bool | None = None) -> dict[str, Any]:
-        if capturer is None:
-            raise CaptureUnavailable("screen capture not configured")
         return await capturer.update_settings(fps, quality, width, audio)

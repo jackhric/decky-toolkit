@@ -6,11 +6,12 @@ from typing import Any
 
 from ..loader import live
 from ..loader.plugins import RESTART_MODES, install, resolve_plugin
+from ..server.events import EventHub
 from . import ToolRegistry
 from .system import require_confirm
 
 
-def register(reg: ToolRegistry) -> None:
+def register(reg: ToolRegistry, events: EventHub) -> None:
     @reg.add(
         "plugin_install",
         "Install a Decky plugin zip (either '<dir>/...' as the single top-level directory or files at the zip root) "
@@ -40,12 +41,12 @@ def register(reg: ToolRegistry) -> None:
                 raise ValueError("path must be absolute")
             if not os.path.isfile(path):
                 raise FileNotFoundError(path)
-            return await install(path, restart, events=reg.events)
+            return await install(path, restart, events)
         try:
             data = base64.b64decode(zip_base64 or "", validate=True)
         except binascii.Error as e:
             raise ValueError(f"zip_base64 is not valid base64: {e}") from None
-        return await install(data, restart, events=reg.events)
+        return await install(data, restart, events)
 
     @reg.add(
         "plugin_reload",

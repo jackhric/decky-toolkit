@@ -9,19 +9,15 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
-from aiohttp import ClientSession, ClientTimeout, web  # noqa: E402
-
 from decky_toolkit.steam import cdp, ui  # noqa: E402
-from certauth import H, stub_auth  # noqa: E402
+from certauth import H  # noqa: E402
 import sse  # noqa: E402
 from decky_toolkit.server.events import EventHub  # noqa: E402
 from decky_toolkit.input.controllers import ControllerService, evdev_gamepads, merge, parse_bitmap  # noqa: E402
-from decky_toolkit.server.http import Api  # noqa: E402
 from decky_toolkit.input import uinput  # noqa: E402
 from decky_toolkit.input.service import InputDisabled, InputService, InputUnavailable, VirtualPad, pad_values  # noqa: E402
-from decky_toolkit.server.protocol import McpServer  # noqa: E402
 from decky_toolkit.settings import Settings  # noqa: E402
-from decky_toolkit.tools import ToolRegistry, build_registry  # noqa: E402
+from harness import make_registry, with_server  # noqa: E402
 
 LOG = logging.getLogger("t")
 FIXTURE = (Path(__file__).parent / "fixtures" / "proc_bus_input_devices.txt").read_text()
@@ -106,7 +102,7 @@ def make_service(enabled=False, pad_idle=60.0, uinput_ok=True):
         made.append(Dev(f"input{90 + len(made)}"))
         return made[-1]
 
-    svc = InputService(lambda: settings, None, LOG, runtime_dir=lambda: "/nonexistent", make_gamepad=make_pad,
+    svc = InputService(lambda: settings, None, LOG, EventHub(), runtime_dir=lambda: "/nonexistent", make_gamepad=make_pad,
                        uinput_available=lambda: uinput_ok, pad_idle=pad_idle)
     svc.made = made
     return svc
@@ -184,8 +180,8 @@ def devices_text(svc):
 
 
 def make_controllers(svc, events=None, **steam):
-    return ControllerService(svc, LOG, read_devices=lambda: devices_text(svc), steam_query=FakeSteam(svc, **steam),
-                             poll=0.05, steam_poll=0.05, confirm_seconds=0.6, events=events)
+    return ControllerService(svc, LOG, EventHub() if events is None else events, read_devices=lambda: devices_text(svc),
+                             steam_query=FakeSteam(svc, **steam), poll=0.05, steam_poll=0.05, confirm_seconds=0.6)
 
 
 def test_add_virtual_confirmed_by_steam():
@@ -222,20 +218,6 @@ def test_add_virtual_refused_when_steam_does_not_list_it():
             await make_controllers(svc, down=True).add_virtual()
         assert len(svc.made) == 1
     asyncio.run(run())
-
-
-async def with_server(fn, **kwargs):
-    api = Api(auth=stub_auth(), mcp=McpServer(ToolRegistry(), LOG), capturer=None, logger=LOG,
-              log_keepalive=0.2, **kwargs)
-    runner = web.AppRunner(api.build_app())
-    await runner.setup()
-    await web.TCPSite(runner, "127.0.0.1", 0).start()
-    base = f"http://127.0.0.1:{runner.addresses[0][1]}"
-    try:
-        async with ClientSession(timeout=ClientTimeout(total=10)) as s:
-            await fn(s, base)
-    finally:
-        await runner.cleanup()
 
 
 def test_controller_routes_and_events():
@@ -276,12 +258,12 @@ def test_controller_routes_and_events():
                 break
             await asyncio.sleep(0.05)
         assert cs._task.done(), "the watcher stops once the last event stream closed"
-    asyncio.run(with_server(run, input_service=svc, controllers=cs, events=events))
+    asyncio.run(with_server(run, log_keepalive=0.2, input=svc, controllers=cs, events=events))
 
 
 def test_controller_tools():
     svc = make_service()
-    reg = build_registry(None, svc, make_controllers(svc))
+    reg = make_registry(input=svc, controllers=make_controllers(svc))
 
     async def run():
         res = await reg.call("controller_add", {"name": "T"})

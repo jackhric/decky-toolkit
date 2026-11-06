@@ -1,18 +1,14 @@
 """Protocol + auth tests. Run with: ./scripts/test.sh (uses uv to supply aiohttp and pytest)."""
 import asyncio
 import json
-import logging
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
-from aiohttp import ClientSession, CookieJar, web  # noqa: E402
-
-from certauth import H as PEER, stub_auth  # noqa: E402
-from decky_toolkit.server.http import Api  # noqa: E402
-from decky_toolkit.server.protocol import McpServer  # noqa: E402
+from certauth import H as PEER  # noqa: E402
 from decky_toolkit.tools import ToolRegistry  # noqa: E402
+from harness import with_server as serve  # noqa: E402
 
 H = {**PEER, "Content-Type": "application/json"}
 
@@ -32,19 +28,7 @@ def make_registry() -> ToolRegistry:
 
 
 async def with_server(fn):
-    api = Api(auth=stub_auth(), mcp=McpServer(make_registry(), logging.getLogger("t")), capturer=None,
-              logger=logging.getLogger("t"))
-    runner = web.AppRunner(api.build_app())
-    await runner.setup()
-    site = web.TCPSite(runner, "127.0.0.1", 0)
-    await site.start()
-    port = runner.addresses[0][1]
-    base = f"http://127.0.0.1:{port}"
-    try:
-        async with ClientSession(cookie_jar=CookieJar(unsafe=True)) as s:
-            await fn(s, base)
-    finally:
-        await runner.cleanup()
+    await serve(fn, mcp=make_registry())
 
 
 
