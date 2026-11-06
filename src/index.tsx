@@ -16,7 +16,7 @@ import {
 import { addEventListener, callable, definePlugin, removeEventListener, routerHook, toaster } from "@decky/api";
 import { ReactNode, useEffect, useState } from "react";
 import { FaCog, FaGamepad, FaLaptop, FaPlug, FaServer } from "react-icons/fa";
-import { Mark } from "./Mark";
+import { SteamingMark } from "./SteamingMark";
 
 type Status = {
   enabled: boolean;
@@ -28,6 +28,7 @@ type Status = {
   stream: { running: boolean; fps: number; subscribers: number; available: boolean; error: string | null } | null;
   input: InputSettings | null;
   error: string | null;
+  connected?: boolean;
 };
 
 type PairRequest = {
@@ -46,6 +47,7 @@ type PairedClient = {
   kind: string;
   added_at: number;
   last_seen: number | null;
+  connected?: boolean;
 };
 
 type InputSettings = { enabled: boolean; backend: "ei" | "uinput" | null; available: boolean; reason: string | null };
@@ -90,7 +92,10 @@ function useToolkit() {
   const [clients, setClients] = useState<PairedClient[]>([]);
   const [busy, setBusy] = useState(false);
 
-  const refresh = async () => setStatus(await getStatus());
+  const refresh = async () => {
+    setStatus(await getStatus());
+    setClients(await listPairedClients());
+  };
   const refreshRequests = async () => setRequests(await listPairRequests());
   const pending = requests.filter((r) => r.status === "pending").sort((a, b) => b.age_s - a.age_s);
 
@@ -99,7 +104,6 @@ function useToolkit() {
     const onRequest = addEventListener<[info: unknown]>("decky_toolkit_pair_request", () => refreshRequests());
     const onRequests = addEventListener<[list: PairRequest[]]>("decky_toolkit_pair_requests", setRequests);
     const onClients = addEventListener<[list: PairedClient[]]>("decky_toolkit_paired_clients", setClients);
-    listPairedClients().then(setClients);
     refresh();
     const id = setInterval(refresh, 5000);
     return () => {
@@ -194,14 +198,25 @@ const STYLE = `
 .dtk-primary.gpfocus { background: #4fb4ff !important; box-shadow: 0 0 0 2px #fff; }
 `;
 
-function Centered({ children }: { children: ReactNode }) {
+function Centered({ children, steaming = false, connected = false }: { children: ReactNode; steaming?: boolean; connected?: boolean }) {
   return (
     <Focusable
       flow-children="column"
-      style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: "16px", padding: "24px 16px 16px" }}
+      // Quick Access gives plugin content no height of its own; 72px is the panel header above it.
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        textAlign: "center",
+        gap: "16px",
+        padding: "16px",
+        minHeight: "calc(100vh - 72px)",
+        boxSizing: "border-box",
+      }}
     >
       <style>{STYLE}</style>
-      <Mark size={96} style={{ color: "#7a7f86", marginBottom: "8px" }} />
+      <SteamingMark size={96} steaming={steaming} style={{ color: connected ? "#4fa83a" : "#7a7f86", marginBottom: "8px", transition: "color 0.4s" }} />
       {children}
       <Focusable
         className="dtk-link"
@@ -220,12 +235,14 @@ function Centered({ children }: { children: ReactNode }) {
 const hint = { color: MUTED, fontSize: "15px", lineHeight: 1.45, margin: 0, maxWidth: "260px" } as const;
 
 function Panel() {
-  const { status, pending, busy, decide } = useToolkit();
+  const { status, pending, clients, busy, decide } = useToolkit();
   const current = pending[0];
+  const up = !!status && status.enabled && status.running && !status.error;
+  const connected = !!status?.connected;
 
   if (current) {
     return (
-      <Centered>
+      <Centered steaming={up} connected={connected}>
         <DialogButtonPrimary className="dtk-primary" style={{ width: "100%" }} disabled={busy} onClick={() => decide(current, true)}>
           Approve {current.client_name}
         </DialogButtonPrimary>
@@ -233,6 +250,7 @@ function Panel() {
           Code <span style={{ color: "#fff", fontSize: "18px", fontWeight: 600, letterSpacing: "0.12em" }}>{current.code}</span>
           {" · "}
           {current.remote}
+          {clients.length > 0 && <div style={{ marginTop: "4px" }}>Replaces {clients.map((c) => c.name).join(", ")}</div>}
         </div>
         <DialogButton style={{ width: "100%" }} disabled={busy} onClick={() => decide(current, false)}>
           Deny
@@ -253,9 +271,8 @@ function Panel() {
     );
   }
 
-  const up = status.enabled && status.running && !status.error;
   return (
-    <Centered>
+    <Centered steaming={up} connected={connected}>
       <Focusable
         className="dtk-card"
         focusClassName="dtk-focus"
@@ -357,7 +374,7 @@ function SettingsPage() {
       <DialogControlsSection>
         {clients.length === 0 && <Field label="None yet" focusable />}
         {clients.map((c) => (
-          <Field key={c.fingerprint} label={c.name} description={`${KIND_LABELS[c.kind] ?? c.kind} · ${lastSeen(c.last_seen)}`}>
+          <Field key={c.fingerprint} label={c.name} description={`${KIND_LABELS[c.kind] ?? c.kind} · ${c.connected ? "connected" : lastSeen(c.last_seen)}`}>
             <DialogButton style={{ minWidth: "160px" }} disabled={busy} onClick={() => forget(c)}>
               Forget
             </DialogButton>
