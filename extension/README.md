@@ -261,9 +261,8 @@ and whether it is the pad the device created on its own for forwarded input ("Au
   shown as it is.
 - **Remove** (trash icon on a virtual row, or the right-click menu): `DELETE /controllers/virtual/{id}`,
   no confirmation. From the palette it asks which pad.
-- **Live**: while the view is visible it follows `/controllers/events` (SSE through the loopback
-  proxy), so a controller plugged in on the device appears at once. If the stream fails it polls
-  every 5 s and retries the stream.
+- **Live**: the list follows the device's `controllers` events (`/events`), so a controller plugged in
+  on the device appears at once. After a dropped connection the reconnect brings the current list.
 - With no controllers the view says *No controllers seen by Steam Input.* with an **Add virtual
   controller** button.
 
@@ -380,7 +379,7 @@ panel is the active editor of its group:
   (native, 1600, 1280, 960, 640 px wide) and **Audio** on/off. These are device-wide
   (`/stream/settings`, the same values the `stream_settings` tool changes); the extension sends
   the `PUT`, and the panel shows *Applying stream settings…* until the first frame of the restarted
-  stream arrives. Changes made elsewhere show up within one 5 s stats poll. A device without the
+  stream arrives. Changes made elsewhere arrive at once as `stream_settings` events. A device without the
   route offers only the local entries.
 - *This computer*: **Volume** (100-10 %; picking one unmutes) and **Gamepad goes to** (see
   [Remote input](#remote-input)). Mute and volume are remembered across panels and sessions.
@@ -434,7 +433,13 @@ keeps it.
   session (the connected device) and a state per device: `unpaired`, `disconnected` (paired),
   `connecting`, `pairing`, `connected` or `unreachable`. The views, status bar, screen panel and
   preview subscribe to its events.
-- **Health.** While connected, `/health` is checked every 15 s. If it fails, the device shows as
+- **Events.** While connected, the extension holds the device's event stream (`GET /events`): input
+  settings, controllers, stream settings and the plugin list arrive as they change, with no polling. The
+  stream ending (or 40 s without its 15 s heartbeat) means the device dropped: `/health` is checked at once
+  and then every 2 s while it fails; the stream reconnects with backoff, and its `hello` brings everything
+  up to date. Only the fps/Mbit/s readout (`/stream/stats`, every 5 s while the Actions view or screen
+  panel is open) and the sidebar preview still poll.
+- **Health.** While the stream is down, `/health` is checked every 15 s. If it fails, the device shows as
   unreachable but stays the connected device, with its pairing; when it answers again it is connected
   again. Commands such as Deploy need a connected device; if there is none they offer to connect.
 - **Reconnect.** The connected device is remembered. After a window reload the extension reconnects to
@@ -448,8 +453,8 @@ fills again by itself when the device answers. The state (context key `decky-too
 
 | State | When | Recovers |
 | --- | --- | --- |
-| `connection lost` | `/health` fails (device asleep, network gone, Decky Loader restarting), or the screen stream drops and an immediate `/health` check fails | by itself: `/health` is retried every 2 s while lost |
-| `pairing rejected` | a request answers 401 (the `/input/settings` check after each `/health`, or the stats poll) | **Reconnect**, which pairs again (approve on the device) |
+| `connection lost` | the event stream or the screen stream drops and an immediate `/health` check fails (device asleep, network gone, Decky Loader restarting) | by itself: `/health` is retried every 2 s while lost, and the event stream reconnects |
+| `pairing rejected` | a request answers 401 (the event stream's reconnect after the device forgot this editor, or the stats poll) | **Reconnect**, which pairs again (approve on the device) |
 | `disconnected` | you clicked Disconnect (or forgot / replaced the device) | **Reconnect** |
 | `connecting…` | a connect or pairing is running | by itself |
 
@@ -593,7 +598,7 @@ install (loader restart), fast deploy (`restart=plugin`), debug-flagged deploy (
 full restart, a failing build and auto-deploy on change. It also checks that Connect on an unpaired device files a pairing request
 (name, kind, the waiting message and the row's code, then approval), a denied request with Try
 again, waiting through a lost connection and a forgotten request (new code) and Cancel sending
-`DELETE`, the "Update Decky Toolkit" path for an older device, the reachability error with Retry, the 15 s health check going unreachable and back (views kept but
+`DELETE`, the "Update Decky Toolkit" path for an older device, the reachability error with Retry, the connection going unreachable and back (views kept but
 empty with their welcome text, view descriptions, status bar, screen panel title and `link` message,
 preview state, one log line each way, the `decky://` decoration, everything back on recovery), a
 Disconnect and Reconnect, a rejected pairing mid-session and re-paired, `media/screen.js` stopping and
@@ -602,11 +607,13 @@ and the remote input toggle (title action and its icon, palette command, status 
 indicator, unavailable and unsupported devices), and the screen panel's controls: which tab bar
 actions show with which icons for each state, mute and pause flipping their icon, the stream
 settings QuickPick (`PUT` of one field, *Applying* message, volume unmuting, audio off hiding the
-mute action, a stats tick mirroring outside changes, a 404 leaving only the local entries), and
+mute action, a 404 leaving only the local entries), and
 `media/screen.js` run in a minimal DOM (audio socket and hint, `/input` socket and its 4003
 handling). For controllers it checks the Controllers view rows (empty, physical and virtual,
-404, error), live updates over SSE through the proxy, add (default name, success text) and remove,
-the 409 and Steam Input refusals shown as-is, the poll fallback and recovery after a 404; the
+404, error), live `controllers` events, add (default name, success text) and remove,
+the 409 and Steam Input refusals shown as-is, the resync from `hello` after a dropped stream; the device events
+(no `/health`, input or controller polling while the stream is up, input settings and the plugin list following
+events, reconnects after `shutdown`, a silent stream and a drop, the outdated-plugin warning once); the
 **Gamepad goes to** pick (**New virtual pad…**, fallback to Auto when the pad is removed, none on a
 404) and, in `media/screen.js`, the `pad` field with a neutral state on switch; the Navigate to… picker
 (sections, current page, template prompt), Open plugin panel, Back / Quick Access / Close menus,
@@ -649,7 +656,7 @@ proxy and compares its fps readout with `/stream/stats` (within 10 %), calls MCP
 through the client, opens a WebSocket to `/input` through the proxy and expects close code 4003
 (input must be off on the Deck; the check never turns it on), opens `/audio` through the proxy and
 expects the format frame and at least 10 PCM chunks within 1 s (audio must be on; the check never
-changes it), reads `/controllers`, `/ui/routes` and `/controllers/events` (read-only), checks that the old top-level
+changes it), reads `/controllers` and `/ui/routes`, waits for the `hello` of `/events` (read-only), checks that the old top-level
 paths and the routes v1 dropped answer 404/405 and `/mcp` `GET`/`DELETE` 405, validates a staged zip with `unzip -t`,
 and prints `INFO` lines (never failures) for `/fs?path=/home/jackh/.local/share/VVVVVV`,
 `/apps/70300/saves` and a read-only `/fs/read` of the best VVVVVV save. The

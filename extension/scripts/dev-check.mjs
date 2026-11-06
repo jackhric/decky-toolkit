@@ -264,18 +264,22 @@ await check('controllers and Steam UI routes probe (informational)', async () =>
   } catch (e) {
     parts.push(`/ui/routes → ${redact(e.message)}`);
   }
-  const ac = new AbortController();
-  const t = setTimeout(() => ac.abort(), 5000);
-  try {
-    const res = await fetch(api + '/controllers/events', { signal: ac.signal, headers: { Accept: 'text/event-stream', Origin: 'vscode-webview://dev-check' } });
-    parts.push(`/controllers/events via proxy → ${res.status} ${res.headers.get('content-type') ?? ''}`.trim());
-    ac.abort();
-  } catch (e) {
-    parts.push(`/controllers/events via proxy → ${e.name === 'AbortError' ? 'no headers in 5 s' : redact(e.message)}`);
-  } finally {
-    clearTimeout(t);
-  }
   return parts.join('; ');
+});
+
+await check('/events: hello with the device state', async () => {
+  const c = new DeckyClient({ host, port }, identity);
+  const t0 = Date.now();
+  let sub;
+  const hello = await new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('no hello in 10 s')), 10000);
+    sub = c.events({
+      onEvent: e => { if (e.event === 'hello') { clearTimeout(t); resolve(e.data); } },
+      onDown: (e, final) => { if (final) { clearTimeout(t); reject(e); } },
+    });
+  });
+  sub.close();
+  return `hello in ${Date.now() - t0} ms, v${hello.version}, state: ${Object.keys(hello.state).join(', ')}`;
 });
 
 // The client API lives under API_BASE only; its old top-level paths and the twins v1 dropped answer 404/405.
@@ -283,7 +287,7 @@ const GONE = [['POST', '/pair/request'], ['GET', '/pair/request/none'], ['GET', 
   ['GET', '/stream/stats'], ['GET', '/input/settings'], ['GET', '/controllers'], ['GET', '/ui/routes'], ['GET', '/plugins'],
   ['POST', '/plugins/install'], ['GET', '/logs/tail'], ['GET', '/apps'], ['GET', '/fs?path=/tmp'],
   ...['/pair/requests', '/audio/stats', '/cef/console', '/cef/console/stream', '/recordings', '/recordings/none', '/stream.mjpeg',
-    '/frame.jpg'].map(p => ['GET', API_BASE + p]), ['POST', API_BASE + '/exec']];
+    '/frame.jpg', '/controllers/events'].map(p => ['GET', API_BASE + p]), ['POST', API_BASE + '/exec']];
 
 await check('old and dropped paths 404, /mcp GET and DELETE 405', async () => {
   const c = new DeckyClient({ host, port }, identity);
@@ -308,11 +312,11 @@ await check('old and dropped paths 404, /mcp GET and DELETE 405', async () => {
 });
 
 await check('SSE parser', async () => {
-  const chunks = ['data: one\n\n: keepalive\n\nda', 'ta: two\r\n\r\ndata: a\ndata: b\n\n'];
+  const chunks = ['data: one\n\n: keepalive\n\nevent: tools\nda', 'ta: two\r\n\r\ndata: a\ndata: b\n\n'];
   const body = new ReadableStream({ start(c) { chunks.forEach(s => c.enqueue(new TextEncoder().encode(s))); c.close(); } });
   const got = [];
-  await parseSse(body, d => got.push(d));
-  if (JSON.stringify(got) !== JSON.stringify(['one', 'two', 'a\nb'])) throw new Error(JSON.stringify(got));
+  await parseSse(body, (d, e) => got.push(`${e}:${d}`));
+  if (JSON.stringify(got) !== JSON.stringify(['message:one', 'tools:two', 'message:a\nb'])) throw new Error(JSON.stringify(got));
   return got.length + ' events';
 });
 

@@ -18,6 +18,7 @@ from decky_toolkit.server.auth import CertAuth, Connections  # noqa: E402
 from decky_toolkit.media.capture import ScreenCapturer  # noqa: E402
 from decky_toolkit.steam.console import ConsoleCollector  # noqa: E402
 from decky_toolkit.server import API_VERSIONS  # noqa: E402
+from decky_toolkit.server.events import EventHub  # noqa: E402
 from decky_toolkit.server.http import Api  # noqa: E402
 from decky_toolkit.server.identity import identity  # noqa: E402
 from decky_toolkit.input.controllers import ControllerService  # noqa: E402
@@ -31,6 +32,7 @@ from decky_toolkit.settings import Settings  # noqa: E402
 from decky_toolkit.server.tls import Identity, PairedClients, TlsError, fingerprint  # noqa: E402
 from decky_toolkit.tools import build_registry  # noqa: E402
 from decky_toolkit.tools.plugin_tools import PluginTools  # noqa: E402
+from decky_toolkit.tools.system import list_plugins  # noqa: E402
 from decky_toolkit.steam.ui import UiNavigator  # noqa: E402
 
 
@@ -91,6 +93,7 @@ class Plugin:
     activity: InputActivity | None = None
     plugin_tools: PluginTools | None = None
     identity: Identity
+    events: EventHub
     clients: PairedClients
     pairing: PairingRequests
     connections: Connections
@@ -108,11 +111,12 @@ class Plugin:
             self.last_error = f"could not load the device identity: {e}"
             decky.logger.error(self.last_error)
             return
+        registry = build_registry(self.capturer, self.input, self.controllers, self.ui, console=self.console,
+                                  activity=self.activity, plugin_tools=self.plugin_tools, events=self.events)
+        self.events.sources["tools"] = lambda: {"hash": registry.fingerprint()}
         api = Api(
             auth=CertAuth(self.clients, connections=self.connections),
-            mcp=McpServer(build_registry(self.capturer, self.input, self.controllers, self.ui,
-                                        console=self.console, activity=self.activity, plugin_tools=self.plugin_tools),
-                           decky.logger),
+            mcp=McpServer(registry, decky.logger),
             capturer=self.capturer,
             logger=decky.logger,
             pairing=self.pairing,
@@ -120,6 +124,7 @@ class Plugin:
             audio=self.audio,
             controllers=self.controllers,
             ui=self.ui,
+            events=self.events,
         )
         # The loader SIGKILLs a plugin 5s after SIGTERM, so never wait long for in-flight requests.
         runner = web.AppRunner(api.build_app(), access_log=None, shutdown_timeout=2)
@@ -168,8 +173,9 @@ class Plugin:
         if event == "create" and req is not None:
             info = {"id": req.id, "code": req.code, "client_name": req.client_name, "client_kind": req.client_kind,
                     "remote": req.remote}
-            asyncio.ensure_future(decky.emit("decky_toolkit_pair_request", info))
-        asyncio.ensure_future(decky.emit("decky_toolkit_pair_requests", self.pairing.list()))
+            self.events.frontend("decky_toolkit_pair_request", info)
+        self.events.frontend("decky_toolkit_pair_requests", self.pairing.list())
+        self.events.refresh("pairing")
 
     async def list_pair_requests(self) -> list[dict[str, Any]]:
         return self.pairing.list()
@@ -180,7 +186,7 @@ class Plugin:
         self.pairing.approve(request_id, cert)
         self.clients.add(fingerprint(cert), req.client_name, req.client_kind)
         decky.logger.info("pairing: approved %s (%s) from %s", req.client_name, req.client_kind, req.remote)
-        await decky.emit("decky_toolkit_paired", req.remote, req.client_name)
+        self.events.frontend("decky_toolkit_paired", req.remote, req.client_name)
         return self.pairing.list()
 
     async def deny_pair_request(self, request_id: str) -> list[dict[str, Any]]:
@@ -189,7 +195,8 @@ class Plugin:
         return self.pairing.list()
 
     def _on_clients_change(self, clients: list[dict[str, Any]]) -> None:
-        asyncio.ensure_future(decky.emit("decky_toolkit_paired_clients", clients))
+        self.events.frontend("decky_toolkit_paired_clients", clients)
+        self.events.refresh("pairing")
 
     async def list_paired_clients(self) -> list[dict[str, Any]]:
         return self.clients.list()
@@ -203,7 +210,33 @@ class Plugin:
 
     async def _on_input_session(self, remote: str) -> None:
         decky.logger.info("input session toast: remote input from %s", remote)
-        await decky.emit("decky_toolkit_input_session", remote)
+        self.events.frontend("decky_toolkit_input_session", remote)
+
+    # ---- events ----
+
+    def _on_input_state(self, state: dict[str, Any]) -> None:
+        # The panel mirrors a setting that remote clients usually change.
+        self.events.frontend("decky_toolkit_input_state", state["enabled"])
+        self.events.refresh("input_settings")
+
+    def _add_event_sources(self) -> None:
+        """What `hello` carries and `refresh` recomputes; "tools" follows the registry of each server start."""
+        assert self.capturer is not None and self.input is not None and self.controllers is not None
+        controllers = self.controllers
+
+        async def plugins() -> dict[str, Any]:
+            return {"plugins": [{k: p.get(k) for k in ("dir", "name", "version")} for p in await list_plugins()]}
+
+        async def controller_list() -> dict[str, Any]:
+            return controllers.event(await controllers.snapshot())
+
+        self.events.sources.update({
+            "stream_settings": self.capturer.stream_settings,
+            "input_settings": self.input.status,
+            "plugins": plugins,
+            "controllers": controller_list,
+            "pairing": lambda: {"pending": len(self.pairing.pending()), "paired": len(self.clients.list())},
+        })
 
     # ---- methods callable from the frontend ----
 
@@ -269,6 +302,7 @@ class Plugin:
         diagnostics.install(decky.logger, os.path.join(decky.DECKY_PLUGIN_RUNTIME_DIR, "stacks.txt"))
         threading.Thread(target=_loader_watchdog, name="loader-watchdog", daemon=True).start()
         save = lambda: self.settings.save(decky.DECKY_PLUGIN_SETTINGS_DIR)  # noqa: E731
+        self.events = EventHub(decky.emit, decky.logger)
         self.identity = Identity(decky.DECKY_PLUGIN_SETTINGS_DIR)
         try:
             await self.identity.ensure()
@@ -282,18 +316,19 @@ class Plugin:
         self.capturer = ScreenCapturer(lambda: self.settings, decky.logger, save_settings=save)
         self.audio = AudioCapturer(lambda: self.settings, decky.logger)
         self.capturer.audio = self.audio
+        self.capturer.on_settings_change = lambda: self.events.refresh("stream_settings")
         self.input = InputService(lambda: self.settings, save, decky.logger, on_session=self._on_input_session)
-        # The panel mirrors a setting that remote clients usually change, so push changes to it.
-        self.input.add_listener(lambda st: asyncio.ensure_future(decky.emit("decky_toolkit_input_state", st["enabled"])))
-        self.controllers = ControllerService(self.input, decky.logger)
+        self.input.add_listener(self._on_input_state)
+        self.controllers = ControllerService(self.input, decky.logger, events=self.events)
         self.ui = UiNavigator()
         # Only schedules its connection tasks, so a Steam without CEF cannot hold up startup.
         self.console = ConsoleCollector(decky.logger)
         self.console.start()
         self.activity = InputActivity(decky.logger)
         self.activity.start()
-        self.plugin_tools = PluginTools(decky.logger)
+        self.plugin_tools = PluginTools(decky.logger, events=self.events)
         self.plugin_tools.start()
+        self._add_event_sources()
         await self._start_server()
 
     async def _unload(self) -> None:

@@ -56,7 +56,7 @@ const identityPath = path.join(configDir, 'identity.json');
 const fakeDir = path.join(scratch, 'device');
 mkdirSync(fakeDir);
 const frame = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 0xff, 0xd9]);
-const health = { ok: true, name: 'decky-toolkit', version: '0.2.1', api: ['v1'], tools: 2, hostname: 'steamdeck.local', device_id: 'dev-1', os: 'SteamOS' };
+const health = { ok: true, name: 'decky-toolkit', version: '0.2.1', api: ['v1'], tools: 2, tools_hash: 'h0', hostname: 'steamdeck.local', device_id: 'dev-1', os: 'SteamOS' };
 const stateFile = path.join(fakeDir, 'state.json');
 const state = () => JSON.parse(readFileSync(stateFile, 'utf8'));
 const setState = patch => writeFileSync(stateFile, JSON.stringify({ ...state(), ...patch }, null, 2));
@@ -336,10 +336,12 @@ await check('mcp over stdio', async () => {
   return `${r.lines.length} replies in ${Date.now() - t0} ms, stderr ${r.stderr.length} B`;
 });
 
-await check('mcp: unknown arguments are refused; a changed device tool list sends tools/list_changed', async () => {
+await check('mcp: a tools event sends tools/list_changed at once, also after the device restarts; unknown arguments are refused', async () => {
   setState({ health: { ...health, tools_hash: 'aaaa' } });
   const send = (child, m) => child.stdin.write(JSON.stringify(m) + '\n');
-  let step = 0;
+  const isNote = m => m.method === 'notifications/tools/list_changed';
+  let step = 0, changedAt = 0, latency = 0, reconnectMs = 0, healthAfterList = 0, polled = -1;
+  const healthGets = () => state().requests.filter(r => r === 'GET /health').length;
   const r = await cli(['mcp'], {
     timeoutMs: 30000,
     onSpawn: child => send(child, { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'smoke', version: '1' } } }),
@@ -348,26 +350,42 @@ await check('mcp: unknown arguments are refused; a changed device tool list send
       if (step === 0 && lines.some(m => m.id === 1)) { step = 1; send(child, { jsonrpc: '2.0', id: 2, method: 'tools/list' }); }
       if (step === 1 && lines.some(m => m.id === 2)) {
         step = 2;
+        healthAfterList = healthGets();
+        changedAt = Date.now();
         setState({ health: { ...health, tools_hash: 'bbbb' } });
-        send(child, { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'device_info', arguments: {} } });
       }
-      if (step === 2 && lines.some(m => m.method === 'notifications/tools/list_changed')) {
+      if (step === 2 && lines.filter(isNote).length === 1) {
         step = 3;
+        latency = Date.now() - changedAt;
+        polled = healthGets() - healthAfterList;
+        send(child, { jsonrpc: '2.0', id: 3, method: 'tools/list' });
+      }
+      if (step === 3 && lines.some(m => m.id === 3)) {
+        // The device restarts with other tools: `shutdown`, a dropped stream, then a hello with the new hash.
+        step = 4;
+        changedAt = Date.now();
+        setState({ health: { ...health, tools_hash: 'cccc' }, eventsGen: 1 });
+      }
+      if (step === 4 && lines.filter(isNote).length === 2) {
+        step = 5;
+        reconnectMs = Date.now() - changedAt;
         send(child, { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'plugin_deploy', arguments: { path: plugin } } });
       }
-      if (step === 3 && lines.some(m => m.id === 4)) { step = 4; child.stdin.end(); }
+      if (step === 5 && lines.some(m => m.id === 4)) { step = 6; child.stdin.end(); }
     },
   });
-  setState({ health });
+  setState({ health, eventsGen: 0 });
   assert.equal(r.code, 0, r.stderr);
   const msgs = r.stdout.trim().split('\n').map(l => JSON.parse(l));
-  const note = msgs.findIndex(m => m.method === 'notifications/tools/list_changed');
-  assert.ok(note > msgs.findIndex(m => m.id === 2), 'the notification follows the list it invalidates');
-  assert.equal(msgs.filter(m => m.method === 'notifications/tools/list_changed').length, 1);
+  assert.ok(msgs.findIndex(isNote) > msgs.findIndex(m => m.id === 2), 'the notification follows the list it invalidates');
+  assert.equal(msgs.filter(isNote).length, 2);
+  assert.ok(latency < 1000, `list_changed ${latency} ms after the change`);
+  assert.equal(polled, 0, 'no /health polling while the event stream is up');
+  assert.ok(state().requests.filter(x => x === 'GET /api/v1/events').length >= 2, 'reconnected');
   const refused = msgs.find(m => m.id === 4).result;
   assert.equal(refused.isError, true);
   assert.equal(refused.content[0].text, "Invalid arguments for plugin_deploy: unknown argument 'path'. Arguments: dir (string); restart (none|plugin|loader).");
-  return 'list_changed after the fingerprint moved; plugin_deploy {path} refused with the argument list';
+  return `list_changed ${latency} ms after the change, ${reconnectMs} ms after a restart`;
 });
 
 await check('initialize answers without the device', async () => {

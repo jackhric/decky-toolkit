@@ -8,12 +8,15 @@ import logging
 import os
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..loader import sourcemap
 from ..steam import cdp
 from . import ToolRegistry, error_result, ok_result
 from .system import plugins_dir
+
+if TYPE_CHECKING:
+    from ..server.events import EventHub
 
 BINDING = "__deckyToolkitToolsChanged"
 MAX_NAME = 64
@@ -104,8 +107,9 @@ class PluginTool:
 
 
 class PluginTools:
-    def __init__(self, logger: logging.Logger | None = None):
+    def __init__(self, logger: logging.Logger | None = None, events: "EventHub | None" = None):
         self.log = logger or logging.getLogger("decky_toolkit.plugin_tools")
+        self.events = events
         self.builtin: set[str] = set()
         self._registered: list[dict[str, Any]] = []
         self._tools: dict[str, PluginTool] = {}
@@ -169,6 +173,8 @@ class PluginTools:
         added, removed = tools.keys() - self._tools.keys(), self._tools.keys() - tools.keys()
         if added or removed:
             self.log.info("plugin tools: %s", ", ".join([f"+{n}" for n in sorted(added)] + [f"-{n}" for n in sorted(removed)]))
+        if self.events is not None and tools != self._tools:
+            self.events.refresh("tools")
         for r in refused:
             if r not in self._refused:
                 self.log.warning("plugin tools: refused %s from %s: %s", r["name"], r["plugin"], r["reason"])
@@ -247,6 +253,9 @@ class PluginTools:
         while True:
             await self._dirty.wait()
             self._dirty.clear()
+            # Also woken when Decky loads or unloads any plugin (install, reload, its file watcher).
+            if self.events is not None:
+                self.events.refresh("plugins")
             try:
                 await self.refresh()
             except (cdp.CdpError, asyncio.TimeoutError, ValueError) as e:

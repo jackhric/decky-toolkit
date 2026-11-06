@@ -1,6 +1,7 @@
 import type {
   AppsList,
   ControllersList,
+  DeviceEvent,
   FsListing,
   GameDirs,
   GameSaves,
@@ -122,6 +123,26 @@ function logQueryString(q: LogQuery): string {
   if (q.tail !== undefined) p.set('tail', String(q.tail));
   const s = p.toString();
   return s ? `?${s}` : '';
+}
+
+/** Mutable so tests can shorten them. */
+export const eventTimings = {
+  /** The device sends a heartbeat every 15 s; this long without a byte means the connection is dead. */
+  heartbeatTimeoutMs: 40000,
+  backoffMs: [500, 1000, 2000, 3000, 5000],
+};
+
+export interface EventHandlers {
+  /** Every event in order. Right after `hello`, each entry of its `state` follows as its own event. */
+  onEvent(e: DeviceEvent): void;
+  /** The stream dropped or could not open; `final` when the device rejected this client, after which it stops. */
+  onDown?(error: unknown, final: boolean): void;
+}
+
+export interface EventSubscription {
+  close(): void;
+  /** Settles once closed or stopped for good. */
+  readonly done: Promise<void>;
 }
 
 export class DeckyClient {
@@ -416,6 +437,55 @@ export class DeckyClient {
     await parseSse(res.body, data => data.split('\n').forEach(onLine));
   }
 
+  /** Follows `GET /events`, reconnecting with backoff until closed or rejected (401, another device). */
+  events(handlers: EventHandlers): EventSubscription {
+    const stop = new AbortController();
+    const done = (async () => {
+      let failures = 0;
+      while (!stop.signal.aborted) {
+        const conn = new AbortController();
+        const signal = AbortSignal.any([stop.signal, conn.signal]);
+        let timer: NodeJS.Timeout | undefined;
+        const alive = () => {
+          clearTimeout(timer);
+          timer = setTimeout(() => conn.abort(new Error(`no heartbeat from the device for ${eventTimings.heartbeatTimeoutMs / 1000} s`)),
+            eventTimings.heartbeatTimeoutMs);
+        };
+        let error: unknown = new Error('the device ended the event stream');
+        try {
+          alive();
+          const res = await this.api('/events', { headers: { Accept: 'text/event-stream' }, signal, timeoutMs: 0 });
+          if (!res.ok || !res.body) throw new HttpError(res.status, await res.text(), '/events');
+          await parseSse(res.body, (data, event) => {
+            let e: DeviceEvent;
+            try {
+              e = { event, data: JSON.parse(data) } as DeviceEvent;
+            } catch {
+              return;
+            }
+            handlers.onEvent(e);
+            if (e.event === 'hello') {
+              failures = 0;
+              for (const [event, data] of Object.entries(e.data.state)) handlers.onEvent({ event, data } as DeviceEvent);
+            } else if (e.event === 'shutdown') {
+              conn.abort(new Error('the device is restarting'));
+            }
+          }, alive);
+        } catch (e) {
+          error = signal.aborted ? signal.reason : e;
+        } finally {
+          clearTimeout(timer);
+        }
+        if (stop.signal.aborted) break;
+        const final = isRejection(error);
+        handlers.onDown?.(error, final);
+        if (final) break;
+        await sleep(eventTimings.backoffMs[Math.min(failures++, eventTimings.backoffMs.length - 1)], stop.signal).catch(() => undefined);
+      }
+    })();
+    return { close: () => stop.abort(), done };
+  }
+
   /**
    * Waits for the device to come back after a loader restart. The restart fires about 1 s after the
    * install reply, so an early healthy answer may still be the old process; require either having
@@ -439,14 +509,21 @@ export class DeckyClient {
   }
 }
 
-export async function parseSse(body: ReadableStream<Uint8Array>, onEvent: (data: string) => void): Promise<void> {
+/** Calls `onEvent` per event (name `message` unless the event names one) and `onActivity` for every chunk, comments included. */
+export async function parseSse(
+  body: ReadableStream<Uint8Array>,
+  onEvent: (data: string, event: string) => void,
+  onActivity?: () => void,
+): Promise<void> {
   const reader = body.getReader();
   const dec = new TextDecoder();
   let buf = '';
   let data: string[] = [];
+  let event = 'message';
   for (;;) {
     const { value, done } = await reader.read();
     if (done) break;
+    onActivity?.();
     buf += dec.decode(value, { stream: true });
     let nl: number;
     while ((nl = buf.indexOf('\n')) >= 0) {
@@ -454,12 +531,15 @@ export async function parseSse(body: ReadableStream<Uint8Array>, onEvent: (data:
       buf = buf.slice(nl + 1);
       if (line.endsWith('\r')) line = line.slice(0, -1);
       if (line === '') {
-        if (data.length) onEvent(data.join('\n'));
+        if (data.length) onEvent(data.join('\n'), event);
         data = [];
+        event = 'message';
       } else if (line.startsWith('data:')) {
         data.push(line.slice(line[5] === ' ' ? 6 : 5));
+      } else if (line.startsWith('event:')) {
+        event = line.slice(line[6] === ' ' ? 7 : 6);
       }
     }
   }
-  if (data.length) onEvent(data.join('\n'));
+  if (data.length) onEvent(data.join('\n'), event);
 }

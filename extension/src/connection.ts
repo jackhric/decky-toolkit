@@ -1,7 +1,9 @@
 import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
-import type { Health, InputSettings, StreamStats } from '@decky-toolkit/client/api';
-import { DeckyClient, DeviceAddress, describeError, isConnectionError, isRejection, outdatedDevice } from '@decky-toolkit/client/client';
+import type { DeviceEvent, Health, InputSettings, StreamStats } from '@decky-toolkit/client/api';
+import {
+  DeckyClient, DeviceAddress, EventSubscription, describeError, isConnectionError, isRejection, outdatedDevice,
+} from '@decky-toolkit/client/client';
 import { DEFAULT_MCP_PORT, DeviceProxy, ProxyTarget } from './proxy';
 import * as identityFile from '@decky-toolkit/client/identity';
 import type { Identity } from '@decky-toolkit/client/transport';
@@ -53,6 +55,8 @@ export interface ConnectionState {
   /** Undefined until the first `input_settings` answer for the connected device. */
   readonly input?: InputSettings;
   readonly onDidChange: vscode.Event<void>;
+  /** Events from the connected device's `/events` stream; a (re)connect replays its state after `hello`. */
+  readonly onDidReceiveEvent: vscode.Event<DeviceEvent>;
   /** Host, port or pairing changed; unlike `onDidChange` not fired for health/stats updates. */
   readonly onDidChangeTarget: vscode.Event<void>;
   /** The device of the current session; stays set while it is briefly unreachable. */
@@ -80,8 +84,10 @@ export class Connection implements ConnectionState, vscode.Disposable {
   private readonly statusChanged = new vscode.EventEmitter<void>();
   /** Some device's `statusOf` may have changed. */
   readonly onDidChangeStatus = this.statusChanged.event;
+  private readonly received = new vscode.EventEmitter<DeviceEvent>();
+  readonly onDidReceiveEvent = this.received.event;
   readonly proxy: DeviceProxy;
-  private readonly disposables: vscode.Disposable[] = [this.changed, this.targetChanged, this.statusChanged];
+  private readonly disposables: vscode.Disposable[] = [this.changed, this.targetChanged, this.statusChanged, this.received];
 
   health: HealthState = { kind: 'unknown' };
   stats?: StreamStats;
@@ -102,6 +108,9 @@ export class Connection implements ConnectionState, vscode.Disposable {
   private recent?: SavedDevice;
   private healthTimer?: NodeJS.Timeout;
   private probeTimer?: NodeJS.Timeout;
+  private events?: EventSubscription;
+  /** Between a `hello` and the next drop of the event stream; `/health` is polled only while it is false. */
+  private eventsUp = false;
   private store: 'file' | 'secrets' = 'file';
 
   constructor(private readonly ctx: vscode.ExtensionContext) {
@@ -282,6 +291,7 @@ export class Connection implements ConnectionState, vscode.Disposable {
     const s = this.session, a = this.activeDevice;
     if (s && !(a && identity && a.id === s.id && a.host === s.host && a.port === s.port)) this.endSession();
     this.proxy.resetUpstreams();
+    if (this.session) this.followEvents();
     this.health = { kind: 'unknown' };
     this.stats = undefined;
     this.statsError = undefined;
@@ -366,17 +376,51 @@ export class Connection implements ConnectionState, vscode.Disposable {
     this.setReachable(device.id, reachable);
   }
 
-  /** Polls `/health` often while the session is unreachable so it recovers within seconds. */
+  /**
+   * Polls `/health` while the event stream is down: often while the session is unreachable so it recovers within
+   * seconds, else every `healthPollMs`. The event stream reconnects on its own and stops this on its `hello`.
+   */
   private scheduleHealth(): void {
     clearTimeout(this.healthTimer);
-    if (!this.session) return;
+    if (!this.session || this.eventsUp) return;
     const ms = this.health.kind === 'unreachable' ? connectionTimings.retryMs : connectionTimings.healthPollMs;
-    this.healthTimer = setTimeout(() => {
-      void this.checkHealth().then(h => {
-        // /health needs no pairing; the input settings route tells a rejected one apart.
-        if (h.kind === 'ok' && this.session && this.statsLeases === 0) void this.refreshInput();
-      }).finally(() => this.scheduleHealth());
-    }, ms);
+    this.healthTimer = setTimeout(() => void this.checkHealth().finally(() => this.scheduleHealth()), ms);
+  }
+
+  /** Follows the session device's `/events`; replaces the `/health`, input settings and controller polls. */
+  private followEvents(): void {
+    this.stopEvents();
+    const client = this.authedClient();
+    if (!client) return;
+    const sub = client.events({
+      onEvent: e => {
+        if (this.events !== sub) return;
+        if (e.event === 'hello') {
+          this.eventsUp = true;
+          clearTimeout(this.healthTimer);
+          this.setRejected(false);
+          if (this.session) this.noteVersion(this.session.id, e.data.version);
+          if (this.health.kind !== 'ok') void this.checkHealth();
+        } else if (e.event === 'input_settings') {
+          this.setInput(e.data);
+        }
+        this.received.fire(e);
+      },
+      onDown: (_error, final) => {
+        if (this.events !== sub) return;
+        this.eventsUp = false;
+        if (final) this.setRejected(true);
+        // Dropped or restarting: look now, then keep probing until the stream is back.
+        void this.checkHealth().finally(() => this.scheduleHealth());
+      },
+    });
+    this.events = sub;
+  }
+
+  private stopEvents(): void {
+    this.events?.close();
+    this.events = undefined;
+    this.eventsUp = false;
   }
 
   private async loadIdentityFlags(): Promise<void> {
@@ -467,11 +511,11 @@ export class Connection implements ConnectionState, vscode.Disposable {
     this.unreachableIds.delete(id);
     this.health = { kind: 'unknown' };
     this.rejected = false;
+    this.followEvents();
     this.scheduleHealth();
     await this.ctx.globalState.update(SESSION_KEY, id);
     this.fireStatus();
     void this.checkHealth();
-    void this.refreshInput();
   }
 
   async disconnect(): Promise<void> {
@@ -482,6 +526,7 @@ export class Connection implements ConnectionState, vscode.Disposable {
 
   private endSession(): void {
     this.session = undefined;
+    this.stopEvents();
     clearTimeout(this.healthTimer);
     this.healthTimer = undefined;
     void this.ctx.globalState.update(SESSION_KEY, undefined);
@@ -550,7 +595,6 @@ export class Connection implements ConnectionState, vscode.Disposable {
   private async pollStats(): Promise<void> {
     const client = this.authedClient();
     if (!client || !this.session) return;
-    void this.refreshInput();
     const gen = this.generation;
     try {
       const stats = await client.streamStats();
@@ -600,6 +644,7 @@ export class Connection implements ConnectionState, vscode.Disposable {
   }
 
   dispose(): void {
+    this.stopEvents();
     clearInterval(this.statsTimer);
     clearTimeout(this.healthTimer);
     clearInterval(this.probeTimer);

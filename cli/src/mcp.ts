@@ -2,7 +2,7 @@ import { once } from 'events';
 import * as readline from 'readline';
 import type { Readable, Writable } from 'stream';
 import type { ToolCallResult, ToolDescription } from '@decky-toolkit/client/api';
-import type { DeckyClient } from '@decky-toolkit/client/client';
+import type { DeckyClient, EventSubscription } from '@decky-toolkit/client/client';
 import * as identityFile from '@decky-toolkit/client/identity';
 import {
   InvalidOption, NotPairedError, PAIR_HINT, Paired, RESTART_MODES, deploy, deviceStatus, explain, onDevice, pairedWith, parseRestart,
@@ -42,11 +42,9 @@ const failure = (id: Id, code: number, message: string) => JSON.stringify({ json
 
 class InvalidParams extends Error {}
 
+/** Only while the event stream is down; otherwise its `tools` events report changes as they happen. */
 const TOOLS_CHECK_MS = 15000;
 const INSTRUCTIONS_TIMEOUT_MS = 1500;
-
-/** What identifies the device's tool list; older devices have no hash, so their version and count stand in. */
-const toolsKey = (h: { version: string; tools: number; tools_hash?: string }) => h.tools_hash ?? `${h.version}/${h.tools}`;
 
 /** Unknown arguments are refused, as on the device, so a misspelt one never silently falls back to a default. */
 function argumentProblem(tool: ToolDescription, args: Record<string, unknown>): string | undefined {
@@ -84,6 +82,11 @@ export class McpServer {
   private checking?: Promise<void>;
   /** Set by `serve`; sends a notification line to the client. */
   private notify?: (line: string) => void;
+  private events?: EventSubscription;
+  /** Bumped per `follow` so a subscription for a previous pairing is not kept. */
+  private followGen = 0;
+  /** Between a `hello` and the next drop of the event stream. */
+  private streamUp = false;
 
   constructor(private readonly log: (line: string) => void) {}
 
@@ -109,7 +112,7 @@ export class McpServer {
     const local = new Set(LOCAL_TOOLS.map(t => t.name));
     const r = await onDevice(this.current, async p => {
       const [tools, health] = await Promise.all([this.toolsOf(p.client), p.client.health().catch(() => undefined)]);
-      this.listedKey = health ? toolsKey(health) : '?';
+      this.listedKey = health?.tools_hash ?? '?';
       return tools;
     });
     if ('value' in r) return [...r.value.filter(t => !local.has(t.name)), ...LOCAL_TOOLS];
@@ -136,32 +139,53 @@ export class McpServer {
       }
     }
     const r = await onDevice(this.current, p => p.client.rpcText('tools/call', { name, arguments: args }, 300000, id));
-    // A call may have changed the device's tools (a deploy of Decky Toolkit itself); look once it is answered.
+    // A call may have changed the device's tools (a deploy of Decky Toolkit itself); without events, look once it is answered.
     setTimeout(() => void this.checkTools(), 0);
     return 'error' in r ? result(id, text(`${name}: ${r.error}`, true)) : relay(id, name, r.value);
   }
 
-  /** Tells the client to fetch the list again when the device's tools changed since it last did. */
+  /** Tells the client to fetch the list again once the device's tools differ from the ones it got. */
+  private toolsChanged(hash: string | undefined): void {
+    if (this.listedKey === undefined || hash === this.listedKey) return;
+    this.deviceTools = undefined;
+    this.listedKey = undefined;
+    this.notify?.(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' }));
+  }
+
+  /** Asks `/health` for the tools hash; a no-op while the event stream is up unless `force`d (another pairing). */
   checkTools(force = false): Promise<void> {
     this.checking ??= (async () => {
       try {
-        if (this.listedKey === undefined) return;
-        let changed = force;
-        if (!changed) {
-          const p = await this.current().catch(() => undefined);
-          const h = await p?.client.health().catch(() => undefined);
-          changed = !!h && toolsKey(h) !== this.listedKey;
-        }
-        if (changed) {
-          this.deviceTools = undefined;
-          this.listedKey = undefined;
-          this.notify?.(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' }));
-        }
+        if (this.listedKey === undefined || (!force && this.streamUp)) return;
+        if (force) return this.toolsChanged(undefined);
+        const p = await this.current().catch(() => undefined);
+        const h = await p?.client.health().catch(() => undefined);
+        if (h) this.toolsChanged(h.tools_hash);
       } finally {
         this.checking = undefined;
       }
     })();
     return this.checking;
+  }
+
+  /** Follows the paired device's events: `tools` carries the hash, so a change is announced as soon as it happens. */
+  private follow(): void {
+    const gen = ++this.followGen;
+    this.events?.close();
+    this.events = undefined;
+    this.streamUp = false;
+    void this.current().then(p => {
+      if (gen !== this.followGen) return;
+      this.events = p.client.events({
+        onEvent: e => {
+          if (e.event === 'hello') this.streamUp = true;
+          else if (e.event === 'tools') this.toolsChanged(e.data.hash);
+        },
+        onDown: () => {
+          this.streamUp = false;
+        },
+      });
+    }, () => undefined);
   }
 
   /** The reply line, if the message gets one. `ping` never touches the device; `initialize` asks it briefly for its own instructions. */
@@ -216,7 +240,9 @@ export class McpServer {
     const watcher = identityFile.watch(f => {
       this.paired = Promise.resolve(f && pairedWith(f));
       void this.checkTools(true);
+      this.follow();
     });
+    this.follow();
     const timer = setInterval(() => void this.checkTools(), TOOLS_CHECK_MS);
     timer.unref();
     const pending = new Set<Promise<void>>();
@@ -239,6 +265,8 @@ export class McpServer {
     return new Promise(resolve => rl.on('close', () => void Promise.all(pending).then(() => {
       clearInterval(timer);
       watcher.close();
+      this.followGen++;
+      this.events?.close();
       resolve();
     })));
   }

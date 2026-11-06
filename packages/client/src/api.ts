@@ -7,8 +7,8 @@ export interface Health {
   /** Client API versions the device serves, e.g. `["v1"]`; absent on devices from before the versioned API. */
   api?: string[];
   tools: number;
-  /** Changes with any tool, description or schema; absent on older builds. */
-  tools_hash?: string;
+  /** Changes with any tool, description or schema; also sent as the `tools` event. */
+  tools_hash: string;
   /** Identification for network discovery; absent on older builds. */
   hostname?: string;
   device_id?: string | null;
@@ -295,6 +295,40 @@ export interface FsListing {
   count: number;
   truncated: boolean;
 }
+
+export interface PluginVersion {
+  dir: string;
+  name: string | null;
+  version: string | null;
+}
+
+/** Payloads of the state events on `GET /events`, by event name. */
+export interface DeviceState {
+  /** `ToolRegistry.fingerprint()`: changes with any MCP tool, description or schema. */
+  tools: { hash: string };
+  stream_settings: StreamSettings;
+  input_settings: InputSettings;
+  plugins: { plugins: PluginVersion[] };
+  controllers: Pick<ControllersList, 'controllers' | 'virtual'>;
+  /** Counts only; pairing codes and request ids stay on the device. */
+  pairing: { pending: number; paired: number };
+}
+
+/** The first event of every stream: the current value of each state event the device could read. */
+export interface HelloEvent {
+  version: string;
+  api: string[];
+  state: Partial<DeviceState>;
+}
+
+export type DeviceEventMap = DeviceState & {
+  hello: HelloEvent;
+  /** The server is stopping (plugin reload, loader restart); the stream ends right after. */
+  shutdown: Record<string, never>;
+};
+
+export type DeviceEventName = keyof DeviceEventMap;
+export type DeviceEvent = { [K in DeviceEventName]: { event: K; data: DeviceEventMap[K] } }[DeviceEventName];
 
 export interface ErrorBody {
   error: string;
