@@ -112,6 +112,11 @@ export interface ConfirmOptions {
   signal?: AbortSignal;
 }
 
+// The loader SIGKILLs a backend that has not finished `_unload` after 5 s, and a debug-flagged plugin is
+// then loaded up to three times (nudge plus the watcher's two); the first "Loaded" line came 10.4 s after
+// an install on 2026-11-05, so 10 s was too short.
+const CONFIRM_TIMEOUT_MS = 20000;
+
 /**
  * The loader logs `Loaded <name> (v<version>)` to the journal when it (re-)imports a plugin, right
  * before it tells the frontend to import the bundle again; Decky also starts a new plugin log file
@@ -120,7 +125,7 @@ export interface ConfirmOptions {
 export async function confirmReload(
   client: DeckyClient, p: WorkspacePlugin, before: ReloadMarkers, o: ConfirmOptions = {},
 ): Promise<ReloadConfirmation> {
-  const timeoutMs = o.timeoutMs ?? 10000;
+  const timeoutMs = o.timeoutMs ?? CONFIRM_TIMEOUT_MS;
   const settleMs = o.settleMs ?? 0;
   const loaded = new RegExp(`\\[loader\\]\\[INFO\\]: Loaded ${escapeRe(p.name)}( \\(|$)`);
   const start = Date.now();
@@ -230,7 +235,7 @@ export async function deployPlugin(client: DeckyClient, plugin: WorkspacePlugin,
     const c0 = Date.now();
     if (via === 'watcher') o.log('debug flag set: waiting for the loader\'s file watcher to reload it');
     const c = await confirmReload(client, p, { journal, pluginLog }, {
-      timeoutMs: o.confirmTimeoutMs ?? 10000,
+      timeoutMs: o.confirmTimeoutMs ?? CONFIRM_TIMEOUT_MS,
       nudgeAfterMs: via === 'watcher' ? 4000 : undefined,
       settleMs: via === 'watcher' ? 1500 : 0,
       signal: o.signal,
