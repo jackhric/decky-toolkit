@@ -3,7 +3,7 @@ import asyncio
 import time
 from typing import Any
 
-from ..input.activity import InputActivity
+from ..input.activity import AT_DEVICE_SECONDS, InputActivity, someone_at_device
 from ..input.service import InputService
 from ..media.capture import ScreenCapturer
 from ..steam import cdp
@@ -22,12 +22,11 @@ def register(reg: ToolRegistry, activity: InputActivity, input_service: InputSer
         "physical {devices [{name, id, event, seconds_ago}], last}, remote {client, kind, seconds_ago}, foreground "
         "{current, side_menu, running_app}, screen_viewers}. Physical input is read from every non-virtual input "
         "device (times only, never contents).",
-        {"properties": {"active_within": {"type": "number", "default": 60, "minimum": 1, "maximum": 86400}}},
+        {"properties": {"active_within": {"type": "number", "default": AT_DEVICE_SECONDS, "minimum": 1, "maximum": 86400}}},
     )
-    async def device_activity(active_within: float = 60) -> dict[str, Any]:
+    async def device_activity(active_within: float = AT_DEVICE_SECONDS) -> dict[str, Any]:
         now = time.time()
         physical = activity.snapshot()
-        last_physical = physical["last"]
         remote = None
         if input_service.last_remote:
             r = input_service.last_remote
@@ -38,7 +37,7 @@ def register(reg: ToolRegistry, activity: InputActivity, input_service: InputSer
         except (cdp.CdpError, OSError, asyncio.TimeoutError) as e:
             foreground = {"error": str(e)}
         return {
-            "someone_at_device": bool(last_physical and last_physical["seconds_ago"] <= active_within),
+            "someone_at_device": someone_at_device(physical, active_within),
             "remote_input_active": bool(remote and remote["seconds_ago"] <= active_within),
             "physical": physical,
             "remote": remote,

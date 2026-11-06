@@ -15,6 +15,7 @@ SYS_INPUT = "/sys/class/input"
 RESCAN_SECONDS = 5.0
 EV_KEY, EV_REL, EV_ABS = 1, 2, 3
 INPUT_PROP_ACCELEROMETER = 6
+AT_DEVICE_SECONDS = 60
 
 
 def _read(path: str) -> str:
@@ -45,6 +46,12 @@ def describe(event: str, sys_input: str = SYS_INPUT) -> dict[str, Any] | None:
         return None
     vendor, product = _read(os.path.join(dev, "id", "vendor")), _read(os.path.join(dev, "id", "product"))
     return {"name": _read(os.path.join(dev, "name")) or event, "id": f"{vendor}:{product}"}
+
+
+def someone_at_device(snapshot: dict[str, Any], within: float = AT_DEVICE_SECONDS) -> bool:
+    """Physical input within the last `within` seconds, from an `InputActivity.snapshot()`."""
+    last = snapshot["last"]
+    return bool(last and last["seconds_ago"] <= within)
 
 
 class InputActivity:

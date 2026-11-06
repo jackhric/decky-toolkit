@@ -46,7 +46,7 @@ class Tab:
     """One short-lived DevTools websocket session. Use as an async context manager.
 
     The long-lived sessions are console.ConsoleCollector's (one per watched target) and
-    tools.plugin_tools.PluginTools' (SharedJSContext), which passes `on_event` for CDP events."""
+    steam.plugin_tools.PluginTools' (SharedJSContext), which passes `on_event` for CDP events."""
 
     def __init__(self, target: dict[str, Any], on_event: Callable[[dict[str, Any]], None] | None = None):
         self.target = target

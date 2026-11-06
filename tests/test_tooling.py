@@ -217,6 +217,15 @@ def test_activity_records_time_and_device(tmp_path):
     assert snap["devices"][0]["event"] == "event5"
 
 
+def test_someone_at_device_is_one_rule():
+    def snap(ago):
+        return {"devices": [], "last": None if ago is None else {"device": "pad", "seconds_ago": ago}}
+    assert activity.someone_at_device(snap(activity.AT_DEVICE_SECONDS))
+    assert not activity.someone_at_device(snap(activity.AT_DEVICE_SECONDS + 0.1))
+    assert not activity.someone_at_device(snap(None))
+    assert activity.someone_at_device(snap(5), within=5) and not activity.someone_at_device(snap(6), within=5)
+
+
 def test_device_activity_tool():
     from decky_toolkit.tools import activity as activity_tools
 
