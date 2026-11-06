@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 from aiohttp import ClientSession, ClientTimeout, web  # noqa: E402
 
 from decky_toolkit import audit  # noqa: E402
-from decky_toolkit.auth import TokenAuth  # noqa: E402
+from certauth import H, stub_auth  # noqa: E402
 from decky_toolkit.http import Api  # noqa: E402
 from decky_toolkit.protocol import McpServer  # noqa: E402
 from decky_toolkit.tools import ToolRegistry, build_registry, guard, system  # noqa: E402
@@ -120,19 +120,17 @@ def test_confirm_required(monkeypatch):
 
 
 def test_audit_line_lists_known_keys_only():
-    token = audit.request_origin.set(("10.0.0.5", "mcp"))
+    token = audit.request_origin.set(("10.0.0.5", "mcp", "VS Code on box"))
     try:
         line = audit.tool_line("write_file", {"path": "/x", "content": "s3cret", "evil key=1": "v"}, ["path", "content", "mode"])
     finally:
         audit.request_origin.reset(token)
-    assert line == "audit tool=write_file origin=10.0.0.5 via=mcp args=content,path+1 unknown"
+    assert line == 'audit tool=write_file origin=10.0.0.5 client="VS Code on box" via=mcp args=content,path+1 unknown'
     assert "s3cret" not in line and "/x" not in line
-    assert audit.tool_line("restart_loader", {}, []) == "audit tool=restart_loader origin=- via=local args=-"
+    assert audit.tool_line("restart_loader", {}, []) == 'audit tool=restart_loader origin=- client="-" via=local args=-'
     assert audit.is_audited("input_mouse") and audit.is_audited("cef_evaluate") and not audit.is_audited("cef_console")
 
 
-TOKEN = "t"
-H = {"Authorization": f"Bearer {TOKEN}"}
 
 
 def test_audit_log_lines_over_http(caplog):
@@ -148,7 +146,7 @@ def test_audit_log_lines_over_http(caplog):
         return []
 
     async def run():
-        api = Api(auth=TokenAuth(TOKEN), mcp=McpServer(reg, log), capturer=None, logger=log)
+        api = Api(auth=stub_auth(), mcp=McpServer(reg, log), capturer=None, logger=log)
         runner = web.AppRunner(api.build_app())
         await runner.setup()
         await web.TCPSite(runner, "127.0.0.1", 0).start()
@@ -169,6 +167,6 @@ def test_audit_log_lines_over_http(caplog):
     with caplog.at_level(logging.INFO, logger="audit-test"):
         asyncio.run(run())
     lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("audit")]
-    assert lines == ["audit tool=cef_evaluate origin=127.0.0.1 via=mcp args=expression",
-                     "audit route=POST /plugins/nope/reload origin=127.0.0.1 via=http"]
+    assert lines == ['audit tool=cef_evaluate origin=127.0.0.1 client="test client" via=mcp args=expression',
+                     'audit route=POST /plugins/nope/reload origin=127.0.0.1 client="test client" via=http']
     assert not any("document.cookie" in r.getMessage() for r in caplog.records)

@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 from aiohttp import ClientSession, ClientTimeout, web  # noqa: E402
 
 from decky_toolkit import cdp, ui  # noqa: E402
-from decky_toolkit.auth import TokenAuth  # noqa: E402
+from certauth import H, stub_auth  # noqa: E402
 from decky_toolkit.controllers import ControllerService, evdev_gamepads, merge, parse_bitmap  # noqa: E402
 from decky_toolkit.http import Api  # noqa: E402
 from decky_toolkit.input import uinput  # noqa: E402
@@ -21,8 +21,6 @@ from decky_toolkit.protocol import McpServer  # noqa: E402
 from decky_toolkit.settings import Settings  # noqa: E402
 from decky_toolkit.tools import ToolRegistry, build_registry  # noqa: E402
 
-TOKEN = "test-token"
-H = {"Authorization": f"Bearer {TOKEN}"}
 LOG = logging.getLogger("t")
 FIXTURE = (Path(__file__).parent / "fixtures" / "proc_bus_input_devices.txt").read_text()
 
@@ -99,7 +97,7 @@ def test_merge_steam_only_device():
 
 
 def make_service(enabled=False, pad_idle=60.0, uinput_ok=True):
-    settings = Settings(token=TOKEN, input_enabled=enabled)
+    settings = Settings(input_enabled=enabled)
     made: list[Dev] = []
 
     def make_pad():
@@ -225,7 +223,7 @@ def test_add_virtual_refused_when_steam_does_not_list_it():
 
 
 async def with_server(fn, **kwargs):
-    api = Api(auth=TokenAuth(TOKEN), mcp=McpServer(ToolRegistry(), LOG), capturer=None, logger=LOG,
+    api = Api(auth=stub_auth(), mcp=McpServer(ToolRegistry(), LOG), capturer=None, logger=LOG,
               log_keepalive=0.2, **kwargs)
     runner = web.AppRunner(api.build_app())
     await runner.setup()
