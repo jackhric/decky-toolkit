@@ -14,11 +14,7 @@ from a deploy goes to the **Decky** output channel; a failed build fails the dep
 
 ## From scripts
 
-The same logs are available over HTTP with the device token:
-
-```sh
-curl -N -H "Authorization: Bearer $TOKEN" "http://<deck-ip>:8765/logs/stream?plugin=my-plugin"   # SSE
-curl -H "Authorization: Bearer $TOKEN" "http://<deck-ip>:8765/logs/tail?source=loader&tail=50"
-```
+The same logs are available over HTTP (`GET /logs/stream` as SSE, `GET /logs/tail`) to paired clients; see the
+[API reference](https://github.com/jackhric/decky-toolkit/blob/main/docs/api.md).
 
 MCP clients can use the `read_plugin_log` and `loader_log` tools.

@@ -37,14 +37,14 @@ The Decky Toolkit plugin must already be installed and enabled on the device.
    Decky plugin, you are offered to deploy it; afterwards use the `$(rocket) Deploy <name>` button in
    the status bar, <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd> (<kbd>Cmd</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd>
    on macOS) or **Plugin → Deploy** in the Actions view. See [Deploy](#deploy).
-4. **Disconnect** with the icon on the device row. The token is kept, so the next connect needs no
-   pairing.
+4. **Disconnect** with the icon on the device row. The pairing is kept, so the next connect needs no
+   approval.
 
 The status bar shows `$(vm-connect) <name>` while connected and `$(vm) Decky: not connected`
 otherwise. Click it to connect, switch device, disconnect, open the screen or add a device. When the
 device stops answering it turns into `$(debug-disconnect) <name>: connection lost` on a warning
-background (`$(key) <name>: token rejected` on an error background when the device refuses the
-token), and a click reconnects; see [Losing the connection](#losing-the-connection).
+background (`$(key) <name>: pairing rejected` on an error background when the device no longer accepts
+this editor), and a click reconnects; see [Losing the connection](#losing-the-connection).
 
 ## Sidebar
 
@@ -66,14 +66,14 @@ row shows the host once and `vX.Y.Z · state` as the description; otherwise the 
 | connecting / pairing | spinner | `connecting…` / `waiting for approval · code 4821` | none | none |
 | connected | `vm-connect` (green) | `v0.2.1 · connected` | none | Disconnect, `…` |
 | unreachable | `warning` (yellow) | `unreachable` | connect (retries) | Connect, `…` |
-| connected, token rejected | `key` (red) | `v0.2.1 · token rejected` | reconnect (pairs again) | Disconnect, `…` |
+| connected, pairing rejected | `key` (red) | `v0.2.1 · pairing rejected` | reconnect (pairs again) | Disconnect, `…` |
 
 The version is the plugin version from the device's public `/health`, so it shows before pairing too;
 it is left out until the device has answered once.
 
 The `…` icon and the right-click menu hold the rest: **Rename…** (the name only) and **Forget device**
-(also deletes its stored token). There is no manual pairing: no token entry, no Re-pair and no address
-editing. A device whose token stops working is paired again by connecting to it, which asks for
+(also deletes its pairing). There is no manual pairing: no Re-pair and no address
+editing. A device that stops accepting this editor is paired again by connecting to it, which asks for
 approval on the device; a device that moved to another address is forgotten and added again (or found
 by [Discovery](#discovery)). Connect and disconnect live only here.
 
@@ -148,8 +148,9 @@ you expand or collapse.
   The status bar briefly shows the page the Steam UI ended up on. A device whose plugin predates
   navigation answers 404; the commands then say *update Decky Toolkit on the device*.
 - **MCP**
-  - **Write MCP config for this workspace**, **Copy MCP URL** (`http://host:port/mcp`),
-    **Copy token** (the bearer token; a warning reminds you it is a secret).
+  - **Write MCP config for this workspace**, **Copy MCP URL** (a local
+    `http://127.0.0.1:<port>/<secret>/mcp` that stays the same across restarts; the port is
+    `decky-toolkit.mcpPort`).
 
 The view title has **Open screen** and **Refresh**.
 
@@ -214,7 +215,7 @@ greyed-out row, *update Decky Toolkit on the device*.
 
 The extension registers a file system for the scheme `decky`: `decky://<host>/<absolute path>`
 (`<host>:<port>` when the port is not 8765). It serves any saved, paired device, also when it is
-not the connected one; the token comes from secret storage.
+not the connected one; the pairing comes from secret storage.
 
 - **Read**: `stat` and directory listings use `GET /fs` (a stat lists the parent with an exact
   glob), files `GET /fs/read` (up to 64 MiB). Symlinks are resolved to file or folder.
@@ -348,8 +349,7 @@ in the device's Decky Toolkit panel.
   It falls back to Auto when that pad is removed. A device without controller management does not
   offer it.
 
-The panel's WebSocket (`/input`) goes through the same loopback proxy as the stream, which adds the
-token during the handshake.
+The panel's WebSocket (`/input`) goes through the same loopback proxy as the stream.
 
 ## Screen panel controls
 
@@ -386,10 +386,10 @@ The screen is only available here: the device serves no browser viewer.
 
 ## Pairing
 
-Pairing starts when you connect to a device without a token, or whose token the device rejects. It is
-the only way to get a token: there is no manual token entry.
+Pairing starts when you connect to a device you have not paired with, or one that no longer accepts
+this editor. Approving on the device is the only way in.
 
-1. **Reachability.** The extension calls `GET /health` (no token). If the device does not answer, you
+1. **Reachability.** The extension calls `GET /health`. If the device does not answer, you
    get one error: *Can't reach <name> at host:port. Is the device on and Decky Toolkit enabled?* with
    **Retry**. Nothing else happens.
 2. **Request.** The extension files `POST /pair/request` with the name *VS Code on <hostname>*
@@ -402,7 +402,7 @@ the only way to get a token: there is no manual token entry.
    sleeping, a loader restart) only show *Lost contact with <name>, retrying…*; it keeps trying until
    you cancel. If the device forgot the request (plugin restarted), it files a new one and shows the
    new code. **Cancel** withdraws the request (`DELETE /pair/request/{id}`).
-4. **Allowed.** The token is stored, the device becomes connected (the screen panel opens per
+4. **Allowed.** The pairing is stored, the device becomes connected (the screen panel opens per
    `decky-toolkit.openScreenOnConnect`) and you see *Paired with <name>* with **Open screen** and
    **Deploy plugin**.
 5. **Denied.** *Pairing denied on <name>* with **Try again**.
@@ -418,15 +418,15 @@ name (press Enter to use the host). The port is 8765. A picker then offers **Con
 
 ## Connection model
 
-- **One state object.** `Connection` holds the saved devices, the active device and its token, the
+- **One state object.** `Connection` holds the saved devices, the active device and its pairing, the
   session (the connected device) and a state per device: `unpaired`, `disconnected` (paired),
   `connecting`, `pairing`, `connected` or `unreachable`. The views, status bar, screen panel and
   preview subscribe to its events.
 - **Health.** While connected, `/health` is checked every 15 s. If it fails, the device shows as
-  unreachable but stays the connected device, with its token; when it answers again it is connected
+  unreachable but stays the connected device, with its pairing; when it answers again it is connected
   again. Commands such as Deploy need a connected device; if there is none they offer to connect.
 - **Reconnect.** The connected device is remembered. After a window reload the extension reconnects to
-  it silently if it answers and the token is still valid; if it does not answer yet, it reconnects as
+  it silently if it answers and the device still accepts it; if it does not answer yet, it reconnects as
   soon as it does (saved devices that do not answer are probed every 15 s).
 
 ### Losing the connection
@@ -437,17 +437,17 @@ fills again by itself when the device answers. The state (context key `decky-too
 | State | When | Recovers |
 | --- | --- | --- |
 | `connection lost` | `/health` fails (device asleep, network gone, Decky Loader restarting), or the screen stream drops and an immediate `/health` check fails | by itself: `/health` is retried every 2 s while lost |
-| `token rejected` | an authenticated request answers 401 (the `/input/settings` check after each `/health`, or the stats poll) | **Reconnect**, which pairs again (approve on the device) |
+| `pairing rejected` | a request answers 401 (the `/input/settings` check after each `/health`, or the stats poll) | **Reconnect**, which pairs again (approve on the device) |
 | `disconnected` | you clicked Disconnect (or removed / switched the device) | **Reconnect** |
 | `connecting…` | a connect or pairing is running | by itself |
 
 - **Actions, Plugins, Games, Controllers**: stay visible but empty, with a welcome message for the
-  state (*Lost connection to the device. …* with **Reconnect now**, *The device rejected the stored
-  token …* with **Reconnect**, *Disconnected from the device.* with **Reconnect**). The view title
-  description says `<name> · connection lost` (or `token rejected`, `disconnected`).
+  state (*Lost connection to the device. …* with **Reconnect now**, *The device no longer accepts
+  this editor …* with **Reconnect**, *Disconnected from the device.* with **Reconnect**). The view title
+  description says `<name> · connection lost` (or `pairing rejected`, `disconnected`).
 - **Preview**: stops fetching, hides its button and shows the same explanation as the screen panel.
 - **Screen panel**: stays open. The tab title becomes `Screen: <name> (connection lost)` (or
-  `(token rejected)`, `(disconnected)`), the last frame stays dimmed behind a message such as *Lost
+  `(pairing rejected)`, `(disconnected)`), the last frame stays dimmed behind a message such as *Lost
   connection to <name>. Reconnecting as soon as it answers again…*, the stream, input and audio
   sockets close, and the tab bar swaps remote input, stream settings and snapshot for a
   `$(plug)` **Reconnect** action (mute and pause stay). On recovery the stream, input and audio come
@@ -456,9 +456,9 @@ fills again by itself when the device answers. The state (context key `decky-too
   <name>. Output resumes when it is connected again.`, then `[decky-toolkit] Connected to <name>
   again.` when it resumes; no error line per retry. After a Disconnect the log stream stops too.
 - **`decky://` files and folders**: editors stay open. While the device does not answer (or is not
-  paired, or rejected the token) their tab and Explorer entry get a `!` badge in the warning colour
+  paired, or no longer accepts this editor) their tab and Explorer entry get a `!` badge in the warning colour
   with a tooltip saying why saving fails; it clears when the device answers. A Disconnect does not
-  mark them, since `decky://` keeps working with the stored token.
+  mark them, since `decky://` keeps working with the stored pairing.
 
 ## Commands
 
@@ -466,10 +466,10 @@ All of these are also in the command palette under the `Decky:` category.
 
 | Command | What it does |
 | --- | --- |
-| Decky: Connect | Connects to a device; pairs first when there is no valid token |
-| Decky: Disconnect | Ends the session; keeps the token |
-| Decky: Reconnect | Connects to the device of the last session again (pairs again when its token was rejected) |
-| Decky: Switch device / Add device… / Rename device / Forget device | Connect to another saved device, add one, rename it, or forget it and its token |
+| Decky: Connect | Connects to a device; pairs first when it is not paired or no longer accepted |
+| Decky: Disconnect | Ends the session; keeps the pairing |
+| Decky: Reconnect | Connects to the device of the last session again (pairs again when it was rejected) |
+| Decky: Switch device / Add device… / Rename device / Forget device | Connect to another saved device, add one, rename it, or forget it and its pairing |
 | Decky: Search network | Look for unsaved Decky Toolkit devices on the local network ([Discovery](#discovery)) |
 | Decky: Open screen | Live screen panel with sound; remote input, mute, stream settings, pause and snapshot as tab bar icons |
 | Decky: Snapshot to file | Saves the current `/frame.jpg` with a Save dialog |
@@ -494,10 +494,9 @@ All of these are also in the command palette under the `Decky:` category.
 | Decky: Show plugin logs | Streams a plugin's log from `~/homebrew/logs/<dir>/` |
 | Decky: Evaluate JS in Steam UI | Runs an expression with the `cef_evaluate` tool; result in an info message or the "Decky Toolkit Console" output |
 | Decky: Toast on device | Shows a Decky toast |
-| Decky: Write MCP config for this workspace | Adds `mcpServers.decky` to `.mcp.json` in the first workspace folder |
-| Decky: Copy MCP URL | Copies `http://host:port/mcp` |
-| Decky: Copy token | Copies the bearer token (a secret) |
-| Decky: Refresh / Refresh plugins | Re-reads the token and `/health`, checks which devices answer, reloads the plugin list |
+| Decky: Write MCP config for this workspace | Adds `mcpServers.decky` to `.mcp.json` in the first workspace folder, pointing at the local MCP URL |
+| Decky: Copy MCP URL | Copies the local MCP URL (`http://127.0.0.1:<port>/<secret>/mcp`) |
+| Decky: Refresh / Refresh plugins | Re-reads `/health`, checks which devices answer, reloads the plugin list |
 
 ## Settings
 
@@ -506,24 +505,26 @@ All of these are also in the command palette under the `Decky:` category.
 | `decky-toolkit.openScreenOnConnect` | `true` | Open the screen panel after the first successful connect of a session |
 | `decky-toolkit.host` | (empty) | Device IP or hostname. When set, seeds the first saved device; used when the device list is empty |
 | `decky-toolkit.port` | `8765` | Decky Toolkit server port (same rules as `host`) |
+| `decky-toolkit.mcpPort` | `8766` | Local port MCP clients connect to; the next free port is used when another window holds it. Takes effect after a window reload |
 | `decky-toolkit.pluginDirName` | (empty) | Target dir under `~/homebrew/plugins` for deploy; empty means the plugin folder's name |
 | `decky-toolkit.deploy.build` | `auto` | `auto`: build only when `src/` is newer than `dist/index.js`; `always`; `never` |
 | `decky-toolkit.deploy.onChange` | `false` | Fast-deploy (without building) when `dist/index.js`, `main.py` or `py_modules/**/*.py` change |
 | `decky-toolkit.discovery.enabled` | `true` | List unsaved Decky Toolkit devices on the local network under **On this network** (see [Discovery](#discovery)) |
 
 Saved devices live in VS Code's global state (`decky-toolkit.devices`), so all windows share them.
-Tokens are stored per `host:port` in secret storage.
+Pairings are stored per `host:port` in secret storage.
 
 ## How it works
 
-- **Token handling.** The token lives in `context.secrets`. Webviews never see it: the extension runs
-  a loopback proxy (`127.0.0.1`, random port, random path prefix) that adds the
-  `Authorization: Bearer` header and strips browser `Origin`/`Cookie` headers before forwarding to
-  the device. WebSocket upgrades (`/input`, `/audio`) are forwarded the same way. The screen panel and the
+- **Credentials.** The pairing lives in `context.secrets`. Webviews never see it: the extension runs
+  a loopback proxy (`127.0.0.1`, stable port, secret path prefix kept in global state) that
+  strips browser `Origin`/`Cookie` headers before forwarding to the device. WebSocket upgrades
+  (`/input`, `/audio`) are forwarded the same way. The screen panel and the
   preview only know the proxy URL, and their CSP allows only that origin (plus its `ws:` form for
   the screen panel) and `blob:` (images, and the screen panel's inline AudioWorklet module, which
-  Chromium checks against `script-src`). The one place the token leaves secret storage is `.mcp.json`, after a
-  confirmation.
+  Chromium checks against `script-src`). MCP clients use the same proxy under
+  `/<secret>/mcp`; **Write MCP config** puts that URL into `.mcp.json`, and the extension
+  refreshes the port there when it changes.
 - **Theme.** The screen panel and preview use only VS Code theme colours (`--vscode-*` variables);
   only the video area itself is black.
 - **Deploy** zips the staged files (see [Deploy](#deploy)) under a single `<dirname>/` folder with
@@ -581,9 +582,9 @@ again, waiting through a lost connection and a forgotten request (new code) and 
 `DELETE`, the "Update Decky Toolkit" path for an older device, the reachability error with Retry, the 15 s health check going unreachable and back (views kept but
 empty with their welcome text, view descriptions, status bar, screen panel title and `link` message,
 preview state, one log line each way, the `decky://` decoration, everything back on recovery), a
-Disconnect and Reconnect, a token rejected mid-session and re-paired, `media/screen.js` stopping and
-restarting stream, input and audio on the link state, Add device, snapshot, Copy MCP URL /
-token, and the remote input toggle (title action and its icon, palette command, status bar
+Disconnect and Reconnect, a rejected pairing mid-session and re-paired, `media/screen.js` stopping and
+restarting stream, input and audio on the link state, Add device, snapshot, Copy MCP URL,
+and the remote input toggle (title action and its icon, palette command, status bar
 indicator, unavailable and unsupported devices), and the screen panel's controls: which tab bar
 actions show with which icons for each state, mute and pause flipping their icon, the stream
 settings QuickPick (`PUT` of one field, *Applying* message, volume unmuting, audio off hiding the
@@ -608,7 +609,7 @@ write/read round trip, mkdir, rename, delete with `confirm=1`, refused and sensi
 code the extension uses and checks on the device that both halves changed:
 
 ```sh
-DECKY_TOKEN_FILE=~/deck-token node scripts/deploy-check.mjs /path/to/decky-toolkit-test [host] [port]
+DECKY_IDENTITY_FILE=~/deck-identity.json node scripts/deploy-check.mjs /path/to/decky-toolkit-test [host] [port]
 ```
 
 The plugin must be named `Decky Toolkit Test`, export `VERSION` from `src/version.ts` and
@@ -625,7 +626,7 @@ exactly one backend process runs. At the end Decky uninstalls the plugin (no loa
 Code:
 
 ```sh
-DECKY_TOKEN_FILE=~/deck-token node scripts/dev-check.mjs [host] [port]
+DECKY_IDENTITY_FILE=~/deck-identity.json node scripts/dev-check.mjs [host] [port]
 ```
 
 It checks `/health`, `/stream.mjpeg` (at least two thirds of the device's fps cap for 5 s),

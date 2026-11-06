@@ -25,5 +25,5 @@ the device. Related tools:
 | `toast` | Show a Decky toast in the Steam UI |
 
 :::caution
-`cef_evaluate` is intentionally powerful: anyone with the device token can run code in the Steam UI.
+`cef_evaluate` is intentionally powerful: anyone paired with the device can run code in the Steam UI.
 :::

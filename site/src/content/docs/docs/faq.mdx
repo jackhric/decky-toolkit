@@ -42,7 +42,7 @@ export const faqs = [
   },
   {
     q: 'How do I connect Claude Code or another MCP client?',
-    a: 'Run claude mcp add --transport http decky http://<deck-ip>:8765/mcp -H "Authorization: Bearer <token>", or use Decky: Write MCP config for this workspace to add the server to .mcp.json. The token is shown in the Decky Toolkit panel on the device.',
+    a: 'Run Decky: Copy MCP URL in VS Code and pass the result to claude mcp add --transport http decky <url>, or use Decky: Write MCP config for this workspace to add the server to .mcp.json. The extension relays MCP to the connected device.',
   },
   {
     q: 'Why isn’t Decky Toolkit in the Decky Plugin Store?',
