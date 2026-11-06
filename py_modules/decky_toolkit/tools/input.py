@@ -1,20 +1,27 @@
 """Keyboard, mouse and gamepad injection tools (refused while remote input is disabled)."""
 import asyncio
 import base64
-from typing import Any
+import json
+from typing import TYPE_CHECKING, Any
 
 from ..media.capture import CaptureUnavailable, ScreenCapturer
 from ..input import keymap
 from ..input.service import InputDisabled, InputService, InputUnavailable, Session, mouse_button, pad_values
 from . import ToolRegistry
 
+if TYPE_CHECKING:
+    from .ui import Orientation
+
 CAPTURE_PROP = {"type": "boolean", "default": False, "description": "Return a fresh screen frame after acting."}
 # Steam opens a freshly created pad asynchronously; input sent before that is lost.
 PAD_SETTLE_SECONDS = 1.5
 CAPTURE_SETTLE_SECONDS = 0.25
+# Long enough for Steam to move focus or open a dialog after a key.
+UI_SETTLE_SECONDS = 0.1
 
 
-def register(reg: ToolRegistry, service: InputService | None, capturer: ScreenCapturer | None) -> None:
+def register(reg: ToolRegistry, service: InputService | None, capturer: ScreenCapturer | None,
+             orient: "Orientation") -> None:
     def svc() -> InputService:
         if service is None:
             raise InputUnavailable("input service not configured")
@@ -30,13 +37,15 @@ def register(reg: ToolRegistry, service: InputService | None, capturer: ScreenCa
         finally:
             await s.close_session(session)
         summary = summary_fn(result) if summary_fn else result
+        await asyncio.sleep(UI_SETTLE_SECONDS)
+        out = {"done": summary, "ui": await orient.safe()}
         if not capture:
-            return summary
+            return out
         if capturer is None:
             raise CaptureUnavailable("screen capture not configured")
-        await asyncio.sleep(CAPTURE_SETTLE_SECONDS)
+        await asyncio.sleep(max(0.0, CAPTURE_SETTLE_SECONDS - UI_SETTLE_SECONDS))
         frame = await capturer.grab()
-        return [{"type": "text", "text": summary if isinstance(summary, str) else str(summary)},
+        return [{"type": "text", "text": json.dumps(out, indent=2)},
                 {"type": "image", "data": base64.b64encode(frame).decode(), "mimeType": "image/jpeg"}]
 
     @reg.add(
@@ -54,7 +63,10 @@ def register(reg: ToolRegistry, service: InputService | None, capturer: ScreenCa
         "input_key",
         "Press a key combo on the device keyboard, e.g. \"ctrl+shift+a\", \"enter\", \"KEY_F5\", \"ArrowDown\". "
         "A list presses several combos one after another. Keys go down in order, are held for hold_ms "
-        "(games poll once per frame), then released in reverse.",
+        "(games poll once per frame), then released in reverse. In the Steam UI the keyboard needs no controller: "
+        "arrows move focus, enter selects (and edits a text field; type with input_text, no on-screen keyboard "
+        "opens), esc goes back or closes a dialog/menu, shift+tab opens the main menu; ui_navigate opens Quick "
+        "Access. Returns {done, ui}: ui is ui_state after the keys, so check focus there instead of a screenshot.",
         {"properties": {
             "keys": {"anyOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}],
                      "description": "Combo like \"ctrl+c\" (names: KeyboardEvent.code, KEY_*, ctrl/shift/alt/meta, "
@@ -86,7 +98,8 @@ def register(reg: ToolRegistry, service: InputService | None, capturer: ScreenCa
 
     @reg.add(
         "input_text",
-        "Type ASCII text with a US keyboard layout (newline = Enter, tab = Tab). Non-ASCII is refused.",
+        "Type ASCII text with a US keyboard layout (newline = Enter, tab = Tab) into the focused field or game. "
+        "Non-ASCII is refused. Returns {done, ui} like input_key.",
         {"properties": {
             "text": {"type": "string"},
             "delay_ms": {"type": "integer", "default": 10, "minimum": 0, "maximum": 1000},
@@ -108,7 +121,7 @@ def register(reg: ToolRegistry, service: InputService | None, capturer: ScreenCa
         "Move, click or scroll the device pointer. x/y are normalised 0..1 across the focused window "
         "(the Steam UI is the full 1920x1080 screen), or pixels in that window with pixels=true; dx/dy move "
         "relatively in pixels. click/double/down/up move to x/y first when given. scroll: amount = vertical "
-        "detents (positive = down), dx = horizontal detents.",
+        "detents (positive = down), dx = horizontal detents. Returns {done, ui} like input_key.",
         {"properties": {
             "action": {"type": "string", "enum": ["move", "click", "double", "down", "up", "scroll"], "default": "move"},
             "x": {"type": "number"}, "y": {"type": "number"},
@@ -165,7 +178,7 @@ def register(reg: ToolRegistry, service: InputService | None, capturer: ScreenCa
         "axes: {lx,ly,rx,ry: -1..1 (y down = +1), lt,rt: 0..1}; hat: [x,y] in -1..1. The state is held for "
         "hold_ms, then everything returns to neutral. sequence runs steps in order instead: "
         "{\"press\":\"a\",\"ms\":100}, {\"stick\":\"l\",\"x\":0,\"y\":-1,\"ms\":300}, "
-        "{\"buttons\":{...},\"axes\":{...},\"hat\":[x,y],\"ms\":100} or {\"wait\":ms}. guide opens the Steam menu.",
+        "{\"buttons\":{...},\"axes\":{...},\"hat\":[x,y],\"ms\":100} or {\"wait\":ms}. guide opens the Steam menu. Returns {done, ui} like input_key.",
         {"properties": {
             "buttons": {"type": "object"}, "axes": {"type": "object"},
             "hat": {"type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 2},

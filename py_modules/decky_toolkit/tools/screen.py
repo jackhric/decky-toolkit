@@ -1,16 +1,20 @@
 """Tools backed by the full-display capture pipeline."""
 import base64
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..media.capture import CaptureUnavailable, ScreenCapturer
 from . import ToolRegistry
 
+if TYPE_CHECKING:
+    from .ui import Orientation
 
-def register(reg: ToolRegistry, capturer: ScreenCapturer | None) -> None:
+
+def register(reg: ToolRegistry, capturer: ScreenCapturer | None, orient: "Orientation") -> None:
     @reg.add(
         "screen_capture",
         "Capture the full gamescope display (Steam UI, games, overlays: exactly what the screen shows) as a JPEG. "
-        "Uses gamescope's PipeWire video node, so it works without a physical display attached.",
+        "Uses gamescope's PipeWire video node, so it works without a physical display attached. The text part "
+        "says where the Steam UI is; trust it over the picture (backgrounds can look like a running game).",
     )
     async def screen_capture() -> list[dict[str, Any]]:
         if capturer is None:
@@ -18,7 +22,8 @@ def register(reg: ToolRegistry, capturer: ScreenCapturer | None) -> None:
         frame = await capturer.grab()
         stats = capturer.stats()
         return [
-            {"type": "text", "text": f"Display frame {stats.get('width')}x{stats.get('height')}, {len(frame)} bytes"},
+            {"type": "text", "text": f"Display frame {stats.get('width')}x{stats.get('height')}, {len(frame)} bytes\n"
+                                     f"{orient.line(await orient.safe())}"},
             {"type": "image", "data": base64.b64encode(frame).decode(), "mimeType": "image/jpeg"},
         ]
 

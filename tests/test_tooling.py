@@ -333,3 +333,28 @@ def test_logs_read_takes_only_the_arguments_of_its_source():
     assert r["isError"] and "positive integer" in text(r)
     r = run(reg.call("logs_wait", {"pattern": "x", "source": "loader", "plugin": "y"}))
     assert r["isError"] and "does not take plugin" in text(r)
+
+
+def test_orientation_reports_person_and_one_line_summary():
+    from decky_toolkit.tools.ui import Orientation
+
+    class Inspector:
+        async def snapshot(self):
+            return {"current": "/library/home", "side_menu": "none", "running_app": None,
+                    "dialog": {"title": "Disconnect?", "text": "", "buttons": ["OK"]}, "keyboard": False,
+                    "focus": {"text": "OK", "tag": "button", "target": "Steam Big Picture Mode"}}
+
+    class Activity:
+        def __init__(self, ago):
+            self.ago = ago
+
+        def snapshot(self):
+            return {"devices": [], "last": None if self.ago is None else {"device": "pad", "seconds_ago": self.ago}}
+
+    state = asyncio.run(Orientation(Inspector(), Activity(5))())
+    assert state["someone_at_device"] is True
+    assert asyncio.run(Orientation(Inspector(), Activity(600))())["someone_at_device"] is False
+    assert asyncio.run(Orientation(Inspector(), None)())["someone_at_device"] is False
+    assert Orientation.line(state) == ("route /library/home · menu none · no game running · dialog Disconnect? · "
+                                       "focus 'OK' · someone is using the device")
+    assert Orientation.line({"error": "Steam UI state unavailable: x"}) == "Steam UI state unavailable: x"

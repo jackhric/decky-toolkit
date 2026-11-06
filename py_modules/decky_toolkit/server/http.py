@@ -23,7 +23,7 @@ from ..input.ei import EiError
 from ..input.service import InputDisabled, InputService, InputUnavailable
 from .long_lived import LongLivedRequests
 from .pairing import MAX_WAIT_SECONDS, POLL_AFTER_MS, PairingLimit, PairingRequests
-from .protocol import SERVER_INFO, McpServer
+from .protocol import INSTRUCTIONS, SERVER_INFO, McpServer
 from ..media.record import check_name, recorder_for
 from ..tools import plugins
 from ..tools.system import list_plugins, schedule_loader_restart
@@ -118,7 +118,8 @@ class Api:
 
     async def handle_health(self, _request: web.Request) -> web.Response:
         return web.json_response({"ok": True, **SERVER_INFO, "api_version": API_VERSION, "tools": len(self.mcp.tools),
-                                  "tools_hash": self.mcp.tools.fingerprint(), **identity()})
+                                  "tools_hash": self.mcp.tools.fingerprint(), "instructions": INSTRUCTIONS,
+                                  **identity()})
 
     # ---- pairing ----
 
