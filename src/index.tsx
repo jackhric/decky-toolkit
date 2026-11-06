@@ -1,11 +1,13 @@
 import {
   ButtonItem,
+  ConfirmModal,
   DialogButton,
   Field,
   Focusable,
   PanelSection,
   PanelSectionRow,
   ToggleField,
+  showModal,
 } from "@decky/ui";
 import { addEventListener, callable, definePlugin, removeEventListener, toaster } from "@decky/api";
 import { useEffect, useState } from "react";
@@ -17,7 +19,6 @@ type Status = {
   bind: string;
   port: number;
   ip: string;
-  url: string;
   pair_requests: number;
   stream: { running: boolean; fps: number; subscribers: number; available: boolean; error: string | null } | null;
   input: InputSettings | null;
@@ -34,15 +35,35 @@ type PairRequest = {
   age_s: number;
 };
 
+type PairedClient = {
+  fingerprint: string;
+  name: string;
+  kind: string;
+  added_at: number;
+  last_seen: number | null;
+};
+
+const KIND_LABELS: Record<string, string> = { vscode: "VS Code", mcp: "MCP client", other: "Other" };
+
+function lastSeen(at: number | null): string {
+  if (at === null) return "never seen";
+  const minutes = Math.floor((Date.now() / 1000 - at) / 60);
+  if (minutes < 2) return "seen just now";
+  if (minutes < 60) return `seen ${minutes} min ago`;
+  if (minutes < 48 * 60) return `seen ${Math.floor(minutes / 60)} h ago`;
+  return `seen ${Math.floor(minutes / 1440)} days ago`;
+}
+
 type InputSettings = { enabled: boolean; backend: "ei" | "uinput" | null; available: boolean; reason: string | null };
 
 const getStatus = callable<[], Status>("get_status");
 const setEnabled = callable<[enabled: boolean], Status>("set_enabled");
-const regenerateToken = callable<[], Status>("regenerate_token");
 const restartServer = callable<[], Status>("restart_server");
 const listPairRequests = callable<[], PairRequest[]>("list_pair_requests");
 const approvePairRequest = callable<[id: string], PairRequest[]>("approve_pair_request");
 const denyPairRequest = callable<[id: string], PairRequest[]>("deny_pair_request");
+const listPairedClients = callable<[], PairedClient[]>("list_paired_clients");
+const forgetPairedClient = callable<[fingerprint: string], PairedClient[]>("forget_paired_client");
 const getInputSettings = callable<[], InputSettings>("get_input_settings");
 const setInputEnabled = callable<[enabled: boolean], InputSettings>("set_input_enabled");
 
@@ -52,6 +73,7 @@ function Content() {
   const [busy, setBusy] = useState(false);
 
   const [requests, setRequests] = useState<PairRequest[]>([]);
+  const [clients, setClients] = useState<PairedClient[]>([]);
 
   const refresh = async () => setStatus(await getStatus());
   const refreshRequests = async () => setRequests(await listPairRequests());
@@ -62,10 +84,13 @@ function Content() {
     const onInput = addEventListener<[enabled: boolean]>("decky_toolkit_input_state", () => refresh());
     const onRequest = addEventListener<[info: unknown]>("decky_toolkit_pair_request", () => refreshRequests());
     const onRequests = addEventListener<[list: PairRequest[]]>("decky_toolkit_pair_requests", (list) => setRequests(list));
+    const onClients = addEventListener<[list: PairedClient[]]>("decky_toolkit_paired_clients", (list) => setClients(list));
+    listPairedClients().then(setClients);
     return () => {
       removeEventListener("decky_toolkit_input_state", onInput);
       removeEventListener("decky_toolkit_pair_request", onRequest);
       removeEventListener("decky_toolkit_pair_requests", onRequests);
+      removeEventListener("decky_toolkit_paired_clients", onClients);
     };
   }, []);
 
@@ -93,6 +118,23 @@ function Content() {
       setBusy(false);
     }
   };
+
+  const forget = (c: PairedClient) =>
+    showModal(
+      <ConfirmModal
+        strTitle={`Forget ${c.name}?`}
+        strDescription="It has to pair again to connect to this device."
+        strOKButtonText="Forget"
+        onOK={async () => {
+          try {
+            setClients(await forgetPairedClient(c.fingerprint));
+            toaster.toast({ title: "Decky Toolkit", body: `Forgot ${c.name}` });
+          } catch (e) {
+            toaster.toast({ title: "Decky Toolkit error", body: String(e) });
+          }
+        }}
+      />,
+    );
 
   const run = async (fn: () => Promise<Status>, okMsg: string) => {
     setBusy(true);
@@ -161,6 +203,23 @@ function Content() {
         </PanelSectionRow>
       </PanelSection>
 
+      <PanelSection title="Paired clients">
+        {clients.length === 0 && (
+          <PanelSectionRow>
+            <Field label="None yet" focusable />
+          </PanelSectionRow>
+        )}
+        {clients.map((c) => (
+          <PanelSectionRow key={c.fingerprint}>
+            <Field label={c.name} description={`${KIND_LABELS[c.kind] ?? c.kind} · ${lastSeen(c.last_seen)}`}>
+              <DialogButton style={{ minWidth: 0, padding: "0 16px" }} disabled={busy} onClick={() => forget(c)}>
+                Forget
+              </DialogButton>
+            </Field>
+          </PanelSectionRow>
+        ))}
+      </PanelSection>
+
       {showAdvanced && (
         <PanelSection title="Advanced">
           <PanelSectionRow>
@@ -194,11 +253,6 @@ function Content() {
           <PanelSectionRow>
             <ButtonItem layout="below" disabled={busy} onClick={() => run(restartServer, "Server restarted")}>
               Restart server
-            </ButtonItem>
-          </PanelSectionRow>
-          <PanelSectionRow>
-            <ButtonItem layout="below" disabled={busy} onClick={() => run(regenerateToken, "New token generated")}>
-              Regenerate token
             </ButtonItem>
           </PanelSectionRow>
         </PanelSection>
