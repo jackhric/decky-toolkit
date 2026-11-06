@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import type { PluginInfo } from './api';
-import { DeckyClient, describeError } from './client';
+import type { PluginInfo } from '@decky-toolkit/client/api';
+import { DeckyClient, describeError } from '@decky-toolkit/client/client';
 import type { ConnectionState } from './connection';
 
 export class PluginNode extends vscode.TreeItem {

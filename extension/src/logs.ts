@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import type { LogQuery } from './api';
-import { DeckyClient, describeError, isConnectionError, isMissingRoute, sleep } from './client';
+import type { LogQuery } from '@decky-toolkit/client/api';
+import { DeckyClient, describeError, isConnectionError, isMissingRoute, sleep } from '@decky-toolkit/client/client';
 import { Connection, LinkState, linkMessage } from './connection';
 
 const POLL_MS = 3000;

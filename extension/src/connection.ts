@@ -1,9 +1,9 @@
 import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
-import type { Health, InputSettings, StreamStats } from './api';
-import { DeckyClient, DeviceAddress, HttpError, describeError, isConnectionError, isRejection } from './client';
+import type { Health, InputSettings, StreamStats } from '@decky-toolkit/client/api';
+import { DeckyClient, DeviceAddress, HttpError, describeError, isConnectionError, isRejection } from '@decky-toolkit/client/client';
 import { DEFAULT_MCP_PORT, DeviceProxy, ProxyTarget } from './proxy';
-import type { Identity } from './transport';
+import type { Identity } from '@decky-toolkit/client/transport';
 
 const STATS_POLL_MS = 5000;
 const DEVICES_KEY = 'decky-toolkit.devices';

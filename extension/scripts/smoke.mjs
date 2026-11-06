@@ -20,9 +20,9 @@ const outfile = path.join(root, 'out', 'smoke.cjs');
 await esbuild.build({
   stdin: {
     contents: "export * from './src/extension'; export * from './src/actionsTree'; export * from './src/pluginsTree'; " +
-      "export * from './src/pluginDeploy'; export * from './src/stage'; export { AUTO_DEPLOY_DEBOUNCE_MS } from './src/deploy'; " +
-      "export * from './src/controllers'; export * from './src/navigation'; export { DeckyClient, HttpError } from './src/client'; " +
-      "export * from './src/games'; export * from './src/remoteFs'; export * from './src/discovery'; export * from './src/transport'; " +
+      "export * from './src/pluginDeploy'; export * from '../packages/client/src/stage'; export { AUTO_DEPLOY_DEBOUNCE_MS } from './src/deploy'; " +
+      "export * from './src/controllers'; export * from './src/navigation'; export { DeckyClient, HttpError } from '../packages/client/src/client'; " +
+      "export * from './src/games'; export * from './src/remoteFs'; export * from './src/discovery'; export * from '../packages/client/src/transport'; " +
       "export { pairingCode } from './src/pairing'; export { DeviceProxy } from './src/proxy';",
     resolveDir: root,
     loader: 'ts',

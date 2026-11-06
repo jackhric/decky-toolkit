@@ -3,9 +3,9 @@
 import { spawn } from 'child_process';
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import type { InstallResult, RestartMode } from './api';
-import { DeckyClient, isMissingRoute, sleep } from './client';
-import { stagePlugin } from './stage';
+import type { InstallResult, RestartMode } from '@decky-toolkit/client/api';
+import { DeckyClient, isMissingRoute, sleep } from '@decky-toolkit/client/client';
+import { stagePlugin } from '@decky-toolkit/client/stage';
 
 export interface WorkspacePlugin {
   /** Absolute path of the folder holding plugin.json. */

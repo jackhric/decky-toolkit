@@ -23,7 +23,7 @@ const identity = JSON.parse(readFileSync(identityFile, 'utf8'));
 const outfile = path.join(root, 'out', 'devlib.cjs');
 await esbuild.build({
   stdin: {
-    contents: "export * from './src/proxy'; export * from './src/client'; export * from './src/stage';",
+    contents: "export * from './src/proxy'; export * from '../packages/client/src/client'; export * from '../packages/client/src/stage';",
     resolveDir: root,
     loader: 'ts',
   },

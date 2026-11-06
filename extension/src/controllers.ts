@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import type { ControllerInfo, ControllersList, VirtualPad } from './api';
-import { describeError, isMissingRoute, isOldDevice, parseSse, serverError } from './client';
+import type { ControllerInfo, ControllersList, VirtualPad } from '@decky-toolkit/client/api';
+import { describeError, isMissingRoute, isOldDevice, parseSse, serverError } from '@decky-toolkit/client/client';
 import type { Connection, ConnectionState } from './connection';
 
 /** Mutable so tests can shorten it. */
