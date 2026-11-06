@@ -98,7 +98,6 @@ export class ActionsTreeProvider implements vscode.TreeDataProvider<ActionNode>,
       group('mcp', 'MCP', 'server-process', false, [
         leaf('mcpConfig', 'Write MCP config for this workspace', 'json', 'decky-toolkit.writeMcpConfig'),
         leaf('copyMcpUrl', 'Copy MCP URL', 'link', 'decky-toolkit.copyMcpUrl'),
-        leaf('copyToken', 'Copy token', 'key', 'decky-toolkit.copyToken'),
       ]),
     ];
   }

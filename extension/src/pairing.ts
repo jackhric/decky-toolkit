@@ -1,13 +1,15 @@
 import * as vscode from 'vscode';
+import { createHash, generateKeyPairSync } from 'crypto';
 import { hostname } from 'os';
-import type { PairGrant } from './api';
-import { DeckyClient, HttpError, describeError, sleep } from './client';
+import { DeckyClient, HttpError, describeError, isRejection, sleep } from './client';
 import type { Connection, SavedDevice } from './connection';
+import { Identity, PeerCert, fingerprint, isPlainHttpDevice } from './transport';
 
 /** Mutable so tests can shorten them. There is no overall timeout: pairing waits until approved, denied or cancelled. */
 export const pairingTimings = { waitS: 25, retryMs: 2000 };
 
-type PairOutcome = PairGrant | 'cancelled' | 'denied' | 'unsupported' | { error: string };
+// `mismatch`: the device's code differs from ours, so something between us and the device altered the request.
+type PairOutcome = { identity: Identity } | 'cancelled' | 'denied' | 'unsupported' | 'mismatch' | { error: string };
 
 function clientName(): string {
   const app = vscode.env.appName ?? '';
@@ -21,20 +23,27 @@ async function reachable(c: Connection, d: SavedDevice): Promise<boolean> {
   try {
     c.noteVersion(d.id, (await new DeckyClient(d).health()).version);
     return true;
-  } catch {
-    return false;
+  } catch (e) {
+    // An older plugin still answers; pairing then says it needs an update.
+    return isPlainHttpDevice(e);
   }
 }
 
-/** `/health` needs no token, so check one authenticated route; only a 401 means the token is bad. */
-async function tokenAccepted(d: SavedDevice, token: string): Promise<boolean> {
+/** `/health` needs no pairing, so check one paired route; only a rejection means the pairing is gone. */
+async function identityAccepted(d: SavedDevice, identity: Identity): Promise<boolean> {
   try {
-    const res = await new DeckyClient(d, token).fetch('/stream/stats', { timeoutMs: 5000 });
+    const res = await new DeckyClient(d, identity).fetch('/stream/stats', { timeoutMs: 5000 });
     await res.text();
     return res.status !== 401;
-  } catch {
-    return true;
+  } catch (e) {
+    return !(isRejection(e) || isPlainHttpDevice(e));
   }
+}
+
+/** The code the device shows, as both sides derive it from the device certificate, our public key and the request id. */
+export function pairingCode(serverCertDer: Buffer, publicKeyDer: Buffer, id: string): string {
+  const digest = createHash('sha256').update(serverCertDer).update(publicKeyDer).update(id, 'utf8').digest();
+  return String(digest.readUInt32BE(0) % 10000).padStart(4, '0');
 }
 
 async function cantReach(c: Connection, d: SavedDevice, retry: () => Promise<unknown>): Promise<void> {
@@ -64,7 +73,7 @@ function connected(c: Connection, d: SavedDevice, verb?: string): void {
 }
 
 /**
- * Connects with the stored token, or goes straight into pairing when there is none or the device
+ * Connects with the stored pairing, or goes straight into pairing when there is none or the device
  * rejects it. Non-interactive calls (silent reconnect at startup) never prompt.
  */
 export async function connect(c: Connection, device: SavedDevice, interactive = true): Promise<boolean> {
@@ -80,8 +89,8 @@ export async function connect(c: Connection, device: SavedDevice, interactive = 
     if (!(await reachable(c, d))) {
       outcome = 'unreachable';
     } else {
-      const token = await c.tokenFor(d);
-      outcome = token && (await tokenAccepted(d, token)) ? 'connected' : 'pair';
+      const identity = await c.identityFor(d);
+      outcome = identity && (await identityAccepted(d, identity)) ? 'connected' : 'pair';
       if (outcome === 'connected') await c.markConnected(d.id);
     }
   } finally {
@@ -121,6 +130,10 @@ export async function pair(c: Connection, device: SavedDevice, reachabilityCheck
     void vscode.window.showWarningMessage(`Decky Toolkit: Update Decky Toolkit on ${d.name} to pair with it.`);
     return false;
   }
+  if (outcome === 'mismatch') {
+    const choice = await vscode.window.showWarningMessage(`Decky Toolkit: could not pair with ${d.name}. Try again.`, 'Try again');
+    return choice === 'Try again' ? pair(c, d) : false;
+  }
   if (outcome === 'denied') {
     const choice = await vscode.window.showWarningMessage(`Decky Toolkit: Pairing denied on ${d.name}.`, 'Try again');
     return choice === 'Try again' ? pair(c, d) : false;
@@ -130,15 +143,21 @@ export async function pair(c: Connection, device: SavedDevice, reachabilityCheck
       `Decky Toolkit: Pairing with ${d.name} failed: ${outcome.error}`, 'Try again');
     return choice === 'Try again' ? pair(c, d) : false;
   }
-  await c.setTokenFor(d, outcome.token);
+  await c.setIdentityFor(d, outcome.identity);
   await c.markConnected(d.id);
   connected(c, d, 'Paired with');
   return true;
 }
 
-/** Files a pairing request and long-polls it; a request the device forgot is filed again (new code). */
+/**
+ * Files a pairing request and long-polls it; a request the device forgot is filed again (new code).
+ * The private key stays in memory until the device approves; only the public key is sent.
+ */
 function waitForApproval(c: Connection, d: SavedDevice): Thenable<PairOutcome> {
   const client = new DeckyClient(d);
+  const keys = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  const publicKeyPem = keys.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+  const publicKeyDer = keys.publicKey.export({ type: 'spki', format: 'der' });
   return vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: 'Decky Toolkit', cancellable: true },
     async (progress, token) => {
@@ -147,6 +166,9 @@ function waitForApproval(c: Connection, d: SavedDevice): Thenable<PairOutcome> {
       const pause = () => sleep(pairingTimings.retryMs, abort.signal).catch(() => undefined);
       let id: string | undefined;
       let code: string | undefined;
+      let serverCert: PeerCert | undefined;
+      let mismatched = false;
+      const mismatch = (): PairOutcome => { mismatched = true; return 'mismatch'; };
       const waiting = () => `Waiting for approval on ${d.name} · code ${code}. On the device: Quick Access → Decky Toolkit → Approve.`;
       const lostContact = (e: unknown) =>
         progress.report({ message: `Lost contact with ${d.name} (${describeError(e)}), retrying…${code ? ` Code ${code}.` : ''}` });
@@ -155,7 +177,7 @@ function waitForApproval(c: Connection, d: SavedDevice): Thenable<PairOutcome> {
           if (!id) {
             let created;
             try {
-              created = await client.requestPairing(clientName());
+              created = await client.requestPairing(clientName(), publicKeyPem);
             } catch (e) {
               if (e instanceof HttpError) return { error: describeError(e) };
               lostContact(e);
@@ -163,7 +185,10 @@ function waitForApproval(c: Connection, d: SavedDevice): Thenable<PairOutcome> {
               continue;
             }
             if (created === 'unsupported') return 'unsupported';
-            ({ id, code } = created);
+            id = created.created.id;
+            serverCert = created.serverCert;
+            code = pairingCode(serverCert.der, publicKeyDer, id);
+            if (created.created.code !== code) return mismatch();
             c.setPairingCode(d.id, code);
             progress.report({ message: waiting() });
           }
@@ -183,14 +208,21 @@ function waitForApproval(c: Connection, d: SavedDevice): Thenable<PairOutcome> {
           progress.report({ message: waiting() });
           if (r.status === 'denied') return 'denied';
           if (r.status === 'approved') {
-            if (r.token && r.url) return { token: r.token, url: r.url, api_version: r.api_version ?? 1 };
-            return { error: 'the device approved the request but the token was already handed out' };
+            if (!r.client_cert || !r.server_cert) return { error: 'the device approved the request but already handed out its answer' };
+            let sameDevice = false;
+            try {
+              sameDevice = fingerprint(r.server_cert) === serverCert!.fingerprint256;
+            } catch {
+              // not a parsable certificate
+            }
+            if (!sameDevice) return mismatch();
+            return { identity: { key: keys.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(), cert: r.client_cert, serverCert: serverCert!.pem } };
           }
         }
         return 'cancelled';
       } finally {
         cancelSub.dispose();
-        if (abort.signal.aborted && id) void client.cancelPairing(id).catch(() => undefined);
+        if ((abort.signal.aborted || mismatched) && id) void client.cancelPairing(id).catch(() => undefined);
       }
     });
 }

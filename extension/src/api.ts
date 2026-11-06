@@ -20,17 +20,17 @@ export interface PairRequestCreated {
   poll_after_ms: number;
 }
 
-/** `token`, `url` and `api_version` are present only on the first poll that sees the approval. */
+/** `client_cert`, `server_cert` (PEM) and `api_version` are present only on the first poll that sees the approval. */
 export interface PairPoll {
   status: 'pending' | 'approved' | 'denied';
-  token?: string;
-  url?: string;
+  client_cert?: string;
+  server_cert?: string;
   api_version?: number;
 }
 
 export interface PairGrant {
-  token: string;
-  url: string;
+  client_cert: string;
+  server_cert: string;
   api_version: number;
 }
 
