@@ -174,6 +174,13 @@ class PairedClients:
         self._save()
         return dict(client)
 
+    def replace_all(self, fp: str, name: str, kind: str) -> list[dict]:
+        """Make this the only paired client; returns the clients it replaced."""
+        replaced = [dict(c) for f, c in self._clients.items() if f != fp]
+        self._clients = {}
+        self.add(fp, name, kind)
+        return replaced
+
     def remove(self, fp: str) -> bool:
         if self._clients.pop(fp, None) is None:
             return False

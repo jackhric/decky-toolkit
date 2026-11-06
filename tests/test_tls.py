@@ -104,6 +104,13 @@ def test_paired_clients_store(tmp_path):
                                "last_seen": 1061}
     assert clients.remove("bb") and not clients.remove("bb") and not clients.contains("bb")
     assert [c["fingerprint"] for c in json.loads(path.read_text())] == ["aa"]
+    clients.add("bb", "agent", "mcp")
+    n = len(changes)
+    replaced = clients.replace_all("cc", "VS Code on other", "vscode")
+    assert sorted(c["fingerprint"] for c in replaced) == ["aa", "bb"]
+    assert [c["fingerprint"] for c in json.loads(path.read_text())] == ["cc"]
+    assert len(changes) == n + 1 and changes[-1] == clients.list(), "one save, one change event"
+    assert clients.replace_all("cc", "VS Code on other", "vscode") == [] and len(clients.list()) == 1
     path.write_text("not json")
     assert PairedClients(str(path)).list() == []
 

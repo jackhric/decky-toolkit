@@ -209,7 +209,7 @@ consumer, no re-encode, viewers are not affected. Resolution, quality and the ma
 ## Pairing
 
 A client asks for access, the device owner approves or denies it in the Decky panel (Quick Access →
-Decky Toolkit: while a request is pending the panel shows only an "Approve pairing request?" prompt). There is no time limit: a request stays pending as long as its client
+Decky Toolkit: while a request is pending the panel shows only an "Approve <client>" button with the code). Approving a request replaces the previously paired client; one client is paired at a time. There is no time limit: a request stays pending as long as its client
 keeps polling. Requests live in memory, so a plugin restart forgets them (polls then get `404` and
 the client files a new one).
 
