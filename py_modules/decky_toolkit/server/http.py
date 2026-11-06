@@ -10,6 +10,7 @@ from aiohttp import web
 from . import audit
 from ..steam import cdp
 from ..games import files as games
+from .. import shell
 from ..loader import live, logs
 from .identity import identity
 from ..steam.apps import Apps
@@ -89,6 +90,7 @@ class Api:
             web.post("/plugins/{dir}/reload", self.handle_plugin_reload),
             web.put("/plugins/{dir}/files", self.handle_plugin_file_put),
             web.post("/loader/restart", self.handle_loader_restart),
+            web.post("/exec", self.handle_exec),
             web.get("/logs/tail", self.handle_logs_tail),
             web.get("/logs/stream", live(self.handle_logs_stream)),
             web.get("/cef/console", self.handle_console),
@@ -497,6 +499,22 @@ class Api:
         try:
             return web.json_response(await asyncio.to_thread(live.write_file, request.match_info["dir"], rel, data))
         except ValueError as e:
+            return _error(400, str(e))
+        except PermissionError as e:
+            return _error(403, str(e))
+        except FileNotFoundError as e:
+            return _error(404, str(e))
+
+    async def handle_exec(self, request: web.Request) -> web.Response:
+        try:
+            body = await request.json()
+        except ValueError:
+            return _error(400, "expected a JSON body {command, cwd?, timeout?, root?, stdin?, max_output?}")
+        if not isinstance(body, dict) or set(body) - {"command", "cwd", "timeout", "root", "stdin", "max_output"}:
+            return _error(400, "expected a JSON object with command, cwd, timeout, root, stdin, max_output")
+        try:
+            return web.json_response(await shell.run_command(**body, logger=self.log))
+        except (ValueError, TypeError) as e:
             return _error(400, str(e))
         except PermissionError as e:
             return _error(403, str(e))

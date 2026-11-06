@@ -20,6 +20,7 @@ from decky_toolkit.steam.console import ConsoleCollector  # noqa: E402
 from decky_toolkit.server.http import API_VERSION, Api  # noqa: E402
 from decky_toolkit.server.identity import identity  # noqa: E402
 from decky_toolkit.input.controllers import ControllerService  # noqa: E402
+from decky_toolkit.input.activity import InputActivity  # noqa: E402
 from decky_toolkit.input.service import InputService  # noqa: E402
 from decky_toolkit import diagnostics  # noqa: E402
 from decky_toolkit.loader import fixes as loader_fixes  # noqa: E402
@@ -85,6 +86,7 @@ class Plugin:
     controllers: ControllerService | None = None
     ui: UiNavigator | None = None
     console: ConsoleCollector | None = None
+    activity: InputActivity | None = None
     identity: Identity
     clients: PairedClients
     pairing: PairingRequests
@@ -106,7 +108,7 @@ class Plugin:
         api = Api(
             auth=CertAuth(self.clients, connections=self.connections),
             mcp=McpServer(build_registry(self.capturer, self.input, self.controllers, self.ui,
-                                        console=self.console), decky.logger),
+                                        console=self.console, activity=self.activity), decky.logger),
             capturer=self.capturer,
             logger=decky.logger,
             pairing=self.pairing,
@@ -285,6 +287,8 @@ class Plugin:
         # Only schedules its connection tasks, so a Steam without CEF cannot hold up startup.
         self.console = ConsoleCollector(decky.logger)
         self.console.start()
+        self.activity = InputActivity(decky.logger)
+        self.activity.start()
         await self._start_server()
 
     async def _unload(self) -> None:
@@ -292,6 +296,8 @@ class Plugin:
             self.pruner.cancel()
         if self.console is not None:
             await self.console.stop()
+        if self.activity is not None:
+            await self.activity.stop()
         await self._stop_server()
         decky.logger.info("Decky Toolkit stopped")
 
