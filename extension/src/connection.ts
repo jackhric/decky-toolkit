@@ -126,6 +126,7 @@ export class Connection implements ConnectionState, vscode.Disposable {
   /** Our own writes land here too; only a different pairing for the active device restarts the connection. */
   private async identityFileChanged(): Promise<void> {
     if (this.store !== 'file') return;
+    if (await this.adoptIdentityDevice()) return;
     const identity = await this.identityFor(this.address);
     if (JSON.stringify(identity) !== JSON.stringify(this.cachedIdentity)) return this.refresh();
     await this.loadIdentityFlags();
@@ -158,6 +159,21 @@ export class Connection implements ConnectionState, vscode.Disposable {
       }
     }
     await this.migrateIdentity();
+    await this.adoptIdentityDevice();
+  }
+
+  /**
+   * The identity file is shared with the CLI: a pairing made there (or by another editor install) brings its
+   * device into the list in place of whatever was saved, since this machine pairs with one device. True when
+   * the list changed; saving it reconnects.
+   */
+  private async adoptIdentityDevice(): Promise<boolean> {
+    if (this.store !== 'file') return false;
+    const f = await identityFile.read();
+    if (!f || this.devices.some(d => identityFile.sameDevice(d, f.device))) return false;
+    const device: SavedDevice = { id: newDeviceId(), name: f.device.name, host: f.device.host, port: f.device.port };
+    await this.saveDevices([device], device.id);
+    return true;
   }
 
   /**

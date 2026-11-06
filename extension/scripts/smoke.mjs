@@ -817,6 +817,40 @@ await check('migration: a pairing in secret storage is copied to the identity fi
   });
 });
 
+await check('CLI pairing: an identity file with no saved device seeds the list, and one written while the editor runs is adopted', async () => {
+  await inOtherConfigDir(async (_dir, file) => {
+    const state = new Map();
+    const mkCtx = () => ({
+      subscriptions: [], extensionUri: ctx.extensionUri,
+      secrets: { get: async () => undefined, store: async () => {}, delete: async () => {}, onDidChange: noopEvent },
+      globalState: { get: (k, d) => (state.has(k) ? state.get(k) : d), update: async (k, v) => { state.set(k, v); } },
+      workspaceState: ctx.workspaceState,
+    });
+    const writeFile = device => {
+      writeFileSync(`${file}.cli.tmp`, JSON.stringify({ version: 1, device, ...pairedIdentity }), { mode: 0o600 });
+      renameSync(`${file}.cli.tmp`, file);
+    };
+    writeFile({ host: '10.1.2.3', port: 8765, name: 'deck', deviceId: 'abc' });
+    const host = settings.host;
+    settings.host = '';
+    const c = new ext.Connection(mkCtx());
+    try {
+      await c.initDevices();
+      assert.deepEqual(c.devices.map(d => [d.name, d.host, d.port]), [['deck', '10.1.2.3', 8765]], 'seeded from the file');
+      assert.equal(c.activeDevice?.id, c.devices[0].id);
+      assert.deepEqual(await c.identityFor({ host: '10.1.2.3', port: 8765 }), pairedIdentity);
+      writeFile({ host: '10.1.2.4', port: 8765, name: 'other deck' });
+      for (let i = 0; i < 100 && c.devices[0]?.host !== '10.1.2.4'; i++) await settle(10);
+      assert.deepEqual(c.devices.map(d => d.host), ['10.1.2.4'], 'the device from a later external pairing replaces the saved one');
+      assert.equal(c.devices[0].name, 'other deck');
+      assert.equal(await c.identityFor({ host: '10.1.2.3', port: 8765 }), undefined, 'the old device is no longer paired');
+    } finally {
+      settings.host = host;
+      c.dispose();
+    }
+  });
+});
+
 await ext.activate(ctx);
 await settle();
 
