@@ -17,6 +17,7 @@ This is a hard rule from the project owner. Keep everything native to VS Code / 
 - Nothing is reachable outside the extension: the device serves no browser UI.
 
 ## Practicalities
-- Use the pinned pnpm from `packageManager`: `corepack pnpm run …` or `npx --yes pnpm@12.18.0 run …` (typecheck, build,
-  smoke, package). A globally installed older pnpm does not read `pnpm-workspace.yaml`.
+- Use the pnpm pinned by the root `package.json`'s `packageManager`: `corepack pnpm run …` or `npx --yes pnpm@12.18.0 run …`
+  (typecheck, build, smoke, package). The repo is one pnpm workspace; a globally installed older pnpm does not read its
+  `pnpm-workspace.yaml`.
 - Every `when` clause key must be listed in the smoke test's `allowedKeys`; new UI states get smoke checks.

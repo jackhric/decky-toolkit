@@ -6,7 +6,7 @@ const opts = {
   outfile: 'dist/extension.js',
   platform: 'node',
   format: 'cjs',
-  target: 'node18',
+  target: 'node20',
   external: ['vscode'],
   sourcemap: true,
   logLevel: 'info',

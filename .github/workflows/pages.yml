@@ -23,7 +23,6 @@ jobs:
         with:
           node-version: 26
           cache: pnpm
-          cache-dependency-path: site/pnpm-lock.yaml
       - name: Build site
         working-directory: site
         run: |
