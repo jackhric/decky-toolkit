@@ -13,9 +13,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
-from decky_toolkit import record as record_mod  # noqa: E402
-from decky_toolkit.capture import CaptureUnavailable  # noqa: E402
-from decky_toolkit.record import MkvWriter, Recorder, RecordingBusy, check_name, recorder_for  # noqa: E402
+from decky_toolkit.media import record as record_mod  # noqa: E402
+from decky_toolkit.media.capture import CaptureUnavailable  # noqa: E402
+from decky_toolkit.media.record import MkvWriter, Recorder, RecordingBusy, check_name, recorder_for  # noqa: E402
 
 from test_routes import H, with_server  # noqa: E402
 

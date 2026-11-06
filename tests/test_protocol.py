@@ -10,8 +10,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 from aiohttp import ClientSession, CookieJar, web  # noqa: E402
 
 from certauth import H as PEER, stub_auth  # noqa: E402
-from decky_toolkit.http import Api  # noqa: E402
-from decky_toolkit.protocol import McpServer  # noqa: E402
+from decky_toolkit.server.http import Api  # noqa: E402
+from decky_toolkit.server.protocol import McpServer  # noqa: E402
 from decky_toolkit.tools import ToolRegistry  # noqa: E402
 
 H = {**PEER, "Content-Type": "application/json"}
@@ -105,7 +105,7 @@ def test_mcp_flow():
 
 
 def test_identity_hides_machine_id(tmp_path):
-    from decky_toolkit.identity import device_id, os_name
+    from decky_toolkit.server.identity import device_id, os_name
     mid = tmp_path / "machine-id"
     mid.write_text("0123456789abcdef0123456789abcdef\n")
     did = device_id(mid)

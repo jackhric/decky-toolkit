@@ -5,14 +5,15 @@ import traceback
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
-from .. import audit, cdp
-from ..capture import CaptureUnavailable, ScreenCapturer
+from ..server import audit
+from ..steam import cdp
+from ..media.capture import CaptureUnavailable, ScreenCapturer
 from ..input.service import InputDisabled, InputService, InputUnavailable
 
 if TYPE_CHECKING:
-    from ..console import ConsoleCollector
-    from ..controllers import ControllerService
-    from ..ui import UiNavigator
+    from ..steam.console import ConsoleCollector
+    from ..input.controllers import ControllerService
+    from ..steam.ui import UiNavigator
 
 ToolFn = Callable[..., Awaitable[Any]]
 # Exceptions that are expected, user-facing failures: reported without a traceback.
@@ -83,11 +84,11 @@ def error_result(text: str) -> dict[str, Any]:
 def build_registry(capturer: ScreenCapturer | None = None, input_service: InputService | None = None,
                    controllers: "ControllerService | None" = None, navigator: "UiNavigator | None" = None,
                    console: "ConsoleCollector | None" = None) -> ToolRegistry:
-    from ..apps import Apps as AppsLib
+    from ..steam.apps import Apps as AppsLib
     from . import apps, cef, controllers as controller_tools, games, input, perf, plugin_api, plugins, record, screen, system, ui
 
     if controllers is None and input_service is not None:
-        from ..controllers import ControllerService
+        from ..input.controllers import ControllerService
         controllers = ControllerService(input_service, input_service.log)
 
     reg = ToolRegistry()

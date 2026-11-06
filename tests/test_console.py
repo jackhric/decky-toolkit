@@ -12,9 +12,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 from aiohttp import ClientSession, ClientTimeout, web  # noqa: E402
 
 from certauth import H, stub_auth  # noqa: E402
-from decky_toolkit.console import ConsoleCollector, parse_event, render_args, render_remote_object  # noqa: E402
-from decky_toolkit.http import Api  # noqa: E402
-from decky_toolkit.protocol import McpServer  # noqa: E402
+from decky_toolkit.steam.console import ConsoleCollector, parse_event, render_args, render_remote_object  # noqa: E402
+from decky_toolkit.server.http import Api  # noqa: E402
+from decky_toolkit.server.protocol import McpServer  # noqa: E402
 from decky_toolkit.tools import build_registry  # noqa: E402
 
 LOG = logging.getLogger("t")
@@ -175,7 +175,7 @@ def test_follow_replays_tail_then_streams_live():
 
 
 def test_start_without_cef_does_not_block(monkeypatch):
-    from decky_toolkit import cdp
+    from decky_toolkit.steam import cdp
 
     async def unreachable():
         raise cdp.CdpError("Steam CEF debugger not reachable")

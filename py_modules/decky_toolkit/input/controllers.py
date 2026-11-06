@@ -8,8 +8,8 @@ import time
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Awaitable, Callable
 
-from . import cdp
-from .input.service import InputService, InputUnavailable, VirtualPad
+from ..steam import cdp
+from .service import InputService, InputUnavailable, VirtualPad
 
 DEVICES_PATH = "/proc/bus/input/devices"
 BTN_GAMEPAD = 0x130

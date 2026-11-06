@@ -18,7 +18,7 @@ import base64
 import json
 from typing import Any, Awaitable, Callable
 
-from .. import cdp
+from ..steam import cdp
 from . import ToolRegistry
 
 Evaluate = Callable[[str], Awaitable[Any]]

@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
-from decky_toolkit.advertise import SERVICE_TYPE, Advertiser, instance_name, txt_records  # noqa: E402
+from decky_toolkit.server.advertise import SERVICE_TYPE, Advertiser, instance_name, txt_records  # noqa: E402
 
 LOG = logging.getLogger("t")
 
@@ -78,7 +78,7 @@ def test_child_dies_with_parent(tmp_path):
     host.write_text(
         "import asyncio, logging, sys\n"
         f"sys.path.insert(0, {str(Path(__file__).resolve().parents[1] / 'py_modules')!r})\n"
-        "from decky_toolkit.advertise import Advertiser\n"
+        "from decky_toolkit.server.advertise import Advertiser\n"
         "async def main():\n"
         f"    Advertiser(logging.getLogger(), 1, [], name='x', binary={publisher!r}).start()\n"
         "    await asyncio.sleep(30)\n"

@@ -14,7 +14,7 @@ import signal
 import time
 from typing import Any, AsyncIterator, Callable
 
-from .settings import STREAM_LIMITS, Settings
+from ..settings import STREAM_LIMITS, Settings
 
 IDLE_STOP_SECONDS = 10
 BOUNDARY = b"frame"

@@ -1,7 +1,7 @@
 """Controller tools: Steam Input's controller list and virtual Xbox 360 pads."""
 from typing import Any
 
-from ..controllers import ControllerService
+from ..input.controllers import ControllerService
 from ..input.service import InputUnavailable
 from . import ToolRegistry
 

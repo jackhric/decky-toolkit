@@ -4,8 +4,8 @@ import base64
 import json
 from typing import Any
 
-from ..capture import CaptureUnavailable, ScreenCapturer
-from ..ui import ACTIONS, QUERY_TARGET, QUICK_ACCESS_TABS, UiInspector, UiNavigator
+from ..media.capture import CaptureUnavailable, ScreenCapturer
+from ..steam.ui import ACTIONS, QUERY_TARGET, QUICK_ACCESS_TABS, UiInspector, UiNavigator
 from . import ToolRegistry
 
 CAPTURE_SETTLE_SECONDS = 0.7

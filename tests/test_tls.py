@@ -17,12 +17,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
 from aiohttp import ClientError, ClientSession, ClientTimeout, TCPConnector, web  # noqa: E402
 
-from decky_toolkit import tls  # noqa: E402
-from decky_toolkit.auth import CertAuth  # noqa: E402
-from decky_toolkit.http import Api  # noqa: E402
-from decky_toolkit.pairing import PairingRequests, pairing_code  # noqa: E402
-from decky_toolkit.protocol import McpServer  # noqa: E402
-from decky_toolkit.tls import Identity, PairedClients  # noqa: E402
+from decky_toolkit.server import tls  # noqa: E402
+from decky_toolkit.server.auth import CertAuth  # noqa: E402
+from decky_toolkit.server.http import Api  # noqa: E402
+from decky_toolkit.server.pairing import PairingRequests, pairing_code  # noqa: E402
+from decky_toolkit.server.protocol import McpServer  # noqa: E402
+from decky_toolkit.server.tls import Identity, PairedClients  # noqa: E402
 from decky_toolkit.tools import ToolRegistry  # noqa: E402
 
 LOG = logging.getLogger("t")

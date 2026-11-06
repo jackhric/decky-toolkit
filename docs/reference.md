@@ -212,10 +212,10 @@ described in [docs/api.md](api.md#pairing).
 - `main.py` is the Decky backend. It loads settings, then starts an `aiohttp` server from inside the
   plugin's asyncio loop. `aiohttp` comes from the loader's own PyInstaller bundle, so there are no
   dependencies to vendor.
-- `py_modules/decky_toolkit/protocol.py` implements the JSON-RPC methods `initialize`, `ping`,
+- `py_modules/decky_toolkit/server/protocol.py` implements the JSON-RPC methods `initialize`, `ping`,
   `tools/list`, `tools/call` and the HTTP transport rules (client-certificate auth, `Origin` check, 202 for
   notifications, 405 for GET).
-- `py_modules/decky_toolkit/cdp.py` is a tiny Chrome DevTools Protocol client used to talk to Steam's
+- `py_modules/decky_toolkit/steam/cdp.py` is a tiny Chrome DevTools Protocol client used to talk to Steam's
   CEF debugger. The plugin deliberately does **not** connect to the loader's own websocket on port
   1337: the loader keeps a single client and would kick the Steam UI off.
 - `src/index.tsx` is the Quick Access panel (the address, or the pending pairing request to approve or

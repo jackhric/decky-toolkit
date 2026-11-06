@@ -11,13 +11,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
 from aiohttp import ClientSession, ClientTimeout, web  # noqa: E402
 
-from decky_toolkit import cdp, ui  # noqa: E402
+from decky_toolkit.steam import cdp, ui  # noqa: E402
 from certauth import H, stub_auth  # noqa: E402
-from decky_toolkit.controllers import ControllerService, evdev_gamepads, merge, parse_bitmap  # noqa: E402
-from decky_toolkit.http import Api  # noqa: E402
+from decky_toolkit.input.controllers import ControllerService, evdev_gamepads, merge, parse_bitmap  # noqa: E402
+from decky_toolkit.server.http import Api  # noqa: E402
 from decky_toolkit.input import uinput  # noqa: E402
 from decky_toolkit.input.service import InputDisabled, InputService, InputUnavailable, VirtualPad, pad_values  # noqa: E402
-from decky_toolkit.protocol import McpServer  # noqa: E402
+from decky_toolkit.server.protocol import McpServer  # noqa: E402
 from decky_toolkit.settings import Settings  # noqa: E402
 from decky_toolkit.tools import ToolRegistry, build_registry  # noqa: E402
 
