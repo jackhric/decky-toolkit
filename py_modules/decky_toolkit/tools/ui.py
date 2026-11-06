@@ -5,6 +5,7 @@ import json
 from typing import Any
 
 from ..media.capture import CaptureUnavailable, ScreenCapturer
+from ..steam import cdp
 from ..steam.ui import ACTIONS, QUERY_TARGET, QUICK_ACCESS_TABS, UiInspector, UiNavigator
 from . import ToolRegistry
 
@@ -23,6 +24,23 @@ def register(reg: ToolRegistry, navigator: UiNavigator | None, capturer: ScreenC
     )
     async def ui_routes() -> dict[str, Any]:
         return await nav.routes()
+
+    @reg.add(
+        "ui_state",
+        "Where the Steam UI is, in one small answer: {current (route), side_menu (none|main|quick_access), "
+        "quick_access_tab, active_plugin (Decky panel), running_app ({appid, name} of the game in front, or null), "
+        "focus ({text, target} of the gamepad-focused element, or null)}. Cheaper than ui_routes, ui_focus or a "
+        "screenshot when you only need to know where you are.",
+    )
+    async def ui_state() -> dict[str, Any]:
+        state = await nav.state()
+        try:
+            f = await inspector.focus()
+        except (cdp.CdpError, OSError, asyncio.TimeoutError):
+            f = None
+        el = (f or {}).get("element")
+        state["focus"] = {"text": (el.get("text") or "")[:80], "target": f["target"]} if el else None
+        return state
 
     @reg.add(
         "ui_navigate",

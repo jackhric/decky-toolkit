@@ -9,7 +9,8 @@ See README.md for setup and docs/reference.md for the tool list and architecture
 - `main.py` — Decky `Plugin` class: settings, aiohttp server lifecycle, frontend-callable methods.
 - `py_modules/decky_toolkit/` — grouped by area; `settings.py` and `diagnostics.py` (thread/task stacks for the
   `backend_stacks` tool, a watchdog thread that logs the loop thread's stack when the event loop stops answering
-  for 2 s, SIGUSR1 faulthandler dump to `<runtime dir>/stacks.txt`) at the top.
+  for 2 s, SIGUSR1 faulthandler dump to `<runtime dir>/stacks.txt`) and `shell.py` (`run_command` / `POST /exec`:
+  bash as the desktop user, or root with `root: true`; every command logged) at the top.
   - `server/`: `protocol.py` (JSON-RPC + HTTP transport), `http.py` (REST routes, see `docs/api.md`), `auth.py`
     (client-certificate auth), `tls.py` (device identity, client certs, paired-client store), `pairing.py`,
     `audit.py` (request origin context variable, audit middleware), `advertise.py` (DNS-SD via `avahi-publish`),
@@ -22,8 +23,9 @@ See README.md for setup and docs/reference.md for the tool list and architecture
     element queries), `console.py` (background Steam UI console capture), `apps.py` (Steam library/launch via the
     client JS).
   - `media/`: `capture.py` (gamescope screen stream), `audio.py` (audio stream), `record.py` (recording to MKV).
-  - `input/`: remote input (`ei.py` libei over ctypes, `uinput.py`, `keymap.py`, `service.py` owning state and the
-    virtual pad registry) and `controllers.py` (Steam Input controller list + evdev merge, virtual pad creation
+  - `input/`: remote input (`ei.py` libei over ctypes, `uinput.py`, `keymap.py`, `service.py` owning state, the
+    virtual pad registry and the last remote event), `activity.py` (reads every non-virtual evdev device without
+    grabbing, keeping only times, for `device_activity`) and `controllers.py` (Steam Input controller list + evdev merge, virtual pad creation
     confirmed by Steam).
   - `games/`: `files.py` (game/prefix/save paths, `fs_*` file browser with its sensitive-path and delete guards,
     `fs_read`/`fs_write`/`fs_mkdir`/`fs_rename` behind `writable` for the `/fs/*` routes, Proton logs), `vdf.py`
@@ -415,6 +417,10 @@ SharedJSContext via the `cef_evaluate` tool, or use `call_plugin_method` (`plugi
   'decky-toolkit.screen'`), toggles are command pairs switched by `decky-toolkit.screen.*` context keys, and
   choices go in QuickPicks. Don't add an in-page toolbar.
 - Keep the MCP server dependency-free beyond the loader bundle (aiohttp + stdlib).
+- Agents on the device: use `run_command` (root only when needed), `loader_log` / `read_plugin_log` / `wait_for_log`
+  and `ui_state` instead of ssh, sleeps and screenshots. The owner also uses the device by hand: call
+  `device_activity` before navigating, injecting input or launching anything, and leave the UI alone while
+  `someone_at_device` is true.
 - Tools return str/dict (serialised to text) or a list of MCP content blocks. Raise `ValueError`
   for bad input; other exceptions become `isError` results with a traceback. Arguments are checked against
   the tool's schema before the call (unknown names are refused with the argument list), so every schema

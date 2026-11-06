@@ -3,6 +3,7 @@ import asyncio
 import base64
 import json
 import os
+import re
 import platform
 import sys
 from typing import Any
@@ -84,6 +85,14 @@ async def list_plugins() -> list[dict[str, Any]]:
     return out
 
 
+def _grep(lines: list[str], pattern: str) -> list[str]:
+    try:
+        rx = re.compile(pattern, re.IGNORECASE)
+    except re.error as e:
+        raise ValueError(f"match is not a valid regex: {e}") from None
+    return [l for l in lines if rx.search(l)]
+
+
 def register(reg: ToolRegistry) -> None:
     @reg.add("decky_status", "Report Decky Loader version, host OS, Python runtime and installed plugins.")
     async def decky_status() -> dict[str, Any]:
@@ -121,46 +130,90 @@ def register(reg: ToolRegistry) -> None:
 
     @reg.add(
         "read_plugin_log",
-        "Tail a plugin's backend log from ~/homebrew/logs/<plugin_dir>/. Omit 'file' to pick the newest log.",
+        "Tail a plugin's backend log from ~/homebrew/logs/<plugin_dir>/. Decky starts a new file on every backend "
+        "start: 'run' 0 is the current one, 1 the previous run (where its _unload lines ended up), and so on; or name "
+        "a 'file'. 'match' keeps only lines matching a case-insensitive regex.",
         {
             "properties": {
                 "plugin_dir": {"type": "string", "description": "Plugin directory name, as returned by list_plugins"},
                 "lines": {"type": "integer", "default": 200, "minimum": 1, "maximum": 5000},
+                "run": {"type": "integer", "default": 0, "minimum": 0, "description": "0 newest, 1 previous, ..."},
                 "file": {"type": "string", "description": "Specific log file name inside the plugin's log dir"},
+                "match": {"type": "string", "description": "Case-insensitive regex; only matching lines are returned"},
             },
             "required": ["plugin_dir"],
         },
     )
-    async def read_plugin_log(plugin_dir: str, lines: int = 200, file: str | None = None) -> dict[str, Any]:
-        if "/" in plugin_dir or plugin_dir.startswith("."):
-            raise ValueError("plugin_dir must be a bare directory name")
-        log_dir = os.path.join(_env("DECKY_HOME"), "logs", plugin_dir)
-        if not os.path.isdir(log_dir):
-            raise FileNotFoundError(f"No log dir {log_dir}")
-        files = sorted(os.listdir(log_dir), key=lambda n: os.path.getmtime(os.path.join(log_dir, n)), reverse=True)
+    async def read_plugin_log(plugin_dir: str, lines: int = 200, run: int = 0, file: str | None = None,
+                              match: str | None = None) -> dict[str, Any]:
+        from ..loader import logs
+        paths = logs.log_files(plugin_dir)
+        files = [os.path.basename(p) for p in paths]
         if not files:
-            return {"log_dir": log_dir, "files": [], "text": ""}
-        chosen = file or files[0]
-        if chosen not in files:
-            raise FileNotFoundError(f"{chosen} not in {files}")
-        return {"log_dir": log_dir, "files": files, "file": chosen, "text": tail(os.path.join(log_dir, chosen), lines)}
+            return {"log_dir": logs.plugin_log_dir(plugin_dir), "files": [], "text": ""}
+        if file is not None:
+            if file not in files:
+                raise FileNotFoundError(f"{file} not in {files}")
+            chosen = file
+        else:
+            if run < 0 or run >= len(files):
+                raise ValueError(f"run must be 0-{len(files) - 1} ({len(files)} log files)")
+            chosen = files[run]
+        path = os.path.join(logs.plugin_log_dir(plugin_dir), chosen)
+        text = tail(path, lines if not match else 20000)
+        if match:
+            text = "\n".join(_grep(text.splitlines(), match)[-lines:])
+        return {"log_dir": logs.plugin_log_dir(plugin_dir), "files": files[:20], "file": chosen, "text": text}
 
     @reg.add(
         "loader_log",
-        "Tail the Decky Loader systemd journal (plugin_loader.service). Includes every plugin's stdout/stderr.",
+        "Tail the Decky Loader systemd journal (plugin_loader.service). Includes every plugin's stdout/stderr and the "
+        "loader's own lines ('Loaded <name>', 'stopped in 0.1s', 'Sending SIGKILL'). since/until take journalctl "
+        "times ('-2min', '10 min ago', '2026-11-06 01:30:00', 'today'); 'match' is a case-insensitive regex.",
         {"properties": {"lines": {"type": "integer", "default": 200, "minimum": 1, "maximum": 5000},
-                        "grep": {"type": "string", "description": "Optional case-insensitive substring filter"}}},
+                        "grep": {"type": "string", "description": "Case-insensitive substring filter"},
+                        "match": {"type": "string", "description": "Case-insensitive regex filter, e.g. 'Loaded|SIGKILL|stopped in'"},
+                        "since": {"type": "string", "description": "journalctl --since, e.g. '-2min'"},
+                        "until": {"type": "string", "description": "journalctl --until"}}},
     )
-    async def loader_log(lines: int = 200, grep: str | None = None) -> str:
-        argv = ["journalctl", "-u", "plugin_loader", "--no-pager", "-o", "short-iso", "-n", str(lines if not grep else max(lines * 10, 2000))]
+    async def loader_log(lines: int = 200, grep: str | None = None, match: str | None = None, since: str | None = None,
+                         until: str | None = None) -> str:
+        filtered = bool(grep or match)
+        argv = ["journalctl", "-u", "plugin_loader", "--no-pager", "-o", "short-iso"]
+        argv += [f"--since={since}"] if since else ["-n", str(lines if not filtered else max(lines * 10, 2000))]
+        if until:
+            argv.append(f"--until={until}")
         code, out = await run(*argv)
         if code != 0:
-            raise RuntimeError(out)
+            raise ValueError(out.strip()) if (since or until) else RuntimeError(out)
+        out_lines = out.splitlines()
         if grep:
             needle = grep.lower()
-            out = "\n".join(l for l in out.splitlines() if needle in l.lower())
-            out = "\n".join(out.splitlines()[-lines:])
-        return out
+            out_lines = [l for l in out_lines if needle in l.lower()]
+        if match:
+            out_lines = _grep(out_lines, match)
+        return "\n".join(out_lines[-lines:])
+
+    @reg.add(
+        "wait_for_log",
+        "Block until a log line matches a regex (case-insensitive), then return it; use it instead of polling after a "
+        "reload, deploy or action. source 'loader' follows the journal, 'plugin' the newest log of plugin_dir. Calls "
+        "run one after another, so set since_s to also accept lines from the last few seconds (e.g. after a reload "
+        "you just triggered). Times out without error: check 'matched'.",
+        {"properties": {"pattern": {"type": "string", "description": "Regex, e.g. '\\bLoaded My Plugin' (\\b: not 'Unloaded')"},
+                        "source": {"type": "string", "enum": ["loader", "plugin"], "default": "loader"},
+                        "plugin_dir": {"type": "string", "description": "For source 'plugin'"},
+                        "timeout": {"type": "number", "default": 30, "minimum": 0.1, "maximum": 300},
+                        "count": {"type": "integer", "default": 1, "minimum": 1, "maximum": 100},
+                        "since_s": {"type": "number", "default": 0, "minimum": 0, "maximum": 3600}},
+         "required": ["pattern"]},
+    )
+    async def wait_for_log(pattern: str, source: str = "loader", plugin_dir: str | None = None, timeout: float = 30,
+                           count: int = 1, since_s: float = 0) -> dict[str, Any]:
+        from ..loader import logs
+        if source == "plugin" and not plugin_dir:
+            raise ValueError("source 'plugin' needs plugin_dir")
+        return await logs.wait_for(source, plugin_dir, pattern, min(max(timeout, 0.1), 300), count, since_s)
 
     @reg.add(
         "restart_loader",
