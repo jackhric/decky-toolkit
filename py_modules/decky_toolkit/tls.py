@@ -16,6 +16,8 @@ from .tools.system import run
 
 VALID_DAYS = "36500"
 SEEN_EVERY_SECONDS = 60
+# The extension polls /stream/stats every 5 s while it is connected.
+CONNECTED_SECONDS = 15
 _PEM = re.compile(r"-----BEGIN ([A-Z ]+)-----\s*([A-Za-z0-9+/=\s]+?)-----END \1-----")
 # DER prefix of an uncompressed EC P-256 SubjectPublicKeyInfo (id-ecPublicKey, prime256v1), then 0x04 X Y.
 _P256_SPKI_PREFIX = bytes.fromhex("3059301306072a8648ce3d020106082a8648ce3d030107034200")
@@ -161,9 +163,18 @@ class PairedClients:
             self._clients = {c["fingerprint"]: c for c in data if isinstance(c, dict) and "fingerprint" in c}
         except (FileNotFoundError, json.JSONDecodeError, TypeError):
             self._clients = {}
+        self._active: dict[str, float] = {}
+
+    def _connected(self, fp: str, now: float) -> bool:
+        return now - self._active.get(fp, float("-inf")) < CONNECTED_SECONDS
 
     def list(self) -> list[dict]:
-        return [dict(c) for c in self._clients.values()]
+        now = self.clock()
+        return [{**c, "connected": self._connected(c["fingerprint"], now)} for c in self._clients.values()]
+
+    def any_connected(self) -> bool:
+        now = self.clock()
+        return any(self._connected(fp, now) for fp in self._clients)
 
     def contains(self, fp: str) -> bool:
         return fp in self._clients
@@ -178,10 +189,12 @@ class PairedClients:
         """Make this the only paired client; returns the clients it replaced."""
         replaced = [dict(c) for f, c in self._clients.items() if f != fp]
         self._clients = {}
+        self._active = {}
         self.add(fp, name, kind)
         return replaced
 
     def remove(self, fp: str) -> bool:
+        self._active.pop(fp, None)
         if self._clients.pop(fp, None) is None:
             return False
         self._save()
@@ -192,6 +205,7 @@ class PairedClients:
         client = self._clients.get(fp)
         if client is None:
             return None
+        self._active[fp] = self.clock()
         now = int(self.clock())
         if client["last_seen"] is None or now - client["last_seen"] >= SEEN_EVERY_SECONDS:
             client["last_seen"] = now

@@ -227,7 +227,7 @@ result. A prune runs every 10 s.
 
 The Decky panel uses the frontend methods `list_pair_requests`, `approve_pair_request(id)` and
 `deny_pair_request(id)` (each returns the list above), plus `list_paired_clients()` and
-`forget_paired_client(fingerprint)` (both return the allow-list). There is no HTTP or MCP route to
+`forget_paired_client(fingerprint)` (both return the allow-list; each entry has `connected`, true when that client made an authenticated request in the last 15 s, kept in memory only, and `get_status()` has a top-level `connected`). There is no HTTP or MCP route to
 approve a request or forget a client, and `call_plugin_method` refuses `approve_pair_request`,
 `deny_pair_request` and `forget_paired_client` on this plugin: both need someone at the device.
 `get_status()` no longer returns `url`.

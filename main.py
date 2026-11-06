@@ -219,6 +219,7 @@ class Plugin:
             "stream": self.capturer.stats() if self.capturer else None,
             "input": self.input.status() if self.input else None,
             "error": self.last_error,
+            "connected": self.clients.any_connected(),
         }
 
     async def set_stream_settings(self, fps: int | None = None, quality: int | None = None, width: int | None = None,
