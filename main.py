@@ -32,7 +32,7 @@ from decky_toolkit.settings import Settings  # noqa: E402
 from decky_toolkit.server.tls import Identity, PairedClients, TlsError, fingerprint  # noqa: E402
 from decky_toolkit.tools import build_registry  # noqa: E402
 from decky_toolkit.tools.plugin_tools import PluginTools  # noqa: E402
-from decky_toolkit.tools.system import list_plugins  # noqa: E402
+from decky_toolkit.loader.plugins import list_plugins  # noqa: E402
 from decky_toolkit.steam.ui import UiNavigator  # noqa: E402
 
 

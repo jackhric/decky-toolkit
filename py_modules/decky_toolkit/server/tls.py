@@ -12,7 +12,7 @@ import tempfile
 import time
 from typing import Callable
 
-from ..tools.system import run
+from ..system import run
 
 VALID_DAYS = "36500"
 SEEN_EVERY_SECONDS = 60

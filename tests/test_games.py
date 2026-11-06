@@ -10,7 +10,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
 from decky_toolkit.games import files as games, vdf  # noqa: E402
-from decky_toolkit.tools.guard import SensitivePath  # noqa: E402
+from decky_toolkit.guard import SensitivePath  # noqa: E402
 
 from test_routes import H, with_server  # noqa: E402
 

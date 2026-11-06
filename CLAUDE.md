@@ -10,7 +10,8 @@ See README.md for setup and docs/reference.md for the tool list and architecture
 - `py_modules/decky_toolkit/` — grouped by area; `settings.py` and `diagnostics.py` (thread/task stacks for the
   `toolkit_stacks` tool, a watchdog thread that logs the loop thread's stack when the event loop stops answering
   for 2 s, SIGUSR1 faulthandler dump to `<runtime dir>/stacks.txt`) and `shell.py` (`device_run`:
-  bash as the desktop user, or root with `root: true`; every command logged) at the top.
+  bash as the desktop user, or root with `root: true`; every command logged), `system.py` (`run`, `clean_env`,
+  `tail`) and `guard.py` (sensitive-path deny list) at the top.
   - `server/`: `protocol.py` (JSON-RPC + HTTP transport), `http.py` (the versioned client API under `/api/v1`, see `docs/api.md`;
     `server/__init__.py` holds `API_PREFIX`/`API_VERSIONS`), `auth.py`
     (client-certificate auth), `tls.py` (device identity, client certs, paired-client store), `pairing.py`,
@@ -20,7 +21,8 @@ See README.md for setup and docs/reference.md for the tool list and architecture
     and the panel's `decky.emit` events; per-event sources feed `hello` and `refresh`, see `docs/api.md`).
   - `loader/`: `install.py` (plugin zip validation + atomic install), `logs.py` (journal / plugin log tail and
     follow), `fixes.py` (workarounds for Decky Loader bugs, applied in our own process), `live.py` (live sync:
-    single-file writes into an installed plugin, frontend/backend reload in place with UI restore).
+    single-file writes into an installed plugin, frontend/backend reload in place with UI restore), `plugins.py`
+    (installed plugins: list, name lookup, install with restart, reload, loader restart).
   - `steam/`: `cdp.py` (Chrome DevTools client for Steam CEF on 127.0.0.1:8080), `ui.py` (Steam UI navigation and
     element queries), `console.py` (background Steam UI console capture), `apps.py` (Steam library/launch via the
     client JS).
@@ -33,10 +35,9 @@ See README.md for setup and docs/reference.md for the tool list and architecture
     `fs_read`/`fs_write`/`fs_mkdir`/`fs_rename` behind `writable` for the `/fs/*` routes, Proton logs), `vdf.py`
     (KeyValues parser).
   - `loader/sourcemap.py` maps `dist/*.js` positions in plugin stacks to `src/` through the installed `.map`.
-  - `tools/`: the MCP tool registry and one module of tools per area (`input.py`, `controllers.py`, `ui.py`,
+  - `tools/`: only MCP tools: the registry and one module of tools per area (`input.py`, `controllers.py`, `ui.py`,
     `cef.py`, `apps.py`, `games.py`, `record.py`, `perf.py` for the Steam performance overlay, `plugin_tools.py` for tools other plugins register from their
-    frontend, ...), plus `guard.py`
-    (sensitive-path deny list) and `plugin_api.py` (plugin backend methods, calls, frontend call check).
+    frontend, ...) and `plugin_api.py` (plugin backend methods, calls, frontend call check).
 - `packages/client/` — device client source shared by bundling (transport, API types, discovery, pairing,
   identity file, plugin staging; no `vscode`); the extension and the CLI import it as `@decky-toolkit/client/*`.
 - `cli/` — the `decky-toolkit` npm package: `pair`, `status`, `mcp` (hand-written stdio MCP server that answers
@@ -87,7 +88,7 @@ See README.md for setup and docs/reference.md for the tool list and architecture
   `_loader_watchdog` thread tracks the grandparent loader PID (plus start time) and `os._exit`s.
 - The loader's file watcher loads a plugin whose files change even while shutting down, so a
   `restart=loader` install stops the loader before swapping the dir in.
-- Subprocesses inherit the PyInstaller `LD_LIBRARY_PATH`; `tools.system.clean_env` strips it.
+- Subprocesses inherit the PyInstaller `LD_LIBRARY_PATH`; `system.clean_env` strips it.
 - `"debug"` in `plugin.json` flags enables hot reload on `dist/index.js`/`main.py` changes. An
   install through `/plugins/install` swaps the whole dir, so for a debug-flagged plugin the watcher
   reloads its backend ~5 s later (twice, observed 2026-11-03) even with `restart=none`.
@@ -462,7 +463,7 @@ SharedJSContext via the `cef_evaluate` tool, or use `plugin_call` (`plugin: "Dec
   choices go in QuickPicks. Don't add an in-page toolbar.
 - Keep the MCP server dependency-free beyond the loader bundle (aiohttp + stdlib).
 - MCP tools are named `<area>_<action>` (`tests/test_tooling.py` lists the areas). A plugin argument is `plugin` (directory
-  or plugin.json name, through `tools.plugins.resolve_plugin`), an app `appid`; `timeout`/`wait` in seconds, other
+  or plugin.json name, through `loader.plugins.resolve_plugin`), an app `appid`; `timeout`/`wait` in seconds, other
   durations end in `_ms`; `grep` substring, `match` regex. A settings tool reads without arguments and writes what it
   is given. Logs of every kind go through `logs_read`/`logs_wait` sources. No aliases for old names.
 - Agents on the device: use `device_run` (root only when needed), `logs_read` / `logs_wait`
@@ -477,7 +478,7 @@ SharedJSContext via the `cef_evaluate` tool, or use `plugin_call` (`plugin: "Dec
   the tool's schema before the call (unknown names are refused with the argument list), so every schema
   property must be a parameter of the function (`tests/test_tooling.py` checks this).
 - Comments only for non-obvious *why*; match the sparse style.
-- Any tool or route that reads or writes a caller-supplied device path must call `tools.guard.check_read` /
+- Any tool or route that reads or writes a caller-supplied device path must call `guard.check_read` /
   `check_write` (Steam credential/session files, library folder lists, SSH keys); the server runs as root.
 - Tools that restart the loader, delete things or are otherwise hard to undo take `confirm: true`
   (`tools.system.require_confirm`) and say so in their description. Add risky new tools to

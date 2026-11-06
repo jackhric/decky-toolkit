@@ -15,7 +15,8 @@ from decky_toolkit.server import audit  # noqa: E402
 from certauth import H, PEER_HEADER, stub_auth  # noqa: E402
 from decky_toolkit.server.http import Api  # noqa: E402
 from decky_toolkit.server.protocol import McpServer  # noqa: E402
-from decky_toolkit.tools import ToolRegistry, build_registry, guard, system  # noqa: E402
+from decky_toolkit import guard  # noqa: E402
+from decky_toolkit.tools import ToolRegistry, build_registry, system  # noqa: E402
 
 STEAM = "/home/deck/.local/share/Steam"
 

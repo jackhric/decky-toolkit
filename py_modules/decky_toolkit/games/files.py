@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from typing import Any, Iterable
 
 from . import vdf
-from ..tools.guard import check_read, check_write, is_sensitive
+from ..guard import check_read, check_write, is_sensitive
 
 STEAMID64_BASE = 76561197960265728
 MAX_LIST_ENTRIES = 2000

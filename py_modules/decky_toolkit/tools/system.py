@@ -1,85 +1,16 @@
 """Tools about the loader, plugins and the device itself."""
-import asyncio
-import json
 import os
 import platform
 import sys
 from typing import Any
 
+from ..loader.plugins import list_plugins, schedule_loader_restart
 from . import ToolRegistry
-
-
-def _env(name: str, default: str = "") -> str:
-    return os.environ.get(name, default)
-
-
-def plugins_dir() -> str:
-    return os.path.join(_env("DECKY_HOME"), "plugins")
-
-
-def clean_env() -> dict[str, str]:
-    # The PyInstaller-launched loader exports LD_LIBRARY_PATH pointing at its own libs, which breaks
-    # system binaries (notably /usr/bin/python3) on Bazzite. Strip it like the loader's own run() does.
-    return {k: v for k, v in os.environ.items() if k != "LD_LIBRARY_PATH"}
-
-
-async def run(*argv: str, timeout: float = 20) -> tuple[int, str]:
-    proc = await asyncio.create_subprocess_exec(*argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, env=clean_env())
-    try:
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout)
-    except asyncio.TimeoutError:
-        proc.kill()
-        raise
-    return proc.returncode or 0, out.decode(errors="replace")
-
-
-def tail(path: str, lines: int) -> str:
-    with open(path, "rb") as f:
-        f.seek(0, os.SEEK_END)
-        size = f.tell()
-        block = 64 * 1024
-        data = b""
-        while size > 0 and data.count(b"\n") <= lines:
-            step = min(block, size)
-            size -= step
-            f.seek(size)
-            data = f.read(step) + data
-    return b"\n".join(data.splitlines()[-lines:]).decode(errors="replace")
 
 
 def require_confirm(confirm: object, what: str) -> None:
     if confirm is not True:
         raise ValueError(f"{what}; call again with confirm: true to go ahead")
-
-
-async def schedule_loader_restart() -> None:
-    # A transient systemd timer restarts the loader from outside our process tree 1s later, so the
-    # caller's reply gets out before the loader kills this backend.
-    code, out = await run("systemd-run", "--on-active=1", "--timer-property=AccuracySec=100ms",
-                          "systemctl", "restart", "plugin_loader")
-    if code != 0:
-        raise RuntimeError(out)
-
-
-async def list_plugins() -> list[dict[str, Any]]:
-    out = []
-    root = plugins_dir()
-    for entry in sorted(os.listdir(root)) if os.path.isdir(root) else []:
-        path = os.path.join(root, entry)
-        if not os.path.isdir(path):
-            continue
-        info: dict[str, Any] = {"dir": entry, "path": path}
-        try:
-            with open(os.path.join(path, "plugin.json")) as f:
-                meta = json.load(f)
-            info.update({k: meta.get(k) for k in ("name", "author", "flags", "api_version")})
-            with open(os.path.join(path, "package.json")) as f:
-                info["version"] = json.load(f).get("version")
-        except (OSError, json.JSONDecodeError) as e:
-            info["error"] = str(e)
-        info["has_backend"] = os.path.exists(os.path.join(path, "main.py"))
-        out.append(info)
-    return out
 
 
 def register(reg: ToolRegistry) -> None:
@@ -96,9 +27,9 @@ def register(reg: ToolRegistry) -> None:
         except OSError:
             pass
         return {
-            "decky_version": _env("DECKY_VERSION"),
-            "decky_home": _env("DECKY_HOME"),
-            "decky_user": _env("DECKY_USER"),
+            "decky_version": os.environ.get("DECKY_VERSION", ""),
+            "decky_home": os.environ.get("DECKY_HOME", ""),
+            "decky_user": os.environ.get("DECKY_USER", ""),
             "running_as_uid": os.getuid(),
             "python": sys.version,
             "kernel": platform.release(),
