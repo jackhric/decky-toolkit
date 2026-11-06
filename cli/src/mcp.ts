@@ -42,6 +42,21 @@ const failure = (id: Id, code: number, message: string) => JSON.stringify({ json
 
 class InvalidParams extends Error {}
 
+const TOOLS_CHECK_MS = 15000;
+
+/** What identifies the device's tool list; older devices have no hash, so their version and count stand in. */
+const toolsKey = (h: { version: string; tools: number; tools_hash?: string }) => h.tools_hash ?? `${h.version}/${h.tools}`;
+
+/** Unknown arguments are refused, as on the device, so a misspelt one never silently falls back to a default. */
+function argumentProblem(tool: ToolDescription, args: Record<string, unknown>): string | undefined {
+  const props = (tool.inputSchema as { properties?: Record<string, { enum?: unknown[]; type?: string }> }).properties ?? {};
+  const unknown = Object.keys(args).filter(k => !(k in props));
+  if (!unknown.length) return undefined;
+  const list = Object.entries(props).map(([k, v]) => `${k} (${v.enum ? v.enum.join('|') : v.type ?? 'any'})`).join('; ');
+  return `Invalid arguments for ${tool.name}: unknown argument${unknown.length > 1 ? 's' : ''} ${unknown.map(k => `'${k}'`).join(', ')}. `
+    + (list ? `Arguments: ${list}.` : 'It takes no arguments.');
+}
+
 /** The device was asked with the client's id, so its reply line is ours as it stands once the envelope checks out. */
 function relay(id: Id, tool: string, body: string): string {
   let msg: { jsonrpc?: unknown; id?: unknown; result?: unknown; error?: { message?: unknown } } | null;
@@ -63,6 +78,11 @@ export class McpServer {
   private deviceTools?: { key: string; tools: Promise<ToolDescription[]> };
   /** Read on first use, then replaced by `serve`'s watch of the identity file. */
   private paired?: Promise<Paired | null>;
+  /** The device's tool fingerprint when the client last got the list; unset until a list was served. */
+  private listedKey?: string;
+  private checking?: Promise<void>;
+  /** Set by `serve`; sends a notification line to the client. */
+  private notify?: (line: string) => void;
 
   constructor(private readonly log: (line: string) => void) {}
 
@@ -86,7 +106,11 @@ export class McpServer {
 
   private async listTools(): Promise<ToolDescription[]> {
     const local = new Set(LOCAL_TOOLS.map(t => t.name));
-    const r = await onDevice(this.current, p => this.toolsOf(p.client));
+    const r = await onDevice(this.current, async p => {
+      const [tools, health] = await Promise.all([this.toolsOf(p.client), p.client.health().catch(() => undefined)]);
+      this.listedKey = health ? toolsKey(health) : '?';
+      return tools;
+    });
     if ('value' in r) return [...r.value.filter(t => !local.has(t.name)), ...LOCAL_TOOLS];
     this.log(`decky-toolkit: device tools unavailable: ${r.error}`);
     return LOCAL_TOOLS;
@@ -97,6 +121,9 @@ export class McpServer {
     const args = (params.arguments ?? {}) as Record<string, unknown>;
     if (typeof name !== 'string') throw new InvalidParams('tools/call needs a tool name');
     if (typeof args !== 'object' || Array.isArray(args)) throw new InvalidParams('tools/call arguments must be an object');
+    const localTool = LOCAL_TOOLS.find(t => t.name === name);
+    const problem = localTool && argumentProblem(localTool, args);
+    if (problem) return result(id, text(problem, true));
     if (name === 'device_status') return result(id, text(JSON.stringify(await deviceStatus(), null, 2)));
     if (name === 'deploy_plugin') {
       try {
@@ -108,7 +135,32 @@ export class McpServer {
       }
     }
     const r = await onDevice(this.current, p => p.client.rpcText('tools/call', { name, arguments: args }, 300000, id));
+    // A call may have changed the device's tools (a deploy of Decky Toolkit itself); look once it is answered.
+    setTimeout(() => void this.checkTools(), 0);
     return 'error' in r ? result(id, text(`${name}: ${r.error}`, true)) : relay(id, name, r.value);
+  }
+
+  /** Tells the client to fetch the list again when the device's tools changed since it last did. */
+  checkTools(force = false): Promise<void> {
+    this.checking ??= (async () => {
+      try {
+        if (this.listedKey === undefined) return;
+        let changed = force;
+        if (!changed) {
+          const p = await this.current().catch(() => undefined);
+          const h = await p?.client.health().catch(() => undefined);
+          changed = !!h && toolsKey(h) !== this.listedKey;
+        }
+        if (changed) {
+          this.deviceTools = undefined;
+          this.listedKey = undefined;
+          this.notify?.(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' }));
+        }
+      } finally {
+        this.checking = undefined;
+      }
+    })();
+    return this.checking;
   }
 
   /** The reply line, if the message gets one. `initialize` and `ping` never touch the device. */
@@ -127,7 +179,7 @@ export class McpServer {
           const requested = params.protocolVersion;
           return result(id, {
             protocolVersion: typeof requested === 'string' && PROTOCOL_VERSIONS.includes(requested) ? requested : PROTOCOL_VERSIONS[0],
-            capabilities: { tools: { listChanged: false } },
+            capabilities: { tools: { listChanged: true } },
             serverInfo: { name: 'decky-toolkit', version: VERSION },
             instructions: 'Tools that inspect and control the paired Steam Deck running Decky Loader (screen, logs, plugins, Steam UI, input) '
               + `plus deploy_plugin to install a Decky plugin from this machine; if a tool says the device is not paired, ${PAIR_HINT} in a terminal.`,
@@ -149,10 +201,16 @@ export class McpServer {
 
   /** Newline-delimited JSON-RPC; requests are answered as they complete, so a slow tool call does not hold up a ping. */
   serve(input: Readable, output: Writable): Promise<void> {
-    const watcher = identityFile.watch(f => { this.paired = Promise.resolve(f && pairedWith(f)); });
     const send = async (line: string) => {
       if (!output.write(line + '\n')) await once(output, 'drain');
     };
+    this.notify = line => void send(line);
+    const watcher = identityFile.watch(f => {
+      this.paired = Promise.resolve(f && pairedWith(f));
+      void this.checkTools(true);
+    });
+    const timer = setInterval(() => void this.checkTools(), TOOLS_CHECK_MS);
+    timer.unref();
     const pending = new Set<Promise<void>>();
     const rl = readline.createInterface({ input, crlfDelay: Infinity });
     rl.on('line', line => {
@@ -171,6 +229,7 @@ export class McpServer {
       void job.finally(() => pending.delete(job));
     });
     return new Promise(resolve => rl.on('close', () => void Promise.all(pending).then(() => {
+      clearInterval(timer);
       watcher.close();
       resolve();
     })));

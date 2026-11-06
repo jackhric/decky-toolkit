@@ -1,4 +1,6 @@
 """Tool registry and the result envelope shared by every MCP tool."""
+import hashlib
+import inspect
 import json
 import logging
 import traceback
@@ -52,22 +54,57 @@ class ToolRegistry:
     def describe(self) -> list[dict[str, Any]]:
         return [{"name": t.name, "description": t.description, "inputSchema": t.input_schema} for t in self._tools.values()]
 
+    def fingerprint(self) -> str:
+        """Changes whenever a tool, its description or its schema does; clients compare it to refresh their list."""
+        blob = json.dumps(self.describe(), sort_keys=True, ensure_ascii=False).encode()
+        return hashlib.sha256(blob).hexdigest()[:16]
+
     async def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         tool = self._tools.get(name)
         if tool is None:
             raise ValueError(f"Unknown tool: {name}")
+        if problem := argument_problem(tool, arguments):
+            # Checked against the schema up front, so a TypeError inside the tool is reported as the bug it is.
+            return error_result(f"Invalid arguments for {name}: {problem}. {describe_arguments(tool.input_schema)}")
         if audit.is_audited(name, self.audited):
             self.log.info(audit.tool_line(name, arguments, tool.input_schema.get("properties", {})))
         try:
             result = await tool.fn(**arguments)
-        except TypeError as e:
-            # Bad/missing arguments surface as a tool error so the agent can self-correct.
-            return error_result(f"Invalid arguments for {name}: {e}")
         except EXPECTED_ERRORS as e:
             return error_result(f"{type(e).__name__}: {e}")
         except Exception as e:  # noqa: BLE001
             return error_result(f"{type(e).__name__}: {e}\n{traceback.format_exc()}")
         return ok_result(result)
+
+
+def argument_problem(tool: Tool, arguments: dict[str, Any]) -> str | None:
+    props = tool.input_schema.get("properties", {})
+    unknown = [k for k in arguments if k not in props]
+    if unknown:
+        return f"unknown argument{'s' if len(unknown) > 1 else ''} {', '.join(repr(k) for k in unknown)}"
+    # A required argument the function has a default for is the tool's to explain (e.g. "needs confirm: true").
+    params = inspect.signature(tool.fn).parameters
+    missing = [k for k in tool.input_schema.get("required", []) if k not in arguments
+               and (k not in params or params[k].default is inspect.Parameter.empty)]
+    if missing:
+        return f"missing required {', '.join(repr(k) for k in missing)}"
+    try:
+        inspect.signature(tool.fn).bind(**arguments)
+    except TypeError as e:
+        return str(e)
+    return None
+
+
+def describe_arguments(schema: dict[str, Any]) -> str:
+    props = schema.get("properties", {})
+    if not props:
+        return "It takes no arguments."
+    required = set(schema.get("required", []))
+    parts = []
+    for k, v in props.items():
+        kind = "|".join(map(str, v["enum"])) if "enum" in v else v.get("type", "any")
+        parts.append(f"{k} ({kind}{', required' if k in required else ''})")
+    return "Arguments: " + "; ".join(parts) + "."
 
 
 def ok_result(result: Any) -> dict[str, Any]:
