@@ -46,6 +46,7 @@ run commands on the device. Your plugin can [add its own tools](../plugin-tools/
 
 | Command | What it does |
 | --- | --- |
+| `new [dir]` | Create a plugin from the official template, then install and build it |
 | `pair [host]` | Pair this computer with a device |
 | `status` | Show the paired device and whether it answers |
 | `mcp` | Run the MCP server for an agent |
@@ -69,3 +70,16 @@ npx -y decky-toolkit call screen_capture --out screen.jpg
 ```
 
 Run `npx -y decky-toolkit --help` for every option.
+
+## Start a plugin
+
+```sh
+npx -y decky-toolkit new my-plugin --name "My Plugin" --deploy
+```
+
+This copies [decky-plugin-template](https://github.com/SteamDeckHomebrew/decky-plugin-template), renames it, installs
+and builds it, then deploys it and keeps it in sync until Ctrl-C. Options:
+
+- `--variant backend` adds a Python backend, `--variant mcp-tool` an [agent tool](../plugin-tools/)
+- `--build vite` builds with Vite instead of the template's Rollup
+- `--template latest` uses the template's newest version instead of the tested one

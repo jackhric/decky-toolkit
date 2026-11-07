@@ -18,7 +18,7 @@ Install the helper and a schema library ([Zod](https://zod.dev) 4.2 or newer her
 pnpm add decky-toolkit zod
 ```
 
-Create `src/tools.ts` and import it once from `src/index.tsx` with `import "./tools";`:
+Create `src/tools.ts`:
 
 ```ts
 import { registerTool } from "decky-toolkit/tools";
@@ -27,13 +27,20 @@ import { z } from "zod";
 
 const resetCache = callable<[appid?: number], number>("reset_cache");
 
-registerTool({
-  name: "reset_cache",
-  description: "Clear cached artwork and reload the library view.",
-  inputSchema: z.object({ appid: z.number().int().optional() }),
-  execute: async ({ appid }) => ({ cleared: await resetCache(appid) }),
-});
+export function registerTools() {
+  registerTool({
+    name: "reset_cache",
+    description: "Clear cached artwork and reload the library view.",
+    inputSchema: z.object({ appid: z.number().int().optional() }),
+    execute: async ({ appid }) => ({ cleared: await resetCache(appid) }),
+  });
+}
 ```
+
+Call `registerTools()` inside `definePlugin` in `src/index.tsx`. A bare `import "./tools";` is not enough with the
+template's Rollup build: it removes modules that are only imported for their side effects.
+
+A new plugin made with **New plugin…** (or `decky-toolkit new --variant mcp-tool`) starts with a working example.
 
 Deploy the plugin. If its folder on the device is `my-plugin`, agents now see `my_plugin_reset_cache`.
 
