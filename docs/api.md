@@ -87,6 +87,7 @@ far behind has its stream ended and reconnects (and resyncs from `hello`). Forge
 | `input_settings` | `{enabled, backend, available, reason}`, as `GET /input/settings` | remote input was enabled or disabled |
 | `plugins` | `{plugins: [{dir, name, version}]}` | Decky loaded or unloaded a plugin (install, reload, its file watcher; seen through Steam's SharedJSContext) or a zip was installed |
 | `controllers` | `{controllers: [Controller], virtual: [VirtualPad]}` (see [Controllers](#controllers)) | the controller list changed; `last_event_at` alone does not count |
+| `ui_tweaks` | `{off: [name]}`, as `GET /ui/tweaks` | a Steam UI tweak was turned off or on (`PUT /ui/tweaks`, `ui_tweak`) |
 | `pairing` | `{pending, paired}`: counts of pending pairing requests and paired clients | a request was filed, decided, cancelled or expired, or a client was paired or forgotten. Codes and request ids stay on the device. |
 | `shutdown` | `{}` | the server is stopping; the stream ends right after |
 
@@ -201,6 +202,8 @@ visible page is `SteamUIStore.WindowStore.GamepadUIMainWindowInstance.LocationPa
 | `GET /api/v1/ui/routes` | client cert | live | `{current, side_menu: "none"\|"main"\|"quick_access", quick_access_tab, active_plugin, official: [{path, title, template?}], plugins: [{plugin, path, title}], patched: [{plugin, path}], decky_plugins: [name], quick_access_tabs: [str], steam_routes: [str]}`. `official` is the verified list below; `template: true` entries take `{appid}` etc. `plugins` are routes registered through Decky's router hook (`DeckyPluginLoader.routerHook.routerState._routes`), `patched` its route patches (`_routePatches`); `plugin` is `Decky Loader` for `/decky/...`, else the plugin whose name appears in the path, else `unknown` (Decky does not record the owner). `steam_routes` is Steam's own route table (`routerHook.routes`). `502` if the Steam UI is unreachable. Tool: `ui_routes`. |
 | `POST /api/v1/ui/navigate` | client cert | live | Exactly one of: `{"path": "/library/home"}`, `{"action": "back"}`, `{"action": "quick_access", "tab"?: "decky"\|"notifications"\|"friends"\|"settings"\|"perf"\|"help"\|"soundtrack"\|...}`, `{"action": "main_menu"}`, `{"action": "close_menus"}`, `{"action": "plugin", "plugin": "<Decky plugin name>"}` (case-insensitive), `{"action": "app", "appid": 730}` (must be in the library). A path must be in `official` (or match a template), a plugin route, or Steam's route table; `/settings/<x>` only for the listed pages (Steam shows System for anything else). `/settings/controller` opens the first Steam Input controller's page. Navigating a path also closes open side menus. `200 {ok: true, current, side_menu, quick_access_tab, active_plugin}` read about 0.3 s later; `400 {"error"}` for an unknown route/action/tab/plugin/app (the message lists the known ones); `502` if the Steam UI is unreachable. |
 | `POST /api/v1/ui/toast` | client cert | live | JSON `{title, body, duration_ms?}` (default 5000): a Decky toast in the Steam UI. `{result: "ok"}`. Tool: `ui_toast`. |
+| `GET /api/v1/ui/tweaks` | client cert | live | `{off: [name]}`: Decky Toolkit's own Steam UI changes (`src/steam/` tweaks, e.g. `transparent-header`) that stay off, sorted. Live statuses come from the `ui_tweak` tool. |
+| `PUT /api/v1/ui/tweaks` | client cert | live | `{"off": [name]}` replaces the list (up to 100 names of 1-64 characters; anything else or extra fields: `400`). Persists to `settings.json` (`ui_tweaks_off`); the frontend turns those tweaks off and every other one back on at once (`decky_toolkit_ui_tweaks`). Same shape as `GET`. |
 | `POST /api/v1/cef/evaluate` | client cert | live | JSON `{expression, target?, timeout?}`: `Runtime.evaluate` in a Steam CEF tab (default SharedJSContext, promises awaited, `timeout` 15 s). `{value}` (JSON value, `null` for `undefined`). `400` without `expression`, `502` if the tab is unreachable or the expression throws. Tool: `cef_evaluate`. |
 
 Official routes (each opened on the device and checked on screen, 2026-11-04): `/library/home`, `/library`,
@@ -354,6 +357,41 @@ gamepad focus class `gpfocus` (its ancestors carry `gpfocuswithin`) or `document
 | `ui_focus(target?)` | `{route, side_menu, target, window_focused, element, gpfocus?, active_element?}`. Without `target` it looks in the Quick Access or main menu view when one is open, else in Big Picture. `element` is the visible `.gpfocus` element (else `document.activeElement`); `gpfocus` lists all when there are several; `active_element` appears when `document.activeElement` is a different element. |
 | `ui_wait(selector?, text?, route?, gone=false, timeout=10, interval=0.25, target?)` | Polls until a visible match exists (or, with `gone`, none does), or until the current route (`LocationPathName`) equals `route` (or, with `gone`, differs). `{ok, elapsed_s, element \| route}`. On timeout an error: `timed out after 10s waiting for route /x; current route /y, focus <div> 'System' at {...}`. CEF errors while polling (a tab briefly missing during a reload) count as "not yet". |
 
+## Steam UI tweaks
+
+The frontend's changes to Steam's UI (`src/steam/tweak.ts`) are named tweaks with a status: `active`, `skipped` (an
+internal it needs is missing, so it changed nothing), `failed` (it threw; whatever it had applied is undone; `message`),
+`off`, or `idle` (nothing uses it right now, e.g. a page-scoped tweak while its page is closed). The registry is
+published in SharedJSContext as `window.__deckyToolkitSteam` (`{version: 1, list(), off(), setOff(names),
+setEnabled(name | "all", on), try(name, apply, seconds), restoreAll()}`); `setEnabled` there does not save. A new
+frontend load first calls `restoreAll()` on an instance left behind, and the plugin's `onDismount` calls it before
+anything else; it never throws.
+
+`ui_tweak` (`action` `list` default; `on`/`off` with `name` or `all` and `confirm: true`; `try` with `code`, `name`
+(default `trial`), `seconds` (default 30, 1-300) and `confirm: true`). `on`/`off` switch the tweak in the frontend and
+save the frontend's resulting off list as `ui_tweaks_off` (as `PUT /ui/tweaks`); without a loaded frontend a named
+tweak is still saved (`applied: false`) and `all` off is refused. `try` evaluates `function (track) { <code> }` in
+SharedJSContext as a trial: it must return an undo function, which runs after `seconds`, when `ui_tweak off` names the
+trial, or when the frontend unloads. Trials are never saved. Results: `list` `{tweaks: [{name, status, message?, trial?,
+reverts_in_s?}] | null, off, error?}`; `on`/`off` the same plus `applied`; `try` `{name, status, message?, trial,
+reverts_in_s}`.
+
+`ui_react` is read-only (`mode` required):
+
+- `find` (`grep`: substrings that must all appear, `limit` default 10, max 50): every export of @decky/ui's webpack
+  module list (`window.DFL.modules`) that is a memo, forwardRef, function or class component, matched against the
+  source of the function React renders (the original under any patch). `{total, matches: [{ref, kind, name, length,
+  excerpt, patched}]}`; `ref` is `<module id>:<export path>`, valid until Steam updates.
+- `tree` (`selector`, `target` default `Steam Big Picture Mode`, `depth` fibers up (default 10, max 40), `down` levels
+  below (default 0, max 6, at most 80 fibers)): `{target, selector, up: [line], down?: [line], truncated?}`, one line per
+  fiber: level, kind, name, `key=`, `[error boundary]`, `patched=<tweak name>|other`, `[fiber type is not memo.type]`,
+  `props=` (first 6), `src=` for anonymous components.
+- `patches` (`ref`, or `selector` with `target`/`depth`): the `__deckyPatch` chain on the function React renders
+  (`memo.type`, or `render` of a forwardRef). For `ref`: `{ref, kind, patched_property, wrapped, depth, layers: [{ours,
+  handler}]}`; for a selector, the patched or stale component fibers above it: `{patched: [{level, kind, name, depth,
+  layers, fiber_current}]}`. `ours` is the tweak name a Decky Toolkit patch put on its handler (`__deckyToolkit`);
+  `fiber_current: false` means a memo fiber still renders a function other than `memo.type`.
+
 ## Plugin calls
 
 MCP tools only.
@@ -430,7 +468,8 @@ with an error while input is disabled. `controller_list`,
 quick_access_tab, active_plugin, running_app, focus {text, tag, target}, dialog {title, text, buttons}, keyboard,
 someone_at_device}`; `dialog` is the open Steam dialog, `keyboard` whether the on-screen keyboard shows. `ui_routes`, `ui_navigate`
 (`path` or `action` plus `tab`/`plugin`/`appid`, and `capture: true` for a frame 0.7 s later): as `/ui/...`.
-`ui_query`, `ui_focus`, `ui_wait`: see [UI query](#ui-query). `plugin_methods`, `plugin_call`, `plugin_frontend_check`:
+`ui_query`, `ui_focus`, `ui_wait`: see [UI query](#ui-query). `ui_tweak` and `ui_react`: see
+[Steam UI tweaks](#steam-ui-tweaks). `plugin_methods`, `plugin_call`, `plugin_frontend_check`:
 see [Plugin calls](#plugin-calls). `loader_restart` and `plugin_install` with `restart: "loader"` need
 `confirm: true` (see [Security](#security)). `app_list` (`installed_only`, `query`, `include_tools`; `running: true`:
 `{running: [{appid, name, pid, processes}], main_appid}`), `app_info` (`appid`: the list fields plus `gameid, developer, platforms, playtime_minutes, launch_options,
@@ -493,6 +532,7 @@ The backend sends these to its own panel through the same event hub (`server/eve
 | `decky_toolkit_pair_requests` | the `list_pair_requests` list | requests were filed, decided, cancelled or expired; the panel refreshes |
 | `decky_toolkit_paired` | `remote_ip: string, client_name: string` | a pairing request was allowed on the device |
 | `decky_toolkit_paired_clients` | the `list_paired_clients` list | a client was added or forgotten; the panel refreshes |
+| `decky_toolkit_ui_tweaks` | `off: string[]` | the saved off list changed; the frontend switches its tweaks to match |
 | `decky_toolkit_input_session` | `remote_ip: string` | a client started sending input (`"MCP client"` for tool calls); the panel shows a toast |
 
 ## Errors

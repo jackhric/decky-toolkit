@@ -142,8 +142,8 @@ def error_result(text: str) -> dict[str, Any]:
 
 
 def build_registry(services: "Services") -> ToolRegistry:
-    from . import (activity, apps, cef, controllers, games, input, logs, perf, plugin_api, plugins, record, screen,
-                   shell, system, ui)
+    from . import (activity, apps, cef, controllers, games, input, logs, perf, plugin_api, plugins, react, record,
+                   screen, shell, system, ui)
 
     s = services
     orient = ui.Orientation(s.inspector, s.activity)
@@ -157,6 +157,7 @@ def build_registry(services: "Services") -> ToolRegistry:
     input.register(reg, s.input, s.capturer, orient)
     controllers.register(reg, s.controllers)
     ui.register(reg, s.ui, s.inspector, s.capturer, orient)
+    react.register(reg, s.react, s.tweaks)
     apps.register(reg, s.apps)
     games.register(reg, s.apps)
     record.register(reg, s.capturer)

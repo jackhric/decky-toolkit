@@ -17,7 +17,7 @@ paired_client: contextvars.ContextVar[str] = contextvars.ContextVar("paired_clie
 
 AUDITED_TOOLS = frozenset({
     "cef_evaluate", "fs_write", "fs_delete", "plugin_install", "plugin_reload", "loader_restart", "plugin_call",
-    "app_terminate", "recording_delete", "controller_remove", "ui_navigate",
+    "app_terminate", "recording_delete", "controller_remove", "ui_navigate", "ui_tweak",
 })
 AUDITED_PREFIXES = ("input_",)
 _UNAUDITED_ROUTES = ("/mcp", PAIR_REQUEST_PATH)

@@ -144,6 +144,8 @@ class Api:
             web.get("/ui/routes", self.handle_ui_routes),
             web.post("/ui/navigate", self.handle_ui_navigate),
             web.post("/ui/toast", self.handle_ui_toast),
+            web.get("/ui/tweaks", self.handle_ui_tweaks_get),
+            web.put("/ui/tweaks", self.handle_ui_tweaks_put),
             web.post("/cef/evaluate", self.handle_cef_evaluate),
             web.get("/plugins", self.handle_plugins),
             web.post("/plugins/install", self.handle_plugin_install),
@@ -431,6 +433,13 @@ class Api:
     async def handle_ui_toast(self, request: web.Request) -> web.Response:
         body = await _body(request, {"title", "body", "duration_ms"}, ("title", "body"))
         return web.json_response({"result": await toast(body["title"], body["body"], body.get("duration_ms", 5000))})
+
+    async def handle_ui_tweaks_get(self, _request: web.Request) -> web.Response:
+        return web.json_response(self.s.tweaks.settings())
+
+    async def handle_ui_tweaks_put(self, request: web.Request) -> web.Response:
+        body = await _body(request, {"off"}, ("off",))
+        return web.json_response(self.s.tweaks.set_off(body["off"]))
 
     async def handle_cef_evaluate(self, request: web.Request) -> web.Response:
         body = await _body(request, {"expression", "target", "timeout"}, ("expression",))
