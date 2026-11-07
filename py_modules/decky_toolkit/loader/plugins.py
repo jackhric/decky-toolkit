@@ -47,16 +47,26 @@ def resolve_plugin(plugin: str) -> tuple[str, str]:
     if "/" not in plugin and not plugin.startswith(".") and os.path.isfile(os.path.join(plugins_dir(), plugin, "plugin.json")):
         return plugin, plugin_name(plugin)
     try:
+        return plugin_dir(plugin), plugin
+    except FileNotFoundError:
+        raise FileNotFoundError(f"no installed plugin with directory or name {plugin!r} (see plugin_list)") from None
+
+
+def plugin_dir(name: str) -> str:
+    """The directory of the installed plugin whose plugin.json name is `name`."""
+    if not name or not isinstance(name, str):
+        raise ValueError("plugin must be a plugin.json name (see plugin_list)")
+    try:
         dirs = sorted(os.listdir(plugins_dir()))
     except FileNotFoundError:
         dirs = []
     for d in dirs:
         try:
-            if plugin_name(d) == plugin:
-                return d, plugin
+            if plugin_name(d) == name:
+                return d
         except (FileNotFoundError, ValueError, OSError):
             continue
-    raise FileNotFoundError(f"no installed plugin with directory or name {plugin!r} (see plugin_list)")
+    raise FileNotFoundError(f"no installed plugin is named {name!r} (see plugin_list)")
 
 
 async def _reload_by_name(name: str) -> Any:

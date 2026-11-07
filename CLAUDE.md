@@ -471,7 +471,8 @@ SharedJSContext via the `cef_evaluate` tool, or use `plugin_call` (`plugin: "Dec
   choices go in QuickPicks. Don't add an in-page toolbar.
 - Keep the MCP server dependency-free beyond the loader bundle (aiohttp + stdlib).
 - MCP tools are named `<area>_<action>` (`tests/test_tooling.py` lists the areas). A plugin argument is `plugin` (directory
-  or plugin.json name, through `loader.plugins.resolve_plugin`), an app `appid`; `timeout`/`wait` in seconds, other
+  or plugin.json name, through `loader.plugins.resolve_plugin`; reload takes only the plugin.json name, which is how
+  Decky knows a plugin), an app `appid`; `timeout`/`wait` in seconds, other
   durations end in `_ms`; `grep` substring, `match` regex. A settings tool reads without arguments and writes what it
   is given. Logs of every kind go through `logs_read`/`logs_wait` sources. No aliases for old names.
 - Agents on the device: use `device_run` (root only when needed), `logs_read` / `logs_wait`

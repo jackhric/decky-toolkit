@@ -316,8 +316,8 @@ export class DeckyClient {
   }
 
   /** Reload one plugin in place and restore the UI around it. Reloading Decky Toolkit's own backend only schedules it. */
-  reloadPlugin(dir: string, mode: LiveReloadMode = 'backend'): Promise<LiveReloadResult> {
-    return this.json<LiveReloadResult>(`/plugins/${encodeURIComponent(dir)}/reload?mode=${mode}`, { method: 'POST', timeoutMs: 30000 });
+  reloadPlugin(name: string, mode: LiveReloadMode = 'backend'): Promise<LiveReloadResult> {
+    return this.post<LiveReloadResult>('/plugins/reload', { plugin: name, mode }, 30000);
   }
 
   /** Atomically replace one file inside an installed plugin; `path` is relative to the plugin directory. */

@@ -94,7 +94,7 @@ export interface InstallResult {
 
 export type LiveReloadMode = 'frontend' | 'backend';
 
-/** `POST /plugins/{dir}/reload?mode=…`. Reloading our own backend only schedules it (`scheduled`). */
+/** `POST /plugins/reload` with the plugin.json name and mode. Reloading our own backend only schedules it (`scheduled`). */
 export interface LiveReloadResult {
   dir: string;
   name: string;
