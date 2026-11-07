@@ -50,6 +50,9 @@ See README.md for setup and docs/reference.md for the tool list and architecture
   `registerTool`, with compile-time type tests in `cli/test/` (part of `typecheck`). `scripts/smoke.mjs` runs
   the built CLI as a child process against `scripts/fake-device.mjs` (installed through the client's hooks).
   The extension's "Write MCP config" writes `npx -y decky-toolkit mcp` into `.mcp.json`.
+- `src/steam/` — everything the frontend does past `@decky/ui` into Steam's internals (`internals.ts` is the only
+  place that reads Steam globals; `tweak.ts` applies and undoes changes; `settings.tsx` holds the settings-page tweaks;
+  `theme.ts` maps Steam's design tokens to names).
 - `src/index.tsx` — Quick Access panel (React, `@decky/ui`, `@decky/api`). Built by `pnpm run build` (Vite,
   `vite.config.ts`) into `dist/index.js`.
 - `scripts/test.sh` — Python tests under uv with the loader's Python major (CI runs it). Deploying this repo to
@@ -493,6 +496,13 @@ SharedJSContext via the `cef_evaluate` tool, or use `plugin_call` (`plugin: "Dec
   the tool's schema before the call (unknown names are refused with the argument list), so every schema
   property must be a parameter of the function (`tests/test_tooling.py` checks this).
 - Comments only for non-obvious *why*; match the sparse style.
+- Frontend code never reaches into Steam internals (globals, Steam CSS classes, MobX stores, undocumented props)
+  outside `src/steam/`. There every change goes through `tweak()`/`useTweak()`: check the internal first (accessors in
+  `internals.ts` return undefined on an unexpected shape), return an undo that restores exactly what was there, and
+  leave Steam untouched if anything is missing or throws. `restoreAll()` runs in `onDismount`. Failures log once as
+  `[Decky Toolkit] Steam tweak ...` (visible through `logs_read` source `steam_console`).
+- Frontend colours and type sizes come from `src/steam/theme.ts`: Steam's CSS tokens (`var(--color-accent-8, …)`) with
+  fallbacks, since the Quick Access document lacks the colour tokens. No hard-coded colours elsewhere in `src/`.
 - Any tool or route that reads or writes a caller-supplied device path must call `guard.check_read` /
   `check_write` (Steam credential/session files, library folder lists, SSH keys); the server runs as root.
 - Tools that restart the loader, delete things or are otherwise hard to undo take `confirm: true`
