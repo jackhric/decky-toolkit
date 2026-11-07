@@ -1,10 +1,12 @@
 import json
 import os
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 
 DEFAULT_PORT = 8765
 STREAM_LIMITS = {"fps": [1, 60], "quality": [10, 100], "widths": [0, 1600, 1280, 960, 640], "audio": [False, True]}
 MAX_STREAM_WIDTH = 3840
+MAX_TWEAK_NAME = 64
+MAX_TWEAKS_OFF = 100
 
 
 @dataclass
@@ -17,6 +19,7 @@ class Settings:
     stream_width: int = 0  # 0 = native resolution
     input_enabled: bool = False
     audio_enabled: bool = True
+    ui_tweaks_off: list[str] = field(default_factory=list)
 
     @classmethod
     def load(cls, settings_dir: str) -> "Settings":
@@ -69,6 +72,16 @@ class Settings:
             raise ValueError("enabled must be true or false")
         changed = self.input_enabled != enabled
         self.input_enabled = enabled
+        return changed
+
+    def update_ui_tweaks_off(self, names) -> bool:
+        """Set the Steam UI tweaks that stay off (a list of names); returns whether it changed."""
+        if (not isinstance(names, list) or len(names) > MAX_TWEAKS_OFF
+                or not all(isinstance(n, str) and 0 < len(n) <= MAX_TWEAK_NAME for n in names)):
+            raise ValueError(f"off must be a list of up to {MAX_TWEAKS_OFF} tweak names (1-{MAX_TWEAK_NAME} characters)")
+        names = sorted(set(names))
+        changed = self.ui_tweaks_off != names
+        self.ui_tweaks_off = names
         return changed
 
 

@@ -16,6 +16,8 @@ from .steam.apps import Apps
 from .steam.console import ConsoleCollector
 from .steam.perf import PerfOverlay
 from .steam.plugin_tools import PluginTools
+from .steam.react import ReactInspector
+from .steam.tweaks import UiTweaks
 from .steam.ui import UiInspector, UiNavigator
 
 
@@ -34,6 +36,8 @@ class Services:
     activity: InputActivity
     plugin_tools: PluginTools
     pairing: PairingRequests
+    tweaks: UiTweaks
+    react: ReactInspector
 
     @classmethod
     def create(cls, get_settings: Callable[[], Settings], save_settings: Callable[[], None], logger: logging.Logger,
@@ -47,6 +51,7 @@ class Services:
             controllers=ControllerService(input_service, logger, events), ui=ui, inspector=UiInspector(ui), apps=Apps(), perf=PerfOverlay(),
             console=ConsoleCollector(logger), activity=InputActivity(logger), plugin_tools=PluginTools(logger, events),
             pairing=PairingRequests(events, server_cert),
+            tweaks=UiTweaks(get_settings, save_settings, events, logger), react=ReactInspector(),
         )
 
     def start(self) -> None:

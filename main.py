@@ -185,6 +185,7 @@ class Plugin:
             "plugins": plugins,
             "controllers": controller_list,
             "pairing": lambda: {"pending": len(s.pairing.pending()), "paired": len(self.clients.list())},
+            "ui_tweaks": s.tweaks.settings,
         })
 
     # ---- methods callable from the frontend ----
@@ -211,7 +212,12 @@ class Plugin:
             "connected": self.clients.any_connected(),
             "clients": self._connected_clients(),
             "version": SERVER_INFO["version"],
+            "ui_tweaks_off": self.settings.ui_tweaks_off,
         }
+
+    async def set_ui_tweak(self, name: str, enabled: bool) -> dict[str, Any]:
+        self.services.tweaks.set_one(str(name), bool(enabled))
+        return await self.get_status()
 
     async def set_enabled(self, enabled: bool) -> dict[str, Any]:
         self.settings.enabled = bool(enabled)

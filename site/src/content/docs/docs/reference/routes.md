@@ -56,6 +56,8 @@ Request and response bodies are in [docs/api.md](https://github.com/jackhric/dec
 | GET | `/api/v1/ui/routes` | Pages you can open in the Steam UI | paired client |
 | POST | `/api/v1/ui/navigate` | Open a page, a menu or a plugin panel | paired client |
 | POST | `/api/v1/ui/toast` | Show a toast on the device | paired client |
+| GET | `/api/v1/ui/tweaks` | Decky Toolkit's Steam UI changes that are turned off | paired client |
+| PUT | `/api/v1/ui/tweaks` | Turn Decky Toolkit's Steam UI changes off or back on | paired client |
 | POST | `/api/v1/cef/evaluate` | Run JavaScript in the Steam UI | paired client |
 
 ## Plugins, loader and logs

@@ -1,14 +1,14 @@
 import { DialogControlsSection, DialogControlsSectionHeader, SidebarNavigation } from "@decky/ui";
 import { ComponentProps, ReactNode } from "react";
 import { headerStore, hasGlobalClass } from "./internals";
-import { useTweak } from "./tweak";
+import { useTweak } from "./react";
 
 /**
  * Makes the top bar transparent like Steam's own settings: Steam counts pages "acting as the header background" and
  * drops the bar's dark backdrop while any is shown. Without the store the bar stays dark.
  */
 export function useTransparentHeader() {
-  useTweak("transparent header", () => {
+  useTweak("transparent-header", () => {
     const store = headerStore();
     if (!store) return;
     store.m_nNumTabbedPagesActingAsHeaderBackground++;
