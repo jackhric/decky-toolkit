@@ -63,7 +63,7 @@ const setState = patch => writeFileSync(stateFile, JSON.stringify({ ...state(), 
 writeFileSync(stateFile, JSON.stringify({
   hosts: ['192.168.77.20', '127.0.0.1'], discoverable: ['192.168.77.20:8765'], health, downFor: 0,
   serverCert: readFileSync(path.join(certDir, 'server.crt'), 'utf8'), clientCert: readFileSync(path.join(certDir, 'client.crt'), 'utf8'),
-  journal: ['boot'], pairQueue: [], pairRequests: [], pairCancelled: [], requests: [], rpc: [], installs: [], reloads: [],
+  journal: ['boot'], pairQueue: [], pairRequests: [], pairCancelled: [], requests: [], rpc: [], installs: [], reloads: [], pluginLog: { 'My Plugin': ['[INFO]: boot'] },
   plugins: [{ dir: 'my-plugin', name: 'My Plugin', version: '1.0.0', flags: [] }], installMeta: { name: 'My Plugin', version: '1.2.3' },
   tools: [
     { name: 'device_info', description: 'Loader status', inputSchema: { type: 'object', properties: {} } },
@@ -421,7 +421,7 @@ await check('deploy', async () => {
   assert.ok(inst[0].names.includes('my-plugin/dist/index.js') && inst[0].names.includes('my-plugin/main.py'), inst[0].names.join());
   assert.ok(!inst[0].names.some(n => n.includes('/src/')), 'src/ stays behind');
   assert.match(r.stdout, /Deployed My Plugin 1\.2\.3 to 192\.168\.77\.20 as my-plugin .*reload confirmed/);
-  assert.match(r.stdout, /Reload confirmed: loader imported My Plugin v1\.2\.3 /);
+  assert.match(r.stdout, /Reload confirmed: loader imported My Plugin v1\.2\.3; backend: \[INFO\]: started #\d+/);
   // A debug-flagged plugin is left to the file watcher; the fake's never fires, so the deploy asks for a reload after 4 s.
   writeFileSync(path.join(plugin, 'plugin.json'), JSON.stringify({ name: 'My Plugin', flags: ['debug'] }));
   const reloads = state().reloads.length;
