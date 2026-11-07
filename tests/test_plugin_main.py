@@ -79,6 +79,7 @@ def test_start_rebind_disable_and_unload(plugin):
             assert status["running"] and status["error"] is None and status["port"] == first
             assert await health(first) == 200
             assert set(status) >= {"stream", "input", "clients", "pair_requests"}
+            assert status["version"] == json.loads((ROOT / "package.json").read_text())["version"]
 
             second = free_port()
             assert (await plugin.set_port(second))["running"]
