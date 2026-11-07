@@ -29,9 +29,10 @@ await esbuild.build({
     contents: "import { transportHooks, TrustError } from '../packages/client/src/transport';"
       + "import { discoveryHooks, discoveryTimings } from '../packages/client/src/discovery';"
       + "import { pairingTimings } from '../packages/client/src/pairing';"
+      + "import { scaffoldHooks } from '../packages/client/src/scaffold';"
       + "import { installFake } from './scripts/fake-device.mjs';"
       + "import { main } from './src/main';"
-      + 'installFake({ transportHooks, TrustError, discoveryHooks, discoveryTimings, pairingTimings });'
+      + 'installFake({ transportHooks, TrustError, discoveryHooks, discoveryTimings, pairingTimings, scaffoldHooks });'
       + 'void main(process.argv.slice(2)).then(code => { process.exitCode = code; });',
     resolveDir: root,
     loader: 'ts',
@@ -74,9 +75,9 @@ writeFileSync(stateFile, JSON.stringify({
 const env = { ...process.env, DECKY_TOOLKIT_CONFIG_DIR: configDir, FAKE_DEVICE: fakeDir };
 
 /** Runs the CLI to completion; `onSpawn` and `onStdout` may write to stdin or signal the child. */
-function cli(args, { input, onSpawn, onStdout, timeoutMs = 20000 } = {}) {
+function cli(args, { input, onSpawn, onStdout, timeoutMs = 20000, env: extra } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [harness, ...args], { cwd: scratch, env, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, [harness, ...args], { cwd: scratch, env: { ...env, ...extra }, stdio: ['pipe', 'pipe', 'pipe'] });
     onSpawn?.(child);
     let stdout = '', stderr = '';
     const t = setTimeout(() => { child.kill('SIGKILL'); reject(new Error(`${args.join(' ')} timed out\nstdout: ${stdout}\nstderr: ${stderr}`)); }, timeoutMs);
@@ -113,7 +114,7 @@ await check('--version and --help', async () => {
 });
 
 await check('usage errors exit 2', async () => {
-  for (const args of [['frobnicate'], ['status', '--restart', 'none'], ['deploy', '--restart', 'sometimes'], ['deploy', '--build', 'sometimes'], ['call'], ['call', 'x', '{bad'], ['pair', 'a:b:c'], ['pair', 'steamdeck:99999'], ['forget', 'extra']]) {
+  for (const args of [['frobnicate'], ['status', '--restart', 'none'], ['deploy', '--restart', 'sometimes'], ['deploy', '--build', 'sometimes'], ['call'], ['call', 'x', '{bad'], ['pair', 'a:b:c'], ['pair', 'steamdeck:99999'], ['forget', 'extra'], ['new', '--variant', 'gui'], ['new', 'x', '--build', 'webpack'], ['new', 'x', '--template', 'v2'], ['new', 'a', 'b'], ['new', '--name', 'a/b']]) {
     const r = await cli(args);
     assert.equal(r.code, 2, `${args.join(' ')} → ${r.code} ${r.stderr}`);
     assert.match(r.stderr, /--help/);
@@ -481,6 +482,54 @@ await check('deploy builds when src/ is newer than dist/index.js, as the extensi
   }
 });
 
+await check('new: from the template, renamed and built; refuses a used folder; --deploy deploys and live-syncs', async () => {
+  const tpl = path.join(scratch, 'template', 'decky-plugin-template-main');
+  mkdirSync(path.join(tpl, 'src'), { recursive: true });
+  mkdirSync(path.join(tpl, '.vscode'));
+  writeFileSync(path.join(tpl, 'plugin.json'), JSON.stringify({ name: 'Example Plugin', author: 'John Doe', flags: ['debug', '_root'], api_version: 1 }));
+  // The watch script stands in for rollup -w: one build, then it waits like a watcher.
+  const watch = `node -e "require('fs').mkdirSync('dist',{recursive:true});require('fs').writeFileSync('dist/index.js','export default 1;\\n');console.log('created dist in 1ms');setInterval(()=>{},1e6)"`;
+  writeFileSync(path.join(tpl, 'package.json'), JSON.stringify({ name: 'decky-plugin-template', version: '0.0.1', scripts: { build: 'rollup -c', watch } }));
+  writeFileSync(path.join(tpl, 'LICENSE'), 'Copyright (c) 2024, Hypothetical Plugin Developer\n');
+  writeFileSync(path.join(tpl, 'src', 'index.tsx'), 'name: "Test Plugin"');
+  writeFileSync(path.join(tpl, '.vscode', 'defsettings.json'), '{}');
+  const tgz = path.join(scratch, 'template.tgz');
+  execFileSync('tar', ['-czf', tgz, '-C', path.dirname(tpl), path.basename(tpl)]);
+  const opts = { env: { FAKE_TEMPLATE: tgz } };
+  const r = await cli(['new', '--name', 'Smoke Plugin', '--author', 'Ada', '--variant', 'mcp-tool', '--build', 'vite'], opts);
+  assert.equal(r.code, 0, r.stderr);
+  const dir = path.join(scratch, 'smoke-plugin');
+  assert.match(r.stdout, /^\$ pnpm install --no-frozen-lockfile\n\$ pnpm run build\n/m);
+  assert.match(r.stdout, /^Created Smoke Plugin in .*smoke-plugin \(mcp-tool, vite, template pinned 90d0780\) in \d+\.\d s\.\nNext: cd smoke-plugin && npx decky-toolkit dev$/m);
+  const pkgJson = JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8'));
+  assert.deepEqual([pkgJson.name, pkgJson.author, pkgJson.scripts.build, pkgJson.dependencies['decky-toolkit']], ['smoke-plugin', 'Ada', 'vite build', '^0.9.0']);
+  assert.equal(JSON.parse(readFileSync(path.join(dir, 'plugin.json'), 'utf8')).flags.length, 0);
+  assert.ok(existsSync(path.join(dir, 'src', 'tools.ts')) && existsSync(path.join(dir, 'dist', 'index.js')) && !existsSync(path.join(dir, '.vscode')));
+  const again = await cli(['new', 'smoke-plugin'], opts);
+  assert.equal(again.code, 1);
+  assert.match(again.stderr, /smoke-plugin already exists and is not empty/);
+
+  setState({ installMeta: { name: 'Deployed Plugin', version: '0.0.1' }, filePuts: [], liveReloads: [] });
+  const installs = state().installs.length;
+  let stopped = false;
+  const d = await cli(['new', 'deployed-plugin', '--deploy'], {
+    ...opts, timeoutMs: 30000,
+    onStdout: (stdout, child) => {
+      if (!stopped && stdout.includes('Edit away')) {
+        stopped = true;
+        setTimeout(() => child.kill('SIGINT'), 200);
+      }
+    },
+  });
+  setState({ installMeta: { name: 'My Plugin', version: '1.2.3' } });
+  assert.equal(d.code, 0, d.stderr);
+  assert.match(d.stdout, /^Created Deployed Plugin in .*deployed-plugin \(frontend, rollup, template pinned 90d0780\)/m, 'the name comes from the folder');
+  const inst = state().installs.slice(installs);
+  assert.deepEqual(inst.map(i => [i.dir, i.restart]), [['deployed-plugin', 'loader']], 'one first install, after the watch build');
+  assert.match(d.stdout, /Watching .*deployed-plugin → 192\.168\.77\.20:deployed-plugin\. Edit away/);
+  return `created smoke-plugin (mcp-tool, vite); --deploy: ${inst.length} install, restart ${inst[0].restart}, then live sync`;
+});
+
 await check('forget', async () => {
   const r = await cli(['forget']);
   assert.equal(r.code, 0, r.stderr);
@@ -533,6 +582,8 @@ await check('npm pack contents', async () => {
   const [packed] = JSON.parse(execFileSync('npm', ['pack', '--dry-run', '--json'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
   const names = packed.files.map(f => f.path).sort();
   assert.deepEqual(names, ['LICENSE', 'README.md', 'dist/cli.js', 'dist/tools.d.ts', 'dist/tools.js', 'package.json']);
+  // TypeScript's "moduleResolution": "node" (the Decky template's) ignores exports and reads typesVersions instead.
+  assert.deepEqual(pkg.typesVersions, { '*': { tools: [pkg.exports['./tools'].types] } });
   return `${(statSync('dist/cli.js').size / 1024).toFixed(1)} KiB bundle, ${(packed.size / 1024).toFixed(1)} KiB packed`;
 });
 

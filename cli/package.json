@@ -21,6 +21,13 @@
     },
     "./package.json": "./package.json"
   },
+  "typesVersions": {
+    "*": {
+      "tools": [
+        "./dist/tools.d.ts"
+      ]
+    }
+  },
   "files": [
     "dist/",
     "README.md",
