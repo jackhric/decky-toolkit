@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.8.0](https://github.com/jackhric/decky-toolkit/compare/plugin-v0.7.0...plugin-v0.8.0) (2026-11-07)
+
+
+### Features
+
+* Decky Toolkit icon in Steam's top bar ([#125](https://github.com/jackhric/decky-toolkit/issues/125)) ([330cf0d](https://github.com/jackhric/decky-toolkit/commit/330cf0d17a9cad920f76ef22d39620c928207aa4))
+* inspect and switch Steam UI tweaks over MCP ([#124](https://github.com/jackhric/decky-toolkit/issues/124)) ([299b72c](https://github.com/jackhric/decky-toolkit/commit/299b72c220055ffd9415a07ca83f6399c1cafe67))
+* Steam-style settings page with an About page ([#123](https://github.com/jackhric/decky-toolkit/issues/123)) ([a2384c7](https://github.com/jackhric/decky-toolkit/commit/a2384c724273e553a63a819e508f96ca670d3956))
+* tell agents the device idles and to wake it before testing ([#122](https://github.com/jackhric/decky-toolkit/issues/122)) ([02cc208](https://github.com/jackhric/decky-toolkit/commit/02cc2085742dac1b05cd6fbcfb27347cd193322d))
+
+
+### Bug Fixes
+
+* put the top bar icon right after search ([#126](https://github.com/jackhric/decky-toolkit/issues/126)) ([d46f8a6](https://github.com/jackhric/decky-toolkit/commit/d46f8a66d6611308b08841918d781297792b1e34))
+
 ## [0.7.0](https://github.com/jackhric/decky-toolkit/compare/plugin-v0.6.0...plugin-v0.7.0) (2026-11-07)
 
 
