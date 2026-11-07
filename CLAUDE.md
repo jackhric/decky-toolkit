@@ -29,7 +29,9 @@ See README.md for setup and docs/reference.md for the tool list and architecture
   - `steam/`: `cdp.py` (Chrome DevTools client for Steam CEF on 127.0.0.1:8080), `ui.py` (Steam UI navigation and
     element queries), `console.py` (background Steam UI console capture), `apps.py` (Steam library/launch via the
     client JS), `perf.py` (the performance overlay level via `SteamClient.System.Perf`), `toast.py` (Decky toasts),
-    `plugin_tools.py` (the tools other plugins register from their frontend, synced over one SharedJSContext session).
+    `plugin_tools.py` (the tools other plugins register from their frontend, synced over one SharedJSContext session),
+    `tweaks.py` (the saved off list of our own Steam UI tweaks and calls into the frontend registry) and `react.py`
+    (page scripts for `ui_react`: webpack exports by source, fiber trees, `__deckyPatch` chains).
   - `media/`: `capture.py` (gamescope screen stream), `audio.py` (audio stream), `record.py` (recording to MKV).
   - `input/`: remote input (`ei.py` libei over ctypes, `uinput.py`, `keymap.py`, `service.py` owning state, the
     virtual pad registry and the last remote event), `activity.py` (reads every non-virtual evdev device without
@@ -40,7 +42,7 @@ See README.md for setup and docs/reference.md for the tool list and architecture
     (KeyValues parser).
   - `loader/sourcemap.py` maps `dist/*.js` positions in plugin stacks to `src/` through the installed `.map`.
   - `tools/`: only MCP tools: the registry and one module of tools per area (`input.py`, `controllers.py`, `ui.py`,
-    `cef.py`, `apps.py`, `games.py`, `record.py`, `perf.py`, ...) and `plugin_api.py` (plugin backend methods, calls, frontend call check).
+    `cef.py`, `apps.py`, `games.py`, `record.py`, `perf.py`, `react.py` for `ui_react`/`ui_tweak`, ...) and `plugin_api.py` (plugin backend methods, calls, frontend call check).
 - `packages/client/` — device client source (private workspace package `@decky-toolkit/client`, never built) shared by bundling (transport, API types, discovery, pairing,
   identity file, plugin staging; no `vscode`); the extension and the CLI import it as `@decky-toolkit/client/*`.
 - `cli/` — the `decky-toolkit` npm package: `pair`, `status`, `mcp` (hand-written stdio MCP server that answers
@@ -51,8 +53,10 @@ See README.md for setup and docs/reference.md for the tool list and architecture
   the built CLI as a child process against `scripts/fake-device.mjs` (installed through the client's hooks).
   The extension's "Write MCP config" writes `npx -y decky-toolkit mcp` into `.mcp.json`.
 - `src/steam/` — everything the frontend does past `@decky/ui` into Steam's internals (`internals.ts` is the only
-  place that reads Steam globals; `tweak.ts` applies and undoes changes; `settings.tsx` holds the settings-page tweaks;
-  `theme.ts` maps Steam's design tokens to names).
+  place that reads Steam globals; `tweak.ts` is the named registry that applies and undoes changes, published as
+  `window.__deckyToolkitSteam` for `ui_tweak`, with no imports so `tests/frontend/` (`pnpm test`, CI's plugin job)
+  runs it under plain Node; `react.ts` holds the React hooks; `settings.tsx` the settings-page tweaks; `theme.ts` maps
+  Steam's design tokens to names).
 - `src/index.tsx` — Quick Access panel (React, `@decky/ui`, `@decky/api`). Built by `pnpm run build` (Vite,
   `vite.config.ts`) into `dist/index.js`.
 - `scripts/test.sh` — Python tests under uv with the loader's Python major (CI runs it). Deploying this repo to
@@ -499,8 +503,9 @@ SharedJSContext via the `cef_evaluate` tool, or use `plugin_call` (`plugin: "Dec
 - Frontend code never reaches into Steam internals (globals, Steam CSS classes, MobX stores, undocumented props)
   outside `src/steam/`. There every change goes through `tweak()`/`useTweak()`: check the internal first (accessors in
   `internals.ts` return undefined on an unexpected shape), return an undo that restores exactly what was there, and
-  leave Steam untouched if anything is missing or throws. `restoreAll()` runs in `onDismount`. Failures log once as
-  `[Decky Toolkit] Steam tweak ...` (visible through `logs_read` source `steam_console`).
+  leave Steam untouched if anything is missing or throws. `restoreAll()` runs first in `onDismount` and never throws.
+  Each tweak has a stable kebab-case name; the ones that are off are saved (`ui_tweaks_off`, `ui_tweak`, `/ui/tweaks`).
+  Failures log once as `[Decky Toolkit] Steam tweak ...` (visible through `logs_read` source `steam_console`).
 - Frontend colours and type sizes come from `src/steam/theme.ts`: Steam's CSS tokens (`var(--color-accent-8, …)`) with
   fallbacks, since the Quick Access document lacks the colour tokens. No hard-coded colours elsewhere in `src/`.
 - Any tool or route that reads or writes a caller-supplied device path must call `guard.check_read` /

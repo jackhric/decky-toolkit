@@ -18,7 +18,7 @@ Tools are named `<area>_<action>`. Each table row is one area.
 | `plugin_` | `plugin_list`, `plugin_install` (zip from a device path or base64; restart the loader with `confirm: true`, reload the plugin, or neither), `plugin_reload` (`mode` `backend` (default, waits) or `frontend` (~10 ms); restores the plugin's panel, route, tab and focus), `plugin_methods` (frontend-callable backend methods), `plugin_call` (call one as the frontend does; result or Decky's Python traceback), `plugin_frontend_check` (`callable("x")` names with no backend method). All take `plugin`: the `plugin.json` name from `plugin_list`. |
 | `loader_` | `loader_restart` (scheduled 1 s out so the call returns; `confirm: true`) |
 | `toolkit_` | `toolkit_stacks` (Decky Toolkit's own threads and asyncio tasks, event loop lag and stalls) |
-| `ui_` | `ui_state` (route, menu, Quick Access tab, Decky panel, running game, focused element, open dialog, on-screen keyboard, someone at the device; input tools return it after every input), `ui_routes`, `ui_navigate` (a page, back, Quick Access, a Decky plugin panel, a game page), `ui_query` (elements by CSS selector or text, with coordinates for `input_mouse`), `ui_focus`, `ui_wait` (an element, its absence or a route, instead of sleeping), `ui_toast` |
+| `ui_` | `ui_state` (route, menu, Quick Access tab, Decky panel, running game, focused element, open dialog, on-screen keyboard, someone at the device; input tools return it after every input), `ui_routes`, `ui_navigate` (a page, back, Quick Access, a Decky plugin panel, a game page), `ui_query` (elements by CSS selector or text, with coordinates for `input_mouse`), `ui_focus`, `ui_wait` (an element, its absence or a route, instead of sleeping), `ui_toast`, `ui_react` (read-only: webpack exports by source text, the fiber tree around an element, `__deckyPatch` chains), `ui_tweak` (Decky Toolkit's own Steam UI changes: list, turn off/on and save, or try a patch that reverts itself) |
 | `cef_` | `cef_targets`, `cef_evaluate` (JS in a Steam tab, default `SharedJSContext`), `cef_screenshot` (PNG of one tab) |
 | `screen_` | `screen_capture` (JPEG of the whole gamescope display, games included), `screen_record` / `screen_record_stop` (up to 120 s of screen and sound to MKV) |
 | `recording_` | `recording_list`, `recording_delete` (`confirm: true`); a client fetches the file with `GET /api/v1/fs/read` |
@@ -174,6 +174,15 @@ implicit pad that disappears after 60 s idle. Clients get every change as the `c
 plugins registered), or `action` `back`, `quick_access` (with `tab`, e.g. `decky`), `main_menu`,
 `close_menus`, `plugin` (opens that Decky plugin's Quick Access panel) or `app` (a game page).
 `ui_routes` lists the verified pages. Clients use `GET /api/v1/ui/routes` and `POST /api/v1/ui/navigate`.
+
+## Steam UI tweaks
+
+Every change the frontend makes to Steam's own UI lives in `src/steam/` and goes through `tweak()`: it checks the
+internal first, always returns an undo, and leaves Steam alone when something is missing or throws. Each tweak has a
+name and a status (`active`, `skipped`, `failed`, `off`, `idle`). `ui_tweak` lists them, turns one (or `all`) off or
+back on, and saves the choice in `ui_tweaks_off`, so a tweak that is off stays off across reloads; clients use
+`GET/PUT /api/v1/ui/tweaks`. `ui_tweak` `try` runs a patch for up to 300 s and then undoes it, and `ui_react`
+shows what to patch and whether a patch is still in place.
 
 ## Client API
 

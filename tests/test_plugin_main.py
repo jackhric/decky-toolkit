@@ -104,7 +104,8 @@ def test_event_sources_and_what_services_report(plugin):
         await plugin._main()
         try:
             hub, s = plugin.events, plugin.services
-            assert set(hub.sources) == {"stream_settings", "input_settings", "plugins", "controllers", "pairing", "tools"}
+            assert set(hub.sources) == {"stream_settings", "input_settings", "plugins", "controllers", "pairing", "tools",
+                                       "ui_tweaks"}
             hello = await hub.snapshot()
             assert hello["stream_settings"]["fps"] == 30 and hello["input_settings"]["enabled"] is False
             assert hello["pairing"] == {"pending": 0, "paired": 0} and hello["plugins"] == {"plugins": []}
@@ -132,6 +133,15 @@ def test_event_sources_and_what_services_report(plugin):
             assert ("decky_toolkit_paired", "10.0.0.2", "VS Code") in plugin.emitted
             assert any(e[0] == "decky_toolkit_paired_clients" for e in plugin.emitted)
             assert (await hub.snapshot())["pairing"] == {"pending": 0, "paired": 1}
+
+            assert (await plugin.get_status())["ui_tweaks_off"] == []
+            status = await plugin.set_ui_tweak("top-bar-icon", False)
+            await asyncio.sleep(0.01)
+            assert status["ui_tweaks_off"] == ["top-bar-icon"]
+            assert ("decky_toolkit_ui_tweaks", ["top-bar-icon"]) in plugin.emitted
+            assert (await hub.snapshot())["ui_tweaks"] == {"off": ["top-bar-icon"]}
+            saved = json.loads((Path(plugin.settings_dir) / "settings.json").read_text())
+            assert saved["ui_tweaks_off"] == ["top-bar-icon"]
         finally:
             await plugin._unload()
     asyncio.run(run())

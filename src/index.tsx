@@ -21,7 +21,7 @@ import { FaCog, FaPlug, FaUnlink } from "react-icons/fa";
 import { AboutIcon, PairedDevicesIcon, RemoteInputIcon, ServerIcon } from "./icons";
 import { Mark } from "./Mark";
 import { SteamingMark } from "./SteamingMark";
-import { restoreAll, SettingsSection, settingsPages, theme, useTransparentHeader } from "./steam";
+import { installTweakApi, restoreAll, setOff, SettingsSection, settingsPages, theme, useTransparentHeader } from "./steam";
 
 type Status = {
   enabled: boolean;
@@ -36,6 +36,7 @@ type Status = {
   connected?: boolean;
   clients?: ConnectedClient[];
   version?: string;
+  ui_tweaks_off?: string[];
 };
 
 type ConnectedClient = {
@@ -538,6 +539,9 @@ function SettingsPage() {
 }
 
 export default definePlugin(() => {
+  installTweakApi();
+  const tweaksOff = addEventListener<[off: string[]]>("decky_toolkit_ui_tweaks", setOff);
+  getStatus().then((s) => setOff(s.ui_tweaks_off ?? []), () => {});
   const paired = addEventListener<[remote: string, clientName?: string]>("decky_toolkit_paired", (remote, clientName) => {
     toast(`${clientName ?? "Client"} paired from ${remote}`);
   });
@@ -571,11 +575,22 @@ export default definePlugin(() => {
     content: <Panel />,
     icon: <FaPlug />,
     onDismount() {
-      removeEventListener("decky_toolkit_paired", paired);
-      removeEventListener("decky_toolkit_pair_request", pairRequest);
-      removeEventListener("decky_toolkit_input_session", inputSession);
-      routerHook.removeRoute(SETTINGS_ROUTE);
+      // Decky calls this without a try/catch: Steam is restored first and nothing after it may throw.
       restoreAll();
+      const steps = [
+        () => removeEventListener("decky_toolkit_paired", paired),
+        () => removeEventListener("decky_toolkit_pair_request", pairRequest),
+        () => removeEventListener("decky_toolkit_input_session", inputSession),
+        () => removeEventListener("decky_toolkit_ui_tweaks", tweaksOff),
+        () => routerHook.removeRoute(SETTINGS_ROUTE),
+      ];
+      for (const step of steps) {
+        try {
+          step();
+        } catch (e) {
+          console.warn("[Decky Toolkit] unload step failed:", e);
+        }
+      }
     },
   };
 });
