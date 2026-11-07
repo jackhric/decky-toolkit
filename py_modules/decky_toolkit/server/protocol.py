@@ -33,8 +33,11 @@ INSTRUCTIONS = (
     "Decky Toolkit controls a SteamOS device running Decky Loader; tools are named <area>_<action>. Call ui_state "
     "before navigating, sending input, launching anything or judging a screenshot: screenshots show pixels, not "
     "state, and someone_at_device means leave the UI alone. Move through the Steam UI with input_key (arrows, "
-    "enter, esc) and check the ui field every input tool returns; ui_navigate opens pages and menus. logs_read and "
-    "logs_wait cover every log, device_run runs shell commands, plugin_reload reloads a plugin in place."
+    "enter, esc) and check the ui field every input tool returns; ui_navigate opens pages and menus. The device "
+    "goes idle when nobody uses it: the screen turns dark or shows a full-screen game picture (not a running game) "
+    "and the stream may stop sending frames. Always wake it before testing or judging the screen, with input_key keys "
+    "'down' while nobody is at the device, then check ui_state and the screen again. logs_read and logs_wait cover "
+    "every log, device_run runs shell commands, plugin_reload reloads a plugin in place."
 )
 
 PARSE_ERROR = -32700
