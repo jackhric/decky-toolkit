@@ -1,9 +1,9 @@
 import assert from 'assert/strict';
 import { execFileSync } from 'child_process';
-import { mkdirSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import * as path from 'path';
 import {
-  actionsProvider, actionsTree, calls, check, configEmitter, device, ext, fetched, files, lastMessage, makePlugin,
+  actionsProvider, actionsTree, calls, check, configEmitter, device, ext, fetched, files, globalState, lastMessage, makePlugin,
   openWorkspace, output, plugins, put, RelativePattern, root, run, scratch, setMtime, setPlugins, settings, settle,
   status, statusButton, ui, Uri,
 } from './harness.mjs';
@@ -233,4 +233,78 @@ await check('decky-toolkit.pluginDirName names a first install; an installed plu
   assert.equal(statusButton().visible, false, 'button hidden without a plugin');
   assert.equal((await actionsProvider().getChildren())[1].description, 'no plugin.json in workspace');
   return 'tooltip names other-dir; installed → my-plugin, first install → other-dir; closing the folder hides the button';
+});
+
+await check('New plugin: six steps, created and built, opened; Open and Deploy deploys it in the window that opens it and turns on live sync', async () => {
+  const tpl = path.join(scratch, 'template', 'decky-plugin-template-main');
+  makePlugin(tpl, { name: 'Example Plugin', flags: ['debug', '_root'] });
+  put(tpl, '.vscode/defsettings.json', '{"deckpass": "ssap"}');
+  put(tpl, 'LICENSE', 'Copyright (c) 2024, Hypothetical Plugin Developer\n');
+  const tgz = path.join(scratch, 'template.tgz');
+  execFileSync('tar', ['-czf', tgz, '-C', path.dirname(tpl), path.basename(tpl)]);
+  const hooks = { ...ext.scaffoldHooks };
+  const commands = [];
+  Object.assign(ext.scaffoldHooks, {
+    download: async () => readFileSync(tgz),
+    latestTools: async () => '0.9.0',
+    pnpm: async () => 'pnpm',
+    run: async (cmd, cwd, log) => {
+      commands.push(cmd);
+      log(`$ ${cmd}`);
+      if (cmd.endsWith('run build')) put(cwd, 'dist/index.js', 'export default 1;\n');
+    },
+  });
+  const parent = path.join(scratch, 'created');
+  mkdirSync(parent);
+  const prompts = [];
+  const answers = ['Smoke New', 'Ada'];
+  ui.inputBox = o => { prompts.push(o); return answers.shift(); };
+  const picks = { 3: 'backend', 4: 'vite', 5: 'pinned' };
+  ui.quickPick = (items, o) => { prompts.push(o); return items.find(i => i.value === picks[o.title.match(/\((\d)\/6\)/)[1]]); };
+  ui.openDialog = o => { prompts.push(o); return [Uri.file(parent)]; };
+  let question;
+  ui.info = (m, buttons) => {
+    if (!buttons.includes('Open')) return undefined;
+    question = { m, buttons };
+    return 'Open and Deploy';
+  };
+  const meta = device.installMeta;
+  device.installMeta = { name: 'Smoke New', version: '0.0.1' };
+  try {
+    await run('decky-toolkit.newPlugin');
+    const root = path.join(parent, 'smoke-new');
+    assert.deepEqual(prompts.map(p => p.title.replace(/:.*/, '')), [1, 2, 3, 4, 5, 6].map(n => `New Decky Plugin (${n}/6)`));
+    assert.match(prompts[0].validateInput('a/b'), /^Leave out \//);
+    assert.equal(prompts[0].validateInput('Fine'), undefined);
+    assert.equal(prompts[0].validateInput('Tender ').severity, 2, 'an installed name is a warning, not an error');
+    assert.match(prompts[0].validateInput('Tender').message, /already has a plugin named Tender/);
+    assert.deepEqual(commands, ['pnpm install --no-frozen-lockfile', 'pnpm run build']);
+    assert.deepEqual(calls.progress.at(-1).messages, ['downloading the template…', 'writing files…', 'installing dependencies with pnpm…', 'building…']);
+    const manifest = JSON.parse(readFileSync(path.join(root, 'plugin.json'), 'utf8'));
+    assert.deepEqual([manifest.name, manifest.author, manifest.flags], ['Smoke New', 'Ada', []]);
+    assert.ok(existsSync(path.join(root, 'vite.config.ts')) && existsSync(path.join(root, 'main.py')) && !existsSync(path.join(root, '.vscode')));
+    assert.match(question.m, /^Created Smoke New in .*smoke-new\.$/);
+    assert.deepEqual(question.buttons, ['Open and Deploy', 'Open']);
+    const open = calls.executed.findLast(([id]) => id === 'vscode.openFolder');
+    assert.deepEqual([open[1].fsPath, open[2]], [root, { forceNewWindow: false }], 'no folder open: this window');
+    assert.equal(globalState.get(ext.PENDING_KEY).root, root);
+
+    // The window that opens the folder: the harness does not restart, so the folder change stands in for activation.
+    const installs = device.installs.length;
+    calls.messages.length = 0;
+    await openWorkspace(root);
+    await settle(2500);
+    assert.equal(globalState.get(ext.PENDING_KEY), undefined, 'picked up once');
+    assert.deepEqual([device.installs.length, device.installs.at(-1).dir, device.installs.at(-1).restart], [installs + 1, 'smoke-new', 'loader'], 'a first install');
+    assert.equal(settings['deploy.onChange'], true, 'auto-deploy is on');
+    assert.match(output(), /Live sync on for Smoke New/);
+    assert.ok(!calls.messages.some(m => /Decky plugin detected/.test(m.m)), 'no second "Deploy?" prompt');
+    await run('decky-toolkit.toggleAutoDeploy');
+    return `6 steps → ${commands.join(', ')}; opened ${path.basename(root)}, then deployed (restart=loader) with live sync on`;
+  } finally {
+    Object.assign(ext.scaffoldHooks, hooks);
+    device.installMeta = meta;
+    setPlugins(plugins.filter(x => x.name !== 'Smoke New'));
+    await openWorkspace();
+  }
 });
