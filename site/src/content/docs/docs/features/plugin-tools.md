@@ -2,7 +2,7 @@
 title: Give agents your plugin's own tools
 description: Register MCP tools from your Decky plugin's frontend so coding agents can call into your plugin directly.
 sidebar:
-  order: 6
+  order: 5
 ---
 
 Your plugin can offer its own tools to the agents connected to the device: "clear the cache", "show the state of the
@@ -60,7 +60,7 @@ default in the schema (`z.number().default(1)`) is applied before `execute`.
 You can also pass a plain JSON Schema object as `inputSchema`. Then the device only checks for unknown and missing
 arguments, and `input` is typed loosely.
 
-`signal` aborts when the agent cancels the call or after two minutes. Pass `{ signal }` as the second argument to
+`signal` aborts when the agent cancels the call or the call times out. Pass `{ signal }` as the second argument to
 `registerTool` to remove a tool early, for example while a feature is turned off:
 
 ```ts
@@ -89,4 +89,4 @@ TypeScript checks a tool while you write it:
 - Without Decky Toolkit on the device, `registerTool` does nothing harmful: the tool is kept in the page and never
   called.
 
-The helper has no dependencies and adds about 3 KB to your bundle.
+The helper has no dependencies.

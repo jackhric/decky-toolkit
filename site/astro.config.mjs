@@ -29,7 +29,8 @@ export default defineConfig({
       ],
       sidebar: [
         { label: 'Start here', items: ['docs', 'docs/getting-started', 'docs/faq'] },
-        { label: 'Features', items: [{ autogenerate: { directory: 'docs/features' } }] },
+        { label: 'Guides', items: [{ autogenerate: { directory: 'docs/features' } }] },
+        { label: 'Reference', items: ['docs/reference/routes'] },
       ],
     }),
   ],
