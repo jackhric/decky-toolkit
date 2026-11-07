@@ -280,7 +280,7 @@ await check('dev: deploy, then push changed files and reload in place until Ctrl
   assert.equal(state().installs.length, installs + 1, 'one full deploy at the start');
   assert.deepEqual(state().filePuts.map(f => f.path), ['dist/index.js']);
   assert.match(state().filePuts[0].text, /changed/);
-  assert.deepEqual(state().liveReloads, [{ dir: 'my-plugin', mode: 'frontend' }]);
+  assert.deepEqual(state().liveReloads, [{ plugin: 'My Plugin', mode: 'frontend' }]);
   assert.match(r.stdout, /frontend reload of My Plugin: dist\/index\.js, push \d+ ms, reload \d+ ms .*restored panel/);
   assert.match(r.stdout, /Error: boom\n {4}at src\/index\.tsx:1:1/, 'bundle positions mapped to the source');
   return r.stdout.split('\n').find(l => l.startsWith('frontend reload'));

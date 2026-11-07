@@ -233,10 +233,10 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   });
   command('decky-toolkit.reloadPlugin', async arg => {
     const client = await c.client();
-    const dir = client && await resolveDir(client, workspacePlugins, arg, 'Plugin to reload');
-    if (!client || !dir) return;
-    await client.reloadPlugin(dir);
-    void vscode.window.showInformationMessage(`Decky Toolkit: reloaded ${dir}.`);
+    const name = client && await resolveName(client, workspacePlugins, arg, 'Plugin to reload');
+    if (!client || !name) return;
+    await client.reloadPlugin(name);
+    void vscode.window.showInformationMessage(`Decky Toolkit: reloaded ${name}.`);
     refreshPlugins();
   });
   command('decky-toolkit.loaderLogs', async () => {
@@ -294,6 +294,19 @@ async function resolveDir(client: DeckyClient, ws: PluginWorkspace, arg: unknown
   if (typeof arg === 'string') return arg;
   const dir = (arg as { info?: { dir?: unknown } } | undefined)?.info?.dir;
   return typeof dir === 'string' ? dir : pickDeviceDir(client, ws, placeHolder);
+}
+
+/** The plugin.json name, which is how Decky (and the reload route) knows a plugin. */
+async function resolveName(client: DeckyClient, ws: PluginWorkspace, arg: unknown, placeHolder: string): Promise<string | undefined> {
+  if (arg === WORKSPACE_PLUGIN) return (await ws.pick(placeHolder))?.name;
+  if (typeof arg === 'string') return arg;
+  const name = (arg as { info?: { name?: unknown } } | undefined)?.info?.name;
+  if (typeof name === 'string') return name;
+  const local = (await ws.ready()).map(p => p.name);
+  const remote = await client.listPlugins().then(ps => ps.map(p => p.name).filter((n): n is string => !!n), () => []);
+  const names = [...new Set([...local, ...remote])];
+  if (names.length === 0) return vscode.window.showInputBox({ prompt: 'Plugin name (plugin.json "name")' });
+  return (await vscode.window.showQuickPick(names.map(n => ({ label: n, description: local.includes(n) ? 'workspace' : undefined })), { placeHolder }))?.label;
 }
 
 async function snapshot(c: Connection): Promise<void> {

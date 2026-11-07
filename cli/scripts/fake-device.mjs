@@ -98,12 +98,12 @@ async function deviceFetch(url, init = {}) {
     s.filePuts = [...(s.filePuts ?? []), { dir, path: rel, text: Buffer.from(init.body).toString() }];
     return done(json({ dir, path: rel, bytes: init.body.length }));
   }
-  const reload = /^\/plugins\/([^/]+)\/reload$/.exec(route);
-  if (reload && init.method === 'POST') {
-    const dir = decodeURIComponent(reload[1]), mode = u.searchParams.get('mode') ?? 'backend';
-    s.liveReloads = [...(s.liveReloads ?? []), { dir, mode }];
+  if (route === '/plugins/reload' && init.method === 'POST') {
+    const { plugin: name, mode = 'backend' } = JSON.parse(Buffer.from(init.body).toString());
+    const p = s.plugins.find(x => x.name === name);
+    const dir = p?.dir ?? name;
+    s.liveReloads = [...(s.liveReloads ?? []), { plugin: name, mode }];
     if (mode === 'backend') {
-      const p = s.plugins.find(x => x.dir === dir);
       s.reloads.push(dir);
       s.journal.push(`[loader][INFO]: Loaded ${p?.name ?? dir} (v${p?.version}) reload`);
     }

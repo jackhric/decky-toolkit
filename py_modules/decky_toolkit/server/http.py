@@ -147,7 +147,7 @@ class Api:
             web.post("/cef/evaluate", self.handle_cef_evaluate),
             web.get("/plugins", self.handle_plugins),
             web.post("/plugins/install", self.handle_plugin_install),
-            web.post("/plugins/{dir}/reload", self.handle_plugin_reload),
+            web.post("/plugins/reload", self.handle_plugin_reload),
             web.put("/plugins/{dir}/files", self.handle_plugin_file_put),
             web.post("/loader/restart", self.handle_loader_restart),
             web.get("/logs/tail", self.handle_logs_tail),
@@ -443,8 +443,8 @@ class Api:
         return web.json_response(await list_plugins())
 
     async def handle_plugin_reload(self, request: web.Request) -> web.Response:
-        mode = request.query.get("mode", "backend")
-        return web.json_response(await live.reload(request.match_info["dir"], mode))
+        body = await _body(request, {"plugin", "mode"}, ("plugin",))
+        return web.json_response(await live.reload(body.get("plugin"), body.get("mode", "backend")))
 
     async def handle_loader_restart(self, _request: web.Request) -> web.Response:
         await schedule_loader_restart()

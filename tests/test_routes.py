@@ -132,7 +132,7 @@ def test_root_and_health_are_public():
 OLD_TOP_LEVEL = [("POST", "/pair/request"), ("GET", "/pair/request/x"), ("GET", "/stream.mjpeg"), ("GET", "/frame.jpg"),
                  ("GET", "/stream/stats"), ("GET", "/stream/settings"), ("GET", "/audio"), ("GET", "/input"),
                  ("GET", "/input/settings"), ("GET", "/controllers"), ("GET", "/controllers/events"), ("GET", "/ui/routes"),
-                 ("GET", "/plugins"), ("POST", "/plugins/install"), ("POST", "/plugins/x/reload"), ("GET", "/logs/tail"),
+                 ("GET", "/plugins"), ("POST", "/plugins/install"), ("POST", "/plugins/reload"), ("GET", "/logs/tail"),
                  ("GET", "/logs/stream"), ("GET", "/apps"), ("GET", "/fs?path=/tmp"), ("GET", "/fs/read?path=/tmp/x"),
                  ("GET", "/pair"), ("GET", "/viewer")]
 DROPPED = [("GET", "/api/v1/pair/requests"), ("GET", "/api/v1/audio/stats"), ("GET", "/api/v1/cef/console"),
@@ -254,9 +254,13 @@ def test_plugins_install_list_and_bearer_only(decky_home):
         bad.add_field("file", b"not a zip", filename="x.zip")
         async with s.post(f"{base}/api/v1/plugins/install?restart=none", data=bad, headers=H) as r:
             assert r.status == 400 and "zip" in (await r.json())["error"]
-        async with s.post(f"{base}/api/v1/plugins/missing/reload", headers=H) as r:
+        async with s.post(f"{base}/api/v1/plugins/reload", json={"plugin": "missing"}, headers=H) as r:
             assert r.status == 404
-        async with s.post(f"{base}/api/v1/plugins/thing/reload?mode=bogus", headers=H) as r:
+        async with s.post(f"{base}/api/v1/plugins/reload", json={"plugin": "thing"}, headers=H) as r:
+            assert r.status == 404 and "named 'thing'" in (await r.json())["error"]
+        async with s.post(f"{base}/api/v1/plugins/reload", json={}, headers=H) as r:
+            assert r.status == 400
+        async with s.post(f"{base}/api/v1/plugins/reload", json={"plugin": "Thing", "mode": "bogus"}, headers=H) as r:
             assert r.status == 400 and "mode" in (await r.json())["error"]
     asyncio.run(with_server(run))
 

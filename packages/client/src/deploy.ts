@@ -206,7 +206,7 @@ export interface ReloadConfirmation {
   detail: string;
   /** How many `Loaded <name>` lines appeared (a debug-flagged plugin is usually reloaded twice). */
   loads: number;
-  /** The watcher had not reloaded the plugin in time, so `POST /plugins/{dir}/reload` was sent. */
+  /** The watcher had not reloaded the plugin in time, so `POST /plugins/reload` was sent. */
   nudged?: boolean;
 }
 
@@ -263,7 +263,7 @@ export async function confirmReload(
       nudged = true;
       // Deploying Decky Toolkit itself: its server is down while the watcher reloads it, so the log polls above
       // saw nothing and this call cannot connect. That is the reload in progress, not a failed deploy.
-      await client.reloadPlugin(p.dir).catch(() => undefined);
+      await client.reloadPlugin(p.name).catch(() => undefined);
     }
     await sleep(250, o.signal);
   }

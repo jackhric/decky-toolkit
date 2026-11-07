@@ -33,7 +33,6 @@ class Pair:
     status: int  # what the route answers; 200 means both succeed
     via: tuple[Any, str] | None = None  # the domain function both must call
     id: str = field(default="")
-    same_message: bool = True
 
 
 @pytest.fixture
@@ -100,11 +99,10 @@ def pairs(d) -> list[Pair]:
              (ScreenCapturer, "update_settings"), "stream-bad-audio"),
         Pair(("PUT", "/input/settings", {"enabled": "yes"}), ("input_settings", {"enabled": "yes"}), 400, None,
              "input-bad-enabled"),
-        Pair(("POST", "/plugins/demo/reload?mode=sideways", None), ("plugin_reload", {"plugin": "demo", "mode": "sideways"}),
-             400, (live, "reload"), "reload-mode"),
-        # The route takes a directory, the tool a directory or plugin.json name, so the messages differ.
-        Pair(("POST", "/plugins/nope/reload", None), ("plugin_reload", {"plugin": "nope"}), 404, None, "reload-missing",
-             same_message=False),
+        Pair(("POST", "/plugins/reload", {"plugin": "Demo", "mode": "sideways"}),
+             ("plugin_reload", {"plugin": "Demo", "mode": "sideways"}), 400, (live, "reload"), "reload-mode"),
+        Pair(("POST", "/plugins/reload", {"plugin": "nope"}), ("plugin_reload", {"plugin": "nope"}), 404, None,
+             "reload-missing"),
         Pair(("POST", "/ui/navigate", {"action": "fly"}), ("ui_navigate", {"action": "fly"}), 400, None, "navigate-action"),
         Pair(("POST", "/ui/navigate", {"path": "/nowhere"}), ("ui_navigate", {"path": "/nowhere"}), 400, None,
              "navigate-route"),
@@ -163,7 +161,7 @@ def test_routes_and_tools_share_functions_and_rules(device, monkeypatch):
             else:
                 assert res["isError"], (case.id, res)
                 message = tool_message(res)
-                assert message == route_body["error"] or not case.same_message, (case.id, message, route_body)
+                assert message == route_body["error"], (case.id, message, route_body)
             if case.via:
                 assert len(spies[case.via]) == 2, (case.id, "both sides must call", case.via[1])
     asyncio.run(with_server(run, services=s))
