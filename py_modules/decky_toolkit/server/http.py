@@ -485,7 +485,8 @@ class Api:
         if source not in logs.SOURCES:
             raise ValueError(f"source must be one of {', '.join(logs.SOURCES)}")
         if source == "plugin":
-            logs.plugin_log_dir(plugin or "")
+            # plugin is the plugin.json name; Decky names the log dir after the install dir.
+            plugin = plugins.plugin_dir(plugin or "")
         try:
             n = int(request.query.get("tail", logs.DEFAULT_TAIL))
         except ValueError:

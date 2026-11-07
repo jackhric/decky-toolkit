@@ -301,8 +301,8 @@ approve a request or forget a client, and `plugin_call` refuses `approve_pair_re
 
 | Route | Auth | Status | Notes |
 | --- | --- | --- | --- |
-| `GET /api/v1/logs/stream` | client cert | live | `text/event-stream`. Query: `source=loader` (journal, default) \| `plugin`, `plugin=<dir>` for plugin logs (giving `plugin` alone implies `source=plugin`), `tail=<n>` initial lines (default 100, max 5000). Events: `data: <one log line>`; a comment `: keepalive` every 15 s. Plugin logs follow the newest file in `~/homebrew/logs/<dir>/` and switch when Decky starts a new one. |
-| `GET /api/v1/logs/tail` | client cert | live | Same filters, returns `{lines: [...]}` once. `404` if the plugin has no log dir. |
+| `GET /api/v1/logs/stream` | client cert | live | `text/event-stream`. Query: `source=loader` (journal, default) \| `plugin`, `plugin=<plugin.json name>` for plugin logs (giving `plugin` alone implies `source=plugin`), `tail=<n>` initial lines (default 100, max 5000). Events: `data: <one log line>`; a comment `: keepalive` every 15 s. Plugin logs follow the newest file in `~/homebrew/logs/<dir>/` and switch when Decky starts a new one. |
+| `GET /api/v1/logs/tail` | client cert | live | Same filters, returns `{lines: [...]}` once. `404` if no installed plugin has that name or it has no log dir. |
 
 ## Console
 
@@ -361,7 +361,7 @@ MCP tools only.
 | Tool | Notes |
 | --- | --- |
 | `plugin_methods(plugin)` | Parses (does not import) the plugin's `main.py` with `ast`: public `async def` methods of the top-level `class Plugin`. `{dir, file, methods: [{name, args: [{name, annotation?, default?}], doc, line}]}`; `*args`/`**kw` appear as `*name`/`**name`, `doc` is the first docstring line. |
-| `plugin_call(plugin, method, args=[], timeout=30)` | `plugin` is the directory or `plugin.json` name, as for every `plugin_*` tool. Keys named `token` are removed from `result` at any depth. Runs `window.DeckyBackend.call('loader/call_plugin_method', plugin, method, ...args)` in SharedJSContext, i.e. exactly what the plugin's frontend `callable()` does, over the frontend's existing loader connection. `{ok: true, result}`, or `{ok: false, error, traceback}`: Decky rejects with a `PyError` whose message is empty and whose `pythonTraceback` ends in the exception line (e.g. `Exception: port must be 1024-65535`); an unknown method also fails this way. Methods starting with `_` (lifecycle hooks) are refused before anything is sent. |
+| `plugin_call(plugin, method, args=[], timeout=30)` | `plugin` is the `plugin.json` name, as for every tool that takes a plugin. Keys named `token` are removed from `result` at any depth. Runs `window.DeckyBackend.call('loader/call_plugin_method', plugin, method, ...args)` in SharedJSContext, i.e. exactly what the plugin's frontend `callable()` does, over the frontend's existing loader connection. `{ok: true, result}`, or `{ok: false, error, traceback}`: Decky rejects with a `PyError` whose message is empty and whose `pythonTraceback` ends in the exception line (e.g. `Exception: port must be 1024-65535`); an unknown method also fails this way. Methods starting with `_` (lifecycle hooks) are refused before anything is sent. |
 | `plugin_frontend_check(plugin)` | Scans the plugin's `src/**/*.ts(x)` when sources are installed, else `dist/index.js`, for `callable("x")` / `call("x", ...)` (also `callable$1` and TS generics), and compares with `plugin_methods`. `{source: "src"\|"dist", files_scanned, frontend_calls: {name: ["file:line"]}, backend_methods, missing_backend, unused_backend}`. `missing_backend` entries fail at runtime. |
 
 ## Security
@@ -401,7 +401,7 @@ MCP tools only.
 
 Tools are named `<area>_<action>`; [reference.md](reference.md#mcp-tools) lists them by area. Arguments are checked
 against each tool's schema before the call: an unknown or missing argument is refused with the full argument list.
-Conventions: a plugin is `plugin` (its directory or its `plugin.json` name), an app `appid`; `timeout` and `wait` are
+Conventions: a plugin is `plugin` (its `plugin.json` name, from `plugin_list`), an app `appid`; `timeout` and `wait` are
 seconds and other durations end in `_ms`; `grep` is a case-insensitive substring and `match` a case-insensitive regex;
 `lines` counts log lines and `limit` results. A settings tool reads when called without arguments and changes what it
 is given (`stream_settings`, `input_settings`, `perf_overlay`).
