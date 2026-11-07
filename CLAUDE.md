@@ -379,6 +379,11 @@ See README.md for setup and docs/reference.md for the tool list and architecture
   automatically; that is accepted, it is added by address.
 
 ## Keyboard navigation and dialogs (verified 2026-11-06, Steam client 1792618285)
+- Idle (seen 2026-11-07): after a while unused the library home shows a full-screen game picture (Forza Horizon 4,
+  Fallout: New Vegas) with the persona "Away", or the screen goes dark. Dialogs opened meanwhile exist in the DOM
+  (`ui_state` lists them) but do not show on screen. One `input_key` `keys: "down"` brought the normal home menu back; right
+  after waking, the stream sent no frames and `screen_capture` failed with "gamescope did not repaint" until the next
+  key press.
 - libei keys drive the Steam UI without a controller: arrows move gamepad focus (the first press into an unfocused Quick
   Access lands on its tab column), Enter selects and edits a text field, Esc goes back or closes a dialog/main menu,
   Shift+Tab opens the main menu. In Quick Access Esc only returns to the tab column; close it with `ui_navigate`.
@@ -477,7 +482,9 @@ SharedJSContext via the `cef_evaluate` tool, or use `plugin_call` (`plugin: "Dec
 - Agents on the device: use `device_run` (root only when needed), `logs_read` / `logs_wait`
   and `ui_state` instead of ssh, sleeps and screenshots. Call `ui_state` before navigating, injecting input,
   launching anything or judging a screenshot (the library home background can look like a running game), and leave
-  the UI alone while `someone_at_device` is true. Agent guidance lives in one place, `server/protocol.py`
+  the UI alone while `someone_at_device` is true. The device idles when unused (dark screen, or a full-screen game
+  picture with the persona shown "Away", and the stream may stop sending frames): always wake it with
+  `input_key` `keys: "down"` before testing or judging the screen, especially during tests. Agent guidance lives in one place, `server/protocol.py`
   `INSTRUCTIONS` (sent with `initialize` on `/mcp`; the CLI's stdio server asks the device for them and appends
   them to its own); keep it to a few sentences and put the rest in tool
   descriptions and results.
