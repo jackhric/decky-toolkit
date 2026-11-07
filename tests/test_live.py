@@ -61,7 +61,12 @@ def test_write_file_needs_an_installed_plugin(plugin):
 
 def test_reload_rejects_unknown_mode(plugin):
     with pytest.raises(ValueError):
-        asyncio.run(live.reload("demo", "everything"))
+        asyncio.run(live.reload("Demo", "everything"))
+
+
+def test_reload_takes_the_plugin_json_name_not_the_directory(plugin):
+    with pytest.raises(FileNotFoundError, match="no installed plugin is named 'demo'"):
+        asyncio.run(live.reload("demo", "frontend"))
 
 
 def test_reload_builds_its_scripts_and_restores_the_right_tab(plugin, monkeypatch):
@@ -76,7 +81,7 @@ def test_reload_builds_its_scripts_and_restores_the_right_tab(plugin, monkeypatc
         return ["tab Paired devices"]
 
     monkeypatch.setattr(live.cdp, "evaluate_in", evaluate_in)
-    result = asyncio.run(live.reload("demo", "frontend"))
+    result = asyncio.run(live.reload("Demo", "frontend"))
     assert result == {"dir": "demo", "name": "Demo", "mode": "frontend", "load_ms": 9, "reloaded": True,
                       "errors": [], "restored": ["panel", "tab Paired devices"], "routes": []}
     reload_expr = next(e for t, e in calls if t is None)
@@ -95,7 +100,7 @@ def test_reload_leaves_focus_alone_outside_the_plugin(plugin, monkeypatch):
         return {"load_ms": 9, "reloaded": True, "errors": [], "restored": [], "routes": [], "menu": 0}
 
     monkeypatch.setattr(live.cdp, "evaluate_in", evaluate_in)
-    assert asyncio.run(live.reload("demo", "frontend"))["restored"] == []
+    assert asyncio.run(live.reload("Demo", "frontend"))["restored"] == []
     assert titles.count(None) == 1 and len(titles) == 3
 
 
@@ -111,7 +116,7 @@ def test_routes(plugin):
             assert r.status == 404
         async with s.put(f"{base}/api/v1/plugins/demo/files?path=dist/index.js", data=b"x") as r:
             assert r.status == 401
-        async with s.post(f"{base}/api/v1/plugins/demo/reload?mode=bogus", headers=H) as r:
+        async with s.post(f"{base}/api/v1/plugins/reload", json={"plugin": "Demo", "mode": "bogus"}, headers=H) as r:
             assert r.status == 400
 
     asyncio.run(with_server(run))

@@ -5,7 +5,7 @@ import os
 from typing import Any
 
 from ..loader import live
-from ..loader.plugins import RESTART_MODES, install, resolve_plugin
+from ..loader.plugins import RESTART_MODES, install
 from ..server.events import EventHub
 from . import ToolRegistry
 from .system import require_confirm
@@ -55,9 +55,9 @@ def register(reg: ToolRegistry, events: EventHub) -> None:
         "backend keeps running). Reopens the plugin's panel, its route, settings tab and focus if the user was there "
         "(never over a running game) and returns errors the plugin logged while loading. Reloading Decky Toolkit's "
         "own backend only schedules it ('scheduled': the connection drops for a few seconds).",
-        {"properties": {"plugin": {"type": "string", "description": "Directory or plugin.json name (plugin_list)"},
+        {"properties": {"plugin": {"type": "string", "description": "The plugin.json name (plugin_list)"},
                         "mode": {"type": "string", "enum": ["backend", "frontend"], "default": "backend"}},
          "required": ["plugin"]},
     )
     async def plugin_reload(plugin: str, mode: str = "backend") -> dict[str, Any]:
-        return await live.reload(resolve_plugin(plugin)[0], mode)
+        return await live.reload(plugin, mode)

@@ -95,9 +95,9 @@ await check('detected plugin: Plugin group "<name> v<version>", dir in tooltip, 
   fetched.length = 0;
   const reload = kids.Plugin[2];
   await run(reload.command.command, ...reload.command.arguments);
-  assert.ok(fetched.includes('/plugins/my-plugin/reload'), fetched.join(', '));
-  assert.deepEqual(device.liveReloads.at(-1), { dir: 'my-plugin', mode: 'backend' });
-  assert.equal(lastMessage('info').m, 'Decky Toolkit: reloaded my-plugin.');
+  assert.ok(fetched.includes('/plugins/reload'), fetched.join(', '));
+  assert.deepEqual(device.liveReloads.at(-1), { plugin: 'My Plugin', mode: 'backend' });
+  assert.equal(lastMessage('info').m, 'Decky Toolkit: reloaded My Plugin.');
   await openWorkspace(path.join(scratch, 'ws'));
   assert.equal(prompts().length, 1, 'the prompt shows once per session');
   return `Plugin (${roots[1].description}); prompt "${prompts()[0].m}" [${prompts()[0].buttons.join(', ')}]; status bar "${b.text}"`;
@@ -204,7 +204,7 @@ await check('auto-deploy on a device with live sync: first change deploys, later
   await settle(400);
   assert.equal(device.installs.length, installs + 1, 'no second install');
   assert.deepEqual(device.filePuts.map(f => f.path), ['dist/index.js', 'dist/index.js.map']);
-  assert.deepEqual(device.liveReloads, [{ dir: 'my-plugin', mode: 'frontend' }]);
+  assert.deepEqual(device.liveReloads, [{ plugin: 'My Plugin', mode: 'frontend' }]);
   const status = calls.statusMessages.at(-1);
   assert.match(status, /^\$\(check\) Decky: reloaded My Plugin \(frontend\) in \d+ ms$/);
   writeFileSync(path.join(root, 'plugin.json'), JSON.stringify({ name: 'My Plugin', author: 'me', flags: [], api_version: 1, x: 1 }));

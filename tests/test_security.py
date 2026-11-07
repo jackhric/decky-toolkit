@@ -158,7 +158,7 @@ def test_audit_log_lines_over_http(caplog):
             rpc = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": args}}
             async with s.post(f"{base}/mcp", json=rpc, headers=H) as r:
                 assert not (await r.json())["result"]["isError"]
-        async with s.post(f"{base}/api/v1/plugins/nope/reload", headers=H) as r:
+        async with s.post(f"{base}/api/v1/plugins/reload", json={"plugin": "nope"}, headers=H) as r:
             assert r.status in (400, 404, 502)
         async with s.post(f"{base}/mcp", json={}) as r:
             assert r.status == 401
@@ -167,7 +167,7 @@ def test_audit_log_lines_over_http(caplog):
         asyncio.run(with_server(run, mcp=reg, logger=log))
     lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("audit")]
     assert lines == ['audit tool=cef_evaluate origin=127.0.0.1 client="test client" via=mcp args=expression',
-                     'audit route=POST /api/v1/plugins/nope/reload origin=127.0.0.1 client="test client" via=http']
+                     'audit route=POST /api/v1/plugins/reload origin=127.0.0.1 client="test client" via=http']
     assert not any("document.cookie" in r.getMessage() for r in caplog.records)
 
 

@@ -148,7 +148,7 @@ export class LiveSync {
       // A newer build landed during the push: its own sync follows, so skip this reload.
       if (mode && !(await this.isStale(now))) {
         const r0 = Date.now();
-        step.result = await this.client.reloadPlugin(dir, mode);
+        step.result = await this.client.reloadPlugin(this.plugin.name, mode);
         step.reloadMs = Date.now() - r0;
         if (step.result.scheduled) await this.client.waitForRestart(30000);
       }

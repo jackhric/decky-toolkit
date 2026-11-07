@@ -11,7 +11,7 @@ from typing import Any
 
 from ..steam import cdp
 from ..guard import check_write
-from .plugins import plugin_name, plugins_dir, reload_plugin
+from .plugins import plugin_dir, plugin_name, plugins_dir, reload_plugin
 
 RELOAD_MODES = ("frontend", "backend")
 QUICK_ACCESS = "QuickAccess_uid2"
@@ -124,11 +124,11 @@ async def _snapshot(title: str) -> dict[str, Any] | None:
         return None
 
 
-async def reload(dirname: str, mode: str = "frontend") -> dict[str, Any]:
-    """Reload a plugin in place and restore the UI around it. mode: 'frontend' or 'backend'."""
+async def reload(name: str, mode: str = "frontend") -> dict[str, Any]:
+    """Reload the plugin whose plugin.json name is `name` in place and restore the UI around it."""
     if mode not in RELOAD_MODES:
         raise ValueError(f"mode must be one of {', '.join(RELOAD_MODES)}")
-    name, _ = _plugin_root(dirname)
+    dirname = plugin_dir(name)
     own_dir = os.path.basename(os.environ.get("DECKY_PLUGIN_DIR", "").rstrip("/"))
     if mode == "backend" and dirname == own_dir:
         # Our own backend restart ends this process; nobody would be left to restore the UI.

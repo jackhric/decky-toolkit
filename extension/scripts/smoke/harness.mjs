@@ -488,10 +488,10 @@ const deviceRoutes = [
     return device.input;
   }],
   ['GET', /^\/plugins$/, () => plugins],
-  ['POST', /^\/plugins\/([^/]+)\/reload$/, (m, _b, q) => {
-    const dir = decodeURIComponent(m[1]), mode = q.get('mode') ?? 'backend';
-    device.liveReloads = [...(device.liveReloads ?? []), { dir, mode }];
-    return { dir, name: device.installMeta.name, mode, load_ms: 9, reloaded: true, errors: [], restored: ['panel'], routes: [] };
+  ['POST', /^\/plugins\/reload$/, (_m, body) => {
+    const { plugin: name, mode = 'backend' } = body;
+    device.liveReloads = [...(device.liveReloads ?? []), { plugin: name, mode }];
+    return { dir: plugins.find(p => p.name === name)?.dir ?? name, name, mode, load_ms: 9, reloaded: true, errors: [], restored: ['panel'], routes: [] };
   }],
   ['POST', /^\/loader\/restart$/, () => ({ restarting: true, delay_s: 1 })],
   ['GET', /^\/logs\/tail$/, (_m, _b, q) => {
