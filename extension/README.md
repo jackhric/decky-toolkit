@@ -137,6 +137,7 @@ you expand or collapse.
     plugin logs** and **Auto-deploy on change: On/Off** for the plugin in the workspace (a picker
     asks if there are several). Without one the group says *no plugin.json in workspace*, the
     actions show *needs a plugin folder*, and clicking one tells you to open your plugin folder.
+    **New plugin…** is always there (see [New plugin](#new-plugin)).
 - **Loader**
   - **Restart loader**, **Show loader logs**, **Install plugin zip…** (pick any `.zip`).
 - **Steam**
@@ -271,6 +272,20 @@ and whether it is the pad the device created on its own for forwarded input ("Au
 Fetches one `/stream/frame` every 1.5 s while the view is visible (well under 1 Mbit/s, instead of the
 ~40 Mbit/s stream), scaled to the sidebar width. Click **Open full screen view** or the title icon
 for the screen panel.
+
+## New plugin
+
+**Decky: New plugin…** (also in the Actions view, the empty Explorer and the walkthrough) creates a plugin from
+[decky-plugin-template](https://github.com/SteamDeckHomebrew/decky-plugin-template) in six steps: name, author
+(default `git config user.name`), what it has (frontend only, plus a Python backend, or plus an MCP tool through
+`decky-toolkit/tools`), build tool (the template's rollup, or vite), template version (the commit this release was
+tested with, or the latest) and parent folder. It downloads the template, renames it, drops the template's ssh deploy
+tasks (`.vscode/`) and Docker example (`backend/`), then runs `pnpm install` and `pnpm run build` (the `pnpm` on your
+PATH, else a pinned one through `npx`). The new `plugin.json` has no `debug` or `_root` flag.
+
+Then it asks whether to open the folder, and with a paired device **Open and Deploy**: the folder opens (in this window
+when none is open, else in a new one), and the window that opens it deploys the plugin (the first install restarts
+Decky Loader) and turns on auto-deploy with live sync running, so the next save reloads it in place.
 
 ## Deploy
 
@@ -491,6 +506,7 @@ All of these are also in the command palette under the `Decky:` category.
 | Decky: Search network | Look for unsaved Decky Toolkit devices on the local network ([Discovery](#discovery)) |
 | Decky: Open screen | Live screen panel with sound; remote input, mute, stream settings, pause and snapshot as tab bar icons |
 | Decky: Snapshot to file | Saves the current `/stream/frame` with a Save dialog |
+| Decky: New plugin… | Create a plugin from decky-plugin-template, build it, open it and optionally deploy it ([New plugin](#new-plugin)) |
 | Decky: Deploy plugin | Build if needed, zip, `POST /plugins/install`, reload just this plugin and confirm it (<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd>) |
 | Decky: Deploy plugin (full restart) | Same, but restarts Decky Loader and waits for `/health` |
 | Decky: Toggle auto-deploy on change | Flips `decky-toolkit.deploy.onChange` for the workspace |

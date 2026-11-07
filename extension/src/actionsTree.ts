@@ -117,18 +117,22 @@ export class ActionsTreeProvider implements vscode.TreeDataProvider<ActionNode>,
     children[4].tooltip = auto
       ? 'On: runs the watch build; the first change deploys, later ones push the changed files and reload the plugin in place. Click to turn off'
       : 'Off. Click to run the watch build and keep the device in step: changed files are pushed and the plugin reloads in place';
+    const create = leaf('newPlugin', 'New plugin…', 'new-folder', 'decky-toolkit.newPlugin');
+    create.tooltip = 'Create a Decky plugin from decky-plugin-template, build it and open it';
     const g = group('plugin', 'Plugin', 'package', true, children);
     if (plugins.length === 0) {
       g.description = 'no plugin.json in workspace';
-      g.tooltip = 'Open a Decky plugin folder (one with plugin.json) to deploy, reload or tail it';
+      g.tooltip = 'Open a Decky plugin folder (one with plugin.json) to deploy, reload or tail it, or create one';
       for (const c of children) {
         // Still clickable so the command can explain what is missing.
         c.description = 'needs a plugin folder';
         c.iconPath = new vscode.ThemeIcon((c.iconPath as vscode.ThemeIcon).id, new vscode.ThemeColor('disabledForeground'));
         c.contextValue = 'action.disabled';
       }
+      children.push(create);
       return g;
     }
+    children.push(create);
     if (plugins.length === 1) {
       const [p] = plugins;
       g.description = pluginSummary(p);

@@ -203,6 +203,10 @@
         "view": "decky-toolkit.controllers",
         "contents": "Disconnected from the device.\n[Reconnect](command:decky-toolkit.reconnect)",
         "when": "decky-toolkit.link == disconnected"
+      },
+      {
+        "view": "workbench.explorer.emptyView",
+        "contents": "Start a Decky Loader plugin from the official template.\n[New Decky Plugin](command:decky-toolkit.newPlugin)"
       }
     ],
     "commands": [
@@ -313,6 +317,12 @@
         "title": "Steam UI: Close menus",
         "category": "Decky",
         "icon": "$(close-all)"
+      },
+      {
+        "command": "decky-toolkit.newPlugin",
+        "title": "New plugin…",
+        "category": "Decky",
+        "icon": "$(new-folder)"
       },
       {
         "command": "decky-toolkit.deploy",
@@ -930,6 +940,18 @@
             },
             "completionEvents": [
               "onCommand:decky-toolkit.openScreen"
+            ]
+          },
+          {
+            "id": "create",
+            "title": "Create a plugin",
+            "description": "Start a new Decky plugin from the official template: pick a name, what it should have and a build tool. Decky Toolkit builds it, opens it and can deploy it to your device right away, then pushes every change.\n[New plugin](command:decky-toolkit.newPlugin)",
+            "media": {
+              "svg": "media/mark-flat.svg",
+              "altText": "The Decky Toolkit logo: a mug with a Steam Deck mark and a terminal badge"
+            },
+            "completionEvents": [
+              "onCommand:decky-toolkit.newPlugin"
             ]
           }
         ]
