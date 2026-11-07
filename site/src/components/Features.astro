@@ -47,7 +47,7 @@ const chips = ['Keyboard', 'Mouse', 'Your gamepad', 'Virtual controllers', 'Jump
     <Card class={card}>
       <svg class="go" viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 15.5 15.5 8.5M10 8.5h5.5V14" /></svg>
       <span class="mark"><Glyph name="logs" /></span>
-      <h3><a class="title" href={doc('logs')}>Logs where you work</a></h3>
+      <h3><a class="title" href={`${doc('extension')}#logs`}>Logs where you work</a></h3>
       <p>Decky Loader and plugin logs stream into output channels
         in <span class="inline-link"><EditorBadge editor="vscode" /></span> and <span class="inline-link"><EditorBadge editor="vscodium" /></span>.</p>
       <pre class="panel" aria-hidden="true"><span class="dim">[decky]</span> loading plugin
@@ -58,7 +58,7 @@ const chips = ['Keyboard', 'Mouse', 'Your gamepad', 'Virtual controllers', 'Jump
     <Card class={card}>
       <svg class="go" viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 15.5 15.5 8.5M10 8.5h5.5V14" /></svg>
       <span class="mark"><Glyph name="console" /></span>
-      <h3><a class="title" href={doc('console')}>Poke the Steam UI</a></h3>
+      <h3><a class="title" href={`${doc('extension')}#console`}>Poke the Steam UI</a></h3>
       <p>A JavaScript console for Steam's <code>SharedJSContext</code>, for inspecting and testing UI code live.</p>
       <pre class="panel" aria-hidden="true"><span class="dim">&gt;</span> SteamUIStore.RunningApps
     .map(a =&gt; a.display_name)
@@ -68,10 +68,10 @@ const chips = ['Keyboard', 'Mouse', 'Your gamepad', 'Virtual controllers', 'Jump
     <Card class={card}>
       <svg class="go" viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 15.5 15.5 8.5M10 8.5h5.5V14" /></svg>
       <span class="mark"><Glyph name="api" /></span>
-      <h3><a class="title" href={doc('api')}>Scriptable</a></h3>
+      <h3><a class="title" href={doc('cli')}>Scriptable</a></h3>
       <p>Everything is also available over a small HTTP API and MCP, for your own tools, scripts and coding agents.</p>
-      <pre class="panel" aria-hidden="true"><span class="dim">$</span> claude mcp add --transport http \
-    decky http://&lt;deck-ip&gt;:8765/mcp</pre>
+      <pre class="panel" aria-hidden="true"><span class="dim">$</span> claude mcp add decky -- \
+    npx -y decky-toolkit mcp</pre>
     </Card>
   </div>
 </section>
