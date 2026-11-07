@@ -89,7 +89,10 @@ async function deviceFetch(url, init = {}) {
     s.installs.push({ dir, restart, bytes: bytes.length, names });
     s.plugins = [...s.plugins.filter(p => p.dir !== dir), { dir, name: s.installMeta.name, version: s.installMeta.version, flags: [] }];
     if (restart === 'loader') s.downFor = 1;
-    if (restart === 'plugin') s.journal.push(`[loader][INFO]: Loaded ${s.installMeta.name} (v${s.installMeta.version}) #${s.installs.length}`);
+    if (restart === 'plugin') {
+      s.journal.push(`[loader][INFO]: Loaded ${s.installMeta.name} (v${s.installMeta.version}) #${s.installs.length}`);
+      s.pluginLog[s.installMeta.name] = [...(s.pluginLog[s.installMeta.name] ?? []), `[INFO]: started #${s.installs.length}`];
+    }
     return done(json({ installed: { dir, name: s.installMeta.name, version: s.installMeta.version }, restarted: restart }));
   }
   const files = /^\/plugins\/([^/]+)\/files$/.exec(route);
@@ -111,6 +114,11 @@ async function deviceFetch(url, init = {}) {
       errors: mode === 'frontend' ? ['Error: boom\n    at http://127.0.0.1:1337/plugins/My%20Plugin/dist/index.js?t=1:1:1'] : [] }));
   }
   if (route === '/logs/tail' && u.searchParams.get('source') === 'loader') return done(json({ lines: s.journal.slice(-Number(u.searchParams.get('tail'))) }));
+  if (route === '/logs/tail' && u.searchParams.get('source') === 'plugin') {
+    // Keyed by plugin.json name, as the device takes it; a directory name is refused.
+    const lines = s.pluginLog[u.searchParams.get('plugin')];
+    return done(lines ? json({ lines: lines.slice(-Number(u.searchParams.get('tail'))) }) : json({ error: 'no installed plugin is named that', code: 'ENOENT' }, 404));
+  }
   if (route === '/mcp' && init.method === 'POST') {
     const { id, method, params } = JSON.parse(init.body);
     s.rpc.push(method === 'tools/call' ? `tools/call ${params.name}` : method);
