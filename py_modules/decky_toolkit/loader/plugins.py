@@ -40,18 +40,6 @@ def plugin_name(dirname: str) -> str:
     return name
 
 
-def resolve_plugin(plugin: str) -> tuple[str, str]:
-    """(dir, name) of an installed plugin given either its directory or its plugin.json name."""
-    if not plugin or not isinstance(plugin, str):
-        raise ValueError("plugin must be a plugin directory or name (see plugin_list)")
-    if "/" not in plugin and not plugin.startswith(".") and os.path.isfile(os.path.join(plugins_dir(), plugin, "plugin.json")):
-        return plugin, plugin_name(plugin)
-    try:
-        return plugin_dir(plugin), plugin
-    except FileNotFoundError:
-        raise FileNotFoundError(f"no installed plugin with directory or name {plugin!r} (see plugin_list)") from None
-
-
 def plugin_dir(name: str) -> str:
     """The directory of the installed plugin whose plugin.json name is `name`."""
     if not name or not isinstance(name, str):

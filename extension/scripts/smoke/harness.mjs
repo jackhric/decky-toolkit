@@ -495,8 +495,9 @@ const deviceRoutes = [
   }],
   ['POST', /^\/loader\/restart$/, () => ({ restarting: true, delay_s: 1 })],
   ['GET', /^\/logs\/tail$/, (_m, _b, q) => {
-    const dir = q.get('plugin'), tail = Number(q.get('tail') ?? 100);
-    if (!dir) return { lines: device.journal.slice(-tail) };
+    const name = q.get('plugin'), tail = Number(q.get('tail') ?? 100);
+    if (!name) return { lines: device.journal.slice(-tail) };
+    const dir = plugins.find(p => p.name === name)?.dir;
     return device.pluginLog[dir] ? { lines: device.pluginLog[dir].slice(-tail) } : fail(404, 'no log dir');
   }],
   ['GET', /^\/controllers$/, () => ({ controllers: ctl.controllers, virtual: ctl.virtual, input_enabled: device.input.enabled })],

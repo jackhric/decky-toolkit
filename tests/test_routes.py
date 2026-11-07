@@ -157,22 +157,30 @@ def test_old_and_dropped_paths_are_gone_and_mcp_is_post_only():
     asyncio.run(with_server(run))
 
 
+def install_named(home: Path, dirname: str, name: str) -> None:
+    (home / "plugins" / dirname).mkdir(parents=True)
+    (home / "plugins" / dirname / "plugin.json").write_text(json.dumps({"name": name}))
+
+
 def test_logs_tail_plugin(decky_home):
+    install_named(decky_home, "foo", "Foo")
     now = time.time()
     write_log(decky_home, "foo", "old.log", ["stale"], mtime=now - 100)
     write_log(decky_home, "foo", "new.log", [f"line {i}" for i in range(10)], mtime=now)
 
     async def run(s, base):
-        async with s.get(f"{base}/api/v1/logs/tail?source=plugin&plugin=foo&tail=3") as r:
+        async with s.get(f"{base}/api/v1/logs/tail?source=plugin&plugin=Foo&tail=3") as r:
             assert r.status == 401
-        async with s.get(f"{base}/api/v1/logs/tail?source=plugin&plugin=foo&tail=3", headers=H) as r:
+        async with s.get(f"{base}/api/v1/logs/tail?source=plugin&plugin=Foo&tail=3", headers=H) as r:
             assert await r.json() == {"lines": ["line 7", "line 8", "line 9"]}
-        async with s.get(f"{base}/api/v1/logs/tail?plugin=foo&tail=1", headers=H) as r:
+        async with s.get(f"{base}/api/v1/logs/tail?plugin=Foo&tail=1", headers=H) as r:
             assert await r.json() == {"lines": ["line 9"]}
         async with s.get(f"{base}/api/v1/logs/tail?source=plugin&plugin=nope", headers=H) as r:
             assert r.status == 404
         async with s.get(f"{base}/api/v1/logs/tail?source=plugin&plugin=../etc", headers=H) as r:
-            assert r.status == 400
+            assert r.status == 404
+        async with s.get(f"{base}/api/v1/logs/tail?source=plugin&plugin=foo", headers=H) as r:
+            assert r.status == 404
         async with s.get(f"{base}/api/v1/logs/tail?source=plugin", headers=H) as r:
             assert r.status == 400
         async with s.get(f"{base}/api/v1/logs/tail?source=bogus", headers=H) as r:
@@ -181,10 +189,11 @@ def test_logs_tail_plugin(decky_home):
 
 
 def test_logs_stream_plugin(decky_home):
+    install_named(decky_home, "foo", "Foo")
     path = write_log(decky_home, "foo", "a.log", ["one", "two", "three"], mtime=time.time() - 10)
 
     async def run(s, base):
-        async with s.get(f"{base}/api/v1/logs/stream?plugin=foo&tail=2", headers=H) as r:
+        async with s.get(f"{base}/api/v1/logs/stream?plugin=Foo&tail=2", headers=H) as r:
             assert r.status == 200
             assert r.headers["Content-Type"].startswith("text/event-stream")
             assert r.headers["Cache-Control"] == "no-store" and r.headers["X-Accel-Buffering"] == "no"
