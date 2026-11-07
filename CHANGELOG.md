@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.6.0](https://github.com/jackhric/decky-toolkit/compare/plugin-v0.5.0...plugin-v0.6.0) (2026-11-07)
+
+
+### ⚠ BREAKING CHANGES
+
+* POST /api/v1/plugins/{dir}/reload?mode= is now POST /api/v1/plugins/reload with JSON {plugin, mode}, where plugin is the plugin.json name; plugin_reload takes only the name.
+
+### Features
+
+* **cli:** build before deploy, one deploy path with the extension ([#101](https://github.com/jackhric/decky-toolkit/issues/101)) ([c21632a](https://github.com/jackhric/decky-toolkit/commit/c21632a61691fe5b0a9516e8c46297f31f6b1054))
+
+
+### Bug Fixes
+
+* count a stalled event loop as recovered on its first answer ([#108](https://github.com/jackhric/decky-toolkit/issues/108)) ([ce48fd1](https://github.com/jackhric/decky-toolkit/commit/ce48fd19cf2865e158331533209bd7bc51a1757c))
+* reload plugins by their plugin.json name ([#109](https://github.com/jackhric/decky-toolkit/issues/109)) ([a8d73e8](https://github.com/jackhric/decky-toolkit/commit/a8d73e8f44455fc3b4409ccda4815b9c4d656f51))
+
 ## [0.5.0](https://github.com/jackhric/decky-toolkit/compare/plugin-v0.4.0...plugin-v0.5.0) (2026-11-06)
 
 
