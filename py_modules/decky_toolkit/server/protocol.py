@@ -22,7 +22,7 @@ def _plugin_version() -> str:
     if v := os.environ.get("DECKY_PLUGIN_VERSION"):
         return v
     try:
-        return json.loads((Path(__file__).resolve().parents[2] / "package.json").read_text())["version"]
+        return json.loads((Path(__file__).resolve().parents[3] / "package.json").read_text())["version"]
     except (OSError, ValueError, KeyError):
         return "0.0.0"
 

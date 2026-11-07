@@ -1,9 +1,11 @@
 import {
   ConfirmModal,
   DialogBody,
+  DialogBodyText,
   DialogButton,
   DialogButtonPrimary,
   DialogControlsSection,
+  DialogHeader,
   Field,
   Focusable,
   Navigation,
@@ -15,8 +17,11 @@ import {
 } from "@decky/ui";
 import { addEventListener, callable, definePlugin, removeEventListener, routerHook, toaster } from "@decky/api";
 import { ReactNode, useEffect, useState } from "react";
-import { FaCog, FaGamepad, FaLaptop, FaPlug, FaServer, FaUnlink } from "react-icons/fa";
+import { FaCog, FaPlug, FaUnlink } from "react-icons/fa";
+import { AboutIcon, PairedDevicesIcon, RemoteInputIcon, ServerIcon } from "./icons";
+import { Mark } from "./Mark";
 import { SteamingMark } from "./SteamingMark";
+import { restoreAll, SettingsSection, settingsPages, theme, useTransparentHeader } from "./steam";
 
 type Status = {
   enabled: boolean;
@@ -30,6 +35,7 @@ type Status = {
   error: string | null;
   connected?: boolean;
   clients?: ConnectedClient[];
+  version?: string;
 };
 
 type ConnectedClient = {
@@ -65,8 +71,8 @@ type PairedClient = {
 type InputSettings = { enabled: boolean; backend: "ei" | "uinput" | null; available: boolean; reason: string | null };
 
 const SETTINGS_ROUTE = "/decky-toolkit/settings";
-const MUTED = "#8b929a";
-const LINK = "#1a9fff";
+const PROJECT_URL = "https://github.com/jackhric/decky-toolkit";
+const INPUT_BACKENDS: Record<string, string> = { ei: "gamescope (libei)", uinput: "Virtual devices (uinput)" };
 const KIND_LABELS: Record<string, string> = { vscode: "VS Code", mcp: "MCP client", other: "Other" };
 
 const getStatus = callable<[], Status>("get_status");
@@ -235,19 +241,19 @@ const showPairingHelp = () =>
   );
 
 const STYLE = `
-.dtk-card { border-radius: 4px; background: rgba(255,255,255,0.04); transition: background 0.15s; }
-.dtk-card.dtk-focus { background: rgba(255,255,255,0.2); box-shadow: inset 0 0 0 2px rgba(255,255,255,0.45); }
-.dtk-link.dtk-focus { text-decoration: underline; color: #fff !important; }
-.dtk-row { display: flex; justify-content: space-between; gap: 10px; font-size: 14px; color: #8b929a; }
-.dtk-row > span:last-child:not(:first-child) { color: #dcdedf; text-align: right; font-variant-numeric: tabular-nums; }
-.dtk-card-footer { margin: 10px -14px 0 !important; width: calc(100% + 28px) !important; border-radius: 0 !important; background: rgba(255,255,255,0.06) !important; color: #dcdedf !important; }
-.dtk-card-footer.gpfocus, .dtk-card-footer:hover { background: #fff !important; color: #000 !important; }
-.dtk-primary { background: #1a9fff !important; color: #fff !important; }
-.dtk-primary.gpfocus { background: #4fb4ff !important; box-shadow: 0 0 0 2px #fff; }
-.dtk-mark { color: #7a7f86; transition: color 0.4s; }
-.dtk-mark.connected { color: #4fa83a; }
+.dtk-card { border-radius: ${theme.radius}; background: ${theme.surface}; transition: background 0.15s; }
+.dtk-card.dtk-focus { background: ${theme.surfaceFocus}; box-shadow: inset 0 0 0 2px ${theme.focusRing}; }
+.dtk-link.dtk-focus { text-decoration: underline; color: ${theme.textTitle} !important; }
+.dtk-row { display: flex; justify-content: space-between; gap: 10px; font-size: ${theme.textSize(3)}; color: ${theme.textMuted}; }
+.dtk-row > span:last-child:not(:first-child) { color: ${theme.textSubtitle}; text-align: right; font-variant-numeric: tabular-nums; }
+.dtk-card-footer { margin: 10px -14px 0 !important; width: calc(100% + 28px) !important; border-radius: 0 !important; background: ${theme.surfaceRaised} !important; color: ${theme.textSubtitle} !important; }
+.dtk-card-footer.gpfocus, .dtk-card-footer:hover { background: ${theme.focusBackground} !important; color: ${theme.focusText} !important; }
+.dtk-primary { background: ${theme.accent} !important; color: ${theme.textTitle} !important; }
+.dtk-primary.gpfocus { background: ${theme.accentBright} !important; box-shadow: 0 0 0 2px ${theme.focusBackground}; }
+.dtk-mark { color: ${theme.textMuted}; transition: color 0.4s; }
+.dtk-mark.connected { color: ${theme.positive}; }
 .dtk-mark.pending { animation: dtk-breathe 2s ease-in-out infinite; }
-@keyframes dtk-breathe { 0%, 100% { color: #3a5f80; opacity: 0.75; } 50% { color: #1a9fff; opacity: 1; } }
+@keyframes dtk-breathe { 0%, 100% { color: ${theme.accentDim}; opacity: 0.75; } 50% { color: ${theme.accent}; opacity: 1; } }
 `;
 
 type MarkState = "idle" | "pending" | "connected";
@@ -278,7 +284,7 @@ function Centered({ children, mark = "idle" }: { children: ReactNode; mark?: Mar
         noFocusRing
         onActivate={showPairingHelp}
         onClick={showPairingHelp}
-        style={{ color: LINK, fontSize: "15px", padding: "4px 8px", cursor: "pointer" }}
+        style={{ color: theme.accent, fontSize: theme.textSize(4), padding: "4px 8px", cursor: "pointer" }}
       >
         How pairing works
       </Focusable>
@@ -286,7 +292,7 @@ function Centered({ children, mark = "idle" }: { children: ReactNode; mark?: Mar
   );
 }
 
-const hint = { color: MUTED, fontSize: "15px", lineHeight: 1.45, margin: 0, maxWidth: "260px" } as const;
+const hint = { color: theme.textMuted, fontSize: theme.textSize(4), lineHeight: 1.45, margin: 0, maxWidth: "260px" } as const;
 
 function ConnectionCard({ client, status, busy, onDisconnect }: { client: ConnectedClient; status: Status; busy: boolean; onDisconnect: () => void }) {
   const now = useNow(15000);
@@ -297,7 +303,7 @@ function ConnectionCard({ client, status, busy, onDisconnect }: { client: Connec
       flow-children="column"
       style={{ width: "100%", padding: "14px 14px 0", boxSizing: "border-box", overflow: "hidden", display: "flex", flexDirection: "column", gap: "4px", textAlign: "left" }}
     >
-      <div style={{ fontSize: "20px", fontWeight: 600, color: "#fff", overflowWrap: "anywhere" }}>{client.name}</div>
+      <div style={{ fontSize: theme.textSize(6), fontWeight: 600, color: theme.textTitle, overflowWrap: "anywhere" }}>{client.name}</div>
       <div className="dtk-row">
         <span>{KIND_LABELS[client.kind] ?? client.kind}</span>
         {client.remote && <span>{client.remote}</span>}
@@ -337,8 +343,8 @@ function Panel() {
         <DialogButtonPrimary className="dtk-primary" style={{ width: "100%" }} disabled={busy} onClick={() => decide(current, true)}>
           Approve {current.client_name}
         </DialogButtonPrimary>
-        <div style={{ color: MUTED, fontSize: "14px", marginTop: "-6px" }}>
-          Code <span style={{ color: "#fff", fontSize: "18px", fontWeight: 600, letterSpacing: "0.12em" }}>{current.code}</span>
+        <div style={{ color: theme.textMuted, fontSize: theme.textSize(3), marginTop: "-6px" }}>
+          Code <span style={{ color: theme.textTitle, fontSize: theme.textSize(5), fontWeight: 600, letterSpacing: "0.12em" }}>{current.code}</span>
           {" · "}
           {current.remote}
         </div>
@@ -380,8 +386,8 @@ function Panel() {
         onActivate={() => {}}
         style={{ width: "100%", padding: "14px 8px", boxSizing: "border-box" }}
       >
-        <div style={{ fontSize: "26px", fontWeight: 600, color: up ? "#fff" : MUTED, letterSpacing: "0.02em" }}>{status.ip}</div>
-        <div style={{ fontSize: "14px", color: MUTED, marginTop: "2px" }}>port {status.port}</div>
+        <div style={{ fontSize: theme.textSize(8), fontWeight: 600, color: up ? theme.textTitle : theme.textMuted, letterSpacing: "0.02em" }}>{status.ip}</div>
+        <div style={{ fontSize: theme.textSize(3), color: theme.textMuted, marginTop: "2px" }}>port {status.port}</div>
       </Focusable>
       <p style={hint}>
         {up
@@ -397,6 +403,7 @@ function Panel() {
 }
 
 function SettingsPage() {
+  useTransparentHeader();
   const { status, clients, busy, run, setInput, forget } = useToolkit();
   const [port, setPortDraft] = useState("");
   useEffect(() => {
@@ -427,6 +434,8 @@ function SettingsPage() {
         <Field label="Status" focusable>
           {status ? serverState(status) : "Loading…"}
         </Field>
+      </DialogControlsSection>
+      <SettingsSection title="Network">
         <Field label="Address" focusable>
           {status ? `${status.ip}:${status.port}` : "…"}
         </Field>
@@ -442,12 +451,12 @@ function SettingsPage() {
             onKeyDown={(e) => e.key === "Enter" && applyPort()}
           />
         </Field>
-        <Field label="Restart server" description="Stops and starts the server; connected computers reconnect.">
-          <DialogButton style={{ minWidth: "160px" }} disabled={busy} onClick={() => run(restartServer, "Server restarted")}>
+        <Field label="Restart server" description="Stops and starts the server. Connected computers reconnect." childrenContainerWidth="fixed">
+          <DialogButton disabled={busy} onClick={() => run(restartServer, "Server restarted")}>
             Restart
           </DialogButton>
         </Field>
-      </DialogControlsSection>
+      </SettingsSection>
     </DialogBody>
   );
 
@@ -456,15 +465,18 @@ function SettingsPage() {
       <DialogControlsSection>
         <ToggleField
           label="Allow remote input"
-          description={
-            status?.input && !status.input.available
-              ? status.input.reason ?? "Unavailable"
-              : "Lets paired computers send keyboard, mouse and controller input."
-          }
+          description="Lets paired computers send keyboard, mouse and controller input."
           checked={!!status?.input?.enabled}
           disabled={busy || !status?.input?.available}
           onChange={setInput}
         />
+        <Field label="Input method" focusable>
+          {!status?.input
+            ? "…"
+            : status.input.available
+              ? INPUT_BACKENDS[status.input.backend ?? ""] ?? status.input.backend
+              : status.input.reason ?? "Unavailable"}
+        </Field>
       </DialogControlsSection>
     </DialogBody>
   );
@@ -472,10 +484,15 @@ function SettingsPage() {
   const devices = (
     <DialogBody>
       <DialogControlsSection>
-        {clients.length === 0 && <Field label="None yet" focusable />}
+        {clients.length === 0 && <Field label="No paired computers" description="Pair a computer from the Decky Toolkit panel in Quick Access." focusable />}
         {clients.map((c) => (
-          <Field key={c.fingerprint} label={c.name} description={`${KIND_LABELS[c.kind] ?? c.kind} · ${c.connected ? "connected" : lastSeen(c.last_seen)}`}>
-            <DialogButton style={{ minWidth: "160px" }} disabled={busy} onClick={() => forget(c)}>
+          <Field
+            key={c.fingerprint}
+            label={c.name}
+            description={`${KIND_LABELS[c.kind] ?? c.kind} · ${c.connected ? "Connected" : lastSeen(c.last_seen)}`}
+            childrenContainerWidth="fixed"
+          >
+            <DialogButton disabled={busy} onClick={() => forget(c)}>
               Forget
             </DialogButton>
           </Field>
@@ -484,15 +501,38 @@ function SettingsPage() {
     </DialogBody>
   );
 
+  const about = (
+    <DialogBody>
+      {/* DialogBody is a full-height flex column: auto margins centre this when there is room and collapse when not. */}
+      <div style={{ margin: "auto 0" }}>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", padding: "24px 0 8px" }}>
+          <Mark size={128} style={{ color: theme.textMuted }} />
+          <DialogHeader style={{ marginTop: "16px" }}>Decky Toolkit</DialogHeader>
+          <DialogBodyText>{status?.version ? `Version ${status.version}` : "…"}</DialogBodyText>
+          <DialogBodyText>Lets coding agents and your editor inspect and control this SteamOS device.</DialogBodyText>
+        </div>
+        <SettingsSection title="Credits">
+          <Field label="License" focusable>
+            MIT
+          </Field>
+          <Field label="Project page" description={PROJECT_URL} childrenContainerWidth="fixed">
+            <DialogButton onClick={() => Navigation.NavigateToExternalWeb(PROJECT_URL)}>Open</DialogButton>
+          </Field>
+        </SettingsSection>
+      </div>
+    </DialogBody>
+  );
+
   return (
     <SidebarNavigation
-      title="Decky Toolkit"
-      showTitle
-      pages={[
-        { title: "Server", icon: <FaServer />, content: server, identifier: "server" },
-        { title: "Remote input", icon: <FaGamepad />, content: input, identifier: "input" },
-        { title: "Paired devices", icon: <FaLaptop />, content: devices, identifier: "devices" },
-      ]}
+      pages={settingsPages(
+        [
+          { title: "Server", icon: <ServerIcon />, content: server, identifier: "server" },
+          { title: "Remote Input", icon: <RemoteInputIcon />, content: input, identifier: "input" },
+          { title: "Paired Devices", icon: <PairedDevicesIcon />, content: devices, identifier: "devices" },
+        ],
+        [{ title: "About", icon: <AboutIcon />, content: about, identifier: "about", hideTitle: true }],
+      )}
     />
   );
 }
@@ -535,6 +575,7 @@ export default definePlugin(() => {
       removeEventListener("decky_toolkit_pair_request", pairRequest);
       removeEventListener("decky_toolkit_input_session", inputSession);
       routerHook.removeRoute(SETTINGS_ROUTE);
+      restoreAll();
     },
   };
 });

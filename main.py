@@ -210,6 +210,7 @@ class Plugin:
             "error": self.last_error,
             "connected": self.clients.any_connected(),
             "clients": self._connected_clients(),
+            "version": SERVER_INFO["version"],
         }
 
     async def set_enabled(self, enabled: bool) -> dict[str, Any]:
