@@ -83,7 +83,7 @@ class LoopWatchdog:
                 self.stalls.append({"at": time.time() - silent, "stack": stack, "lasted_s": None})
                 del self.stalls[:-10]
                 self.log.warning("event loop blocked for %.1f s; loop thread stack:\n  %s", silent, "\n  ".join(stack))
-            elif stalled_since is not None and silent < self.interval * 2:
+            elif stalled_since is not None and self._answered > stalled_since:
                 lasted = self._answered - stalled_since
                 self.stalls[-1]["lasted_s"] = round(lasted, 2)
                 self.log.warning("event loop answered again after %.1f s", lasted)
