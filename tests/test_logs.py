@@ -161,9 +161,9 @@ def test_route_and_tool_read_the_same_lines(plugin_logs, journal):
     reg = make_registry()
 
     async def run(s, base):
-        async with s.get(f"{base}/api/v1/logs/tail?plugin=demo&tail=3", headers=H) as r:
+        async with s.get(f"{base}/api/v1/logs/tail?plugin=Demo%20Plugin&tail=3", headers=H) as r:
             route = (await r.json())["lines"]
-        res = await reg.call("logs_read", {"source": "plugin", "plugin": "demo", "lines": 3})
+        res = await reg.call("logs_read", {"source": "plugin", "plugin": "Demo Plugin", "lines": 3})
         assert not res["isError"] and route == logs.read_plugin("demo", 3)["lines"]
         assert res["content"][0]["text"].count(route[-1]) == 1
         async with s.get(f"{base}/api/v1/logs/tail?tail=2", headers=H) as r:

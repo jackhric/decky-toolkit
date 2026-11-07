@@ -7,7 +7,7 @@ from typing import Any
 
 from ..steam import cdp
 from . import ToolRegistry
-from ..loader.plugins import check_dir_name, plugins_dir, resolve_plugin
+from ..loader.plugins import check_dir_name, plugin_dir, plugins_dir
 
 SOURCE_SUFFIXES = (".ts", ".tsx")
 MAX_SOURCE_BYTES = 8 * 1024 * 1024
@@ -159,7 +159,7 @@ def redact_secrets(value: Any) -> Any:
     return value
 
 
-PLUGIN = {"type": "string", "description": "Directory or plugin.json name (plugin_list)"}
+PLUGIN = {"type": "string", "description": "The plugin.json name (plugin_list)"}
 
 
 def register(reg: ToolRegistry) -> None:
@@ -171,7 +171,7 @@ def register(reg: ToolRegistry) -> None:
         {"properties": {"plugin": PLUGIN}, "required": ["plugin"]},
     )
     async def plugin_methods_tool(plugin: str) -> dict[str, Any]:
-        return plugin_methods(resolve_plugin(plugin)[0])
+        return plugin_methods(plugin_dir(plugin))
 
     @reg.add(
         "plugin_call",
@@ -187,7 +187,8 @@ def register(reg: ToolRegistry) -> None:
     )
     async def plugin_call(plugin: str, method: str, args: list[Any] | None = None,
                           timeout: float = 30) -> dict[str, Any]:
-        return await call_plugin_method(resolve_plugin(plugin)[1], method, args, timeout)
+        plugin_dir(plugin)  # an unknown name fails here, not as an opaque loader error
+        return await call_plugin_method(plugin, method, args, timeout)
 
     @reg.add(
         "plugin_frontend_check",
@@ -198,7 +199,7 @@ def register(reg: ToolRegistry) -> None:
         {"properties": {"plugin": PLUGIN}, "required": ["plugin"]},
     )
     async def plugin_frontend_check(plugin: str) -> dict[str, Any]:
-        dirname = resolve_plugin(plugin)[0]
+        dirname = plugin_dir(plugin)
         root = _plugin_path(dirname)
         methods = plugin_methods(dirname)["methods"] if os.path.isfile(os.path.join(root, "main.py")) else []
         return {"dir": dirname, **frontend_check(root, methods)}

@@ -194,7 +194,7 @@ export interface ReloadMarkers {
 
 const journalTail = (client: DeckyClient) => client.logTail({ source: 'loader', tail: 5 }).catch(() => [] as string[]);
 const pluginLogTail = (client: DeckyClient, p: WorkspacePlugin) =>
-  p.hasBackend ? client.logTail({ source: 'plugin', plugin: p.dir, tail: 5 }).catch(() => [] as string[]) : Promise.resolve(undefined);
+  p.hasBackend ? client.logTail({ source: 'plugin', plugin: p.name, tail: 5 }).catch(() => [] as string[]) : Promise.resolve(undefined);
 
 export async function reloadMarkers(client: DeckyClient, p: WorkspacePlugin): Promise<ReloadMarkers> {
   const [journal, pluginLog] = await Promise.all([journalTail(client), pluginLogTail(client, p)]);
@@ -242,7 +242,7 @@ export async function confirmReload(
   while (Date.now() - start < timeoutMs) {
     const [journal, log, listed] = await Promise.all([
       client.logTail({ source: 'loader', tail: 200 }).catch(() => undefined),
-      !before.pluginLog ? undefined : client.logTail({ source: 'plugin', plugin: p.dir, tail: 5 }).catch(() => undefined),
+      !before.pluginLog ? undefined : client.logTail({ source: 'plugin', plugin: p.name, tail: 5 }).catch(() => undefined),
       version === undefined ? client.listPlugins().then(ps => ps.find(x => x.dir === p.dir), () => undefined) : undefined,
     ]);
     if (listed) version = listed.version ?? null;

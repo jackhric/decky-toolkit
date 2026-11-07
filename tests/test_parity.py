@@ -193,7 +193,7 @@ def test_shared_state_and_same_answers(device):
         listed = await tool("plugin_list")
         assert [{k: p[k] for k in ("dir", "name")} for p in listed] == [{k: p[k] for k in ("dir", "name")}
                                                                          for p in await get("/plugins")]
-        assert (await get("/logs/tail?plugin=demo&tail=5"))["lines"] == logs.read_plugin("demo", 5)["lines"]
+        assert (await get("/logs/tail?plugin=Demo%20Plugin&tail=5"))["lines"] == logs.read_plugin("demo", 5)["lines"]
         async with session.post(f"{base}/api/v1/ui/navigate", json={"path": "/library/home"}, headers=H) as r:
             route_nav = await r.json()
         assert route_nav == await tool("ui_navigate", {"path": "/library/home"})

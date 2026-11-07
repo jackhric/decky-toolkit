@@ -55,7 +55,7 @@ def test_plugin_methods_parses_public_async_methods(plugins):
 
 
 def test_frontend_check_on_dist_bundle(plugins):
-    res = json.loads(call("plugin_frontend_check", plugin="sample")["content"][0]["text"])
+    res = json.loads(call("plugin_frontend_check", plugin="Sample Plugin")["content"][0]["text"])
     assert res["source"] == "dist" and res["files_scanned"] == 1
     assert res["frontend_calls"] == {"get_status": ["dist/index.js:2"], "ghost": ["dist/index.js:6"],
                                      "missing_method": ["dist/index.js:4"], "set_volume": ["dist/index.js:3"]}

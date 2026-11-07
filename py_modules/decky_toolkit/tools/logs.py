@@ -6,7 +6,7 @@ from ..games import files as games
 from ..loader import logs
 from ..steam.console import DEFAULT_LEVEL, DEFAULT_TARGETS, LEVELS
 from . import ToolRegistry
-from ..loader.plugins import resolve_plugin
+from ..loader.plugins import plugin_dir
 
 if TYPE_CHECKING:
     from ..steam.console import ConsoleCollector
@@ -53,7 +53,7 @@ def register(reg: ToolRegistry, console: "ConsoleCollector") -> None:
             "match": {"type": "string", "description": "Case-insensitive regex, e.g. 'Loaded|SIGKILL|stopped in'"},
             "since": {"type": ["string", "integer"], "description": "loader: journalctl time; steam_console: entry id or ISO time"},
             "until": {"type": "string", "description": "loader: journalctl time"},
-            "plugin": {"type": "string", "description": "plugin: directory or plugin.json name (plugin_list)"},
+            "plugin": {"type": "string", "description": "plugin: its plugin.json name (plugin_list)"},
             "run": {"type": "integer", "minimum": 0, "description": "plugin: 0 newest, 1 previous, ..."},
             "file": {"type": "string", "description": "plugin: a log file name"},
             "target": {"type": "string", "description": "steam_console: tab title or 'all'"},
@@ -73,7 +73,7 @@ def register(reg: ToolRegistry, console: "ConsoleCollector") -> None:
         if source == "plugin":
             if not plugin:
                 raise ValueError("source 'plugin' needs plugin")
-            out = logs.read_plugin(resolve_plugin(plugin)[0], lines, run or 0, file, grep, match)
+            out = logs.read_plugin(plugin_dir(plugin), lines, run or 0, file, grep, match)
             text = "\n".join(out.pop("lines"))
             return {"source": source, **out, "text": text}
         if source == "steam_console":
@@ -104,7 +104,7 @@ def register(reg: ToolRegistry, console: "ConsoleCollector") -> None:
         {"properties": {
             "pattern": {"type": "string", "description": "Regex, e.g. '\\bLoaded My Plugin' (\\b: not 'Unloaded')"},
             "source": {"type": "string", "enum": list(logs.WAIT_SOURCES), "default": "loader"},
-            "plugin": {"type": "string", "description": "plugin: directory or plugin.json name (plugin_list)"},
+            "plugin": {"type": "string", "description": "plugin: its plugin.json name (plugin_list)"},
             "target": {"type": "string", "description": "steam_console: tab title or 'all'"},
             "level": {"type": "string", "enum": list(LEVELS), "description": "steam_console: minimum level"},
             "timeout": {"type": "number", "default": 30, "minimum": 0.1, "maximum": 300},
@@ -120,6 +120,6 @@ def register(reg: ToolRegistry, console: "ConsoleCollector") -> None:
         timeout = min(max(timeout, 0.1), 300)
         if source == "plugin" and not plugin:
             raise ValueError("source 'plugin' needs plugin")
-        dirname = resolve_plugin(plugin)[0] if plugin else None
+        dirname = plugin_dir(plugin) if plugin else None
         return {"source": source, **await logs.wait_for(source, pattern, timeout, count, since_s, plugin=dirname,
                                                         console=console, target=target, level=level)}

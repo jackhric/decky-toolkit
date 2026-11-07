@@ -244,8 +244,8 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   });
   command('decky-toolkit.pluginLogs', async arg => {
     const client = await c.client();
-    const dir = client && await resolveDir(client, workspacePlugins, arg, 'Show logs of which plugin?');
-    if (dir) logs.show(`plugin:${dir}`, `Decky: ${dir}`, { source: 'plugin', plugin: dir });
+    const name = client && await resolveName(client, workspacePlugins, arg, 'Show logs of which plugin?');
+    if (name) logs.show(`plugin:${name}`, `Decky: ${name}`, { source: 'plugin', plugin: name });
   });
   command('decky-toolkit.evaluate', () => evaluate(c, consoleOut, ctx));
   command('decky-toolkit.toast', async () => {
@@ -289,13 +289,6 @@ export function deactivate(): void {
  * Plugins view rows pass themselves, the Actions view's Plugin group passes WORKSPACE_PLUGIN, and the
  * palette passes nothing (then pick from the workspace and the device).
  */
-async function resolveDir(client: DeckyClient, ws: PluginWorkspace, arg: unknown, placeHolder: string): Promise<string | undefined> {
-  if (arg === WORKSPACE_PLUGIN) return (await ws.pick(placeHolder))?.dir;
-  if (typeof arg === 'string') return arg;
-  const dir = (arg as { info?: { dir?: unknown } } | undefined)?.info?.dir;
-  return typeof dir === 'string' ? dir : pickDeviceDir(client, ws, placeHolder);
-}
-
 /** The plugin.json name, which is how Decky (and the reload route) knows a plugin. */
 async function resolveName(client: DeckyClient, ws: PluginWorkspace, arg: unknown, placeHolder: string): Promise<string | undefined> {
   if (arg === WORKSPACE_PLUGIN) return (await ws.pick(placeHolder))?.name;
@@ -350,20 +343,6 @@ async function installZip(c: Connection): Promise<void> {
     const { name, version, dir } = result.installed;
     void vscode.window.showInformationMessage(`Decky Toolkit: installed ${name}${version ? ` ${version}` : ''} as ${dir}.`);
   });
-}
-
-async function pickDeviceDir(client: DeckyClient, ws: PluginWorkspace, placeHolder: string): Promise<string | undefined> {
-  const local = (await ws.ready()).map(p => p.dir);
-  let remote: string[] = [];
-  try {
-    remote = (await client.listPlugins()).map(p => p.dir);
-  } catch {
-    // offline: still allow picking the workspace plugin
-  }
-  const dirs = [...new Set([...local, ...remote])];
-  if (dirs.length === 0) return vscode.window.showInputBox({ prompt: 'Plugin directory name under ~/homebrew/plugins' });
-  const items = dirs.map(d => ({ label: d, description: local.includes(d) ? 'workspace' : undefined }));
-  return (await vscode.window.showQuickPick(items, { placeHolder }))?.label;
 }
 
 async function evaluate(c: Connection, out: vscode.OutputChannel, ctx: vscode.ExtensionContext): Promise<void> {

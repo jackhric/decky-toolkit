@@ -269,11 +269,11 @@ def test_logs_read_previous_runs_and_names(tmp_path, monkeypatch):
     new.write_text("[2026-11-06 02:00:00,000][INFO]: Hello World!\n[2026-11-06 02:00:00,500][INFO]: ready on port 1\n")
 
     reg = make_registry()
-    prev = json.loads(text(run(reg.call("logs_read", {"source": "plugin", "plugin": "demo", "run": 1}))))
+    prev = json.loads(text(run(reg.call("logs_read", {"source": "plugin", "plugin": "Demo Plugin", "run": 1}))))
     assert prev["file"] == old.name and "Goodnight" in prev["text"]
-    only = json.loads(text(run(reg.call("logs_read", {"source": "plugin", "plugin": "demo", "match": "^\\[.*ready"}))))
+    only = json.loads(text(run(reg.call("logs_read", {"source": "plugin", "plugin": "Demo Plugin", "match": "^\\[.*ready"}))))
     assert only["text"].endswith("ready on port 1")
-    assert run(reg.call("logs_read", {"source": "plugin", "plugin": "demo", "run": 5}))["isError"]
+    assert run(reg.call("logs_read", {"source": "plugin", "plugin": "Demo Plugin", "run": 5}))["isError"]
     by_name = json.loads(text(run(reg.call("logs_read", {"source": "plugin", "plugin": "Demo Plugin", "run": 1}))))
     assert by_name["file"] == old.name
 
