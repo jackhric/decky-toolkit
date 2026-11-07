@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.7.0](https://github.com/jackhric/decky-toolkit/compare/plugin-v0.6.0...plugin-v0.7.0) (2026-11-07)
+
+
+### ⚠ BREAKING CHANGES
+
+* /api/v1/logs/tail and /logs/stream take plugin=<plugin.json name>; logs_read, logs_wait, plugin_methods, plugin_call and plugin_frontend_check take only the plugin.json name.
+
+### Bug Fixes
+
+* every plugin argument is the plugin.json name ([#112](https://github.com/jackhric/decky-toolkit/issues/112)) ([7847b4a](https://github.com/jackhric/decky-toolkit/commit/7847b4ae2b7b1cdbb633542f0cf9d614f00f4499))
+
 ## [0.6.0](https://github.com/jackhric/decky-toolkit/compare/plugin-v0.5.0...plugin-v0.6.0) (2026-11-07)
 
 
