@@ -11,6 +11,8 @@ const ICON_PX = 18;
 // Stable parts of the top bar's source; it is also rendered inside Quick Access with `quickAccessHeader`.
 const NEEDLES = ["quickAccessHeader", "BShowHeader"];
 
+const isSearch = (c: any) => c?.props?.children?.props?.iconMovesOnHover !== undefined;
+
 function openPanel(plugin: string) {
   try {
     deckyState()?.setActivePlugin(plugin);
@@ -46,7 +48,7 @@ function TopBarButton({ plugin, classes, useConnected }: { plugin: string; class
   );
 }
 
-/** The plugin's mark in Steam's top bar next to the notifications bell (main window only), opening its Quick Access panel. */
+/** The plugin's mark in Steam's top bar right after the search field (main window only), opening its Quick Access panel. */
 export function showTopBarIcon(plugin: string, useConnected: () => boolean) {
   return tweak(TOP_BAR_ICON, (track) => {
     const classes = findClassModule((m) => m.HeaderItem && m.Clickable && m.NotificationsIcon) as Classes | undefined;
@@ -68,8 +70,10 @@ export function showTopBarIcon(plugin: string, useConnected: () => boolean) {
       if (props?.quickAccessHeader) return;
       const items = ret?.props?.children?.props?.children;
       if (!Array.isArray(items) || items.some((c) => c?.key === KEY)) return;
-      // The last item is the group that starts with the notifications bell; go just before it.
-      items.splice(Math.max(0, items.length - 1), 0, button);
+      // Right after the search field, found by its iconMovesOnHover prop; else just before the bell's group (last item).
+      const group = items.find((c) => Array.isArray(c?.props?.children) && c.props.children.some(isSearch))?.props.children;
+      if (!group) items.splice(Math.max(0, items.length - 1), 0, button);
+      else if (!group.some((c: any) => c?.key === KEY)) group.splice(group.findIndex(isSearch) + 1, 0, button);
     });
   });
 }
