@@ -97,6 +97,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run typecheck
       - run: pnpm --filter @decky-toolkit/client run typecheck
+      - run: pnpm --filter @decky-toolkit/client test
       - run: pnpm run build
       - run: pnpm run smoke
       - run: npm pack

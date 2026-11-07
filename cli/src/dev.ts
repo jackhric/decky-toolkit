@@ -36,7 +36,12 @@ export async function dev(dir: string, build: boolean, out: (l: string) => void,
     if (!BUILD_NOISE.test(line.trim())) out(`build: ${line}`);
   }) : undefined;
   if (build && !builder) out('No "watch" script in package.json: run your build in watch mode yourself.');
-  if (builder) await Promise.race([built, new Promise(r => setTimeout(r, 120000))]);
+  if (builder) {
+    // Cleared, or it would keep the process alive for up to two minutes after Ctrl-C.
+    let timer: NodeJS.Timeout | undefined;
+    await Promise.race([built, new Promise(r => { timer = setTimeout(r, 120000); })]);
+    clearTimeout(timer);
+  }
   if (!await waitForFile(path.join(root, 'dist', 'index.js'), 60000)) {
     err('dist/index.js did not appear within 60 s; is the build running?');
     if (builder) stopWatchBuild(builder);

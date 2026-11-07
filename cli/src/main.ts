@@ -11,6 +11,7 @@ import { CLAUDE_MCP_ADD as MCP_ADD } from '@decky-toolkit/client/mcpConfig';
 import { PairOutcome, requestApproval } from '@decky-toolkit/client/pairing';
 import { InvalidOption, StatusReport, deploy, deviceStatus, explain, onDevice, pairedClient, parseBuild, parseRestart } from './device';
 import { dev } from './dev';
+import { describeCreated, newPlugin } from './new';
 import { McpServer } from './mcp';
 import { VERSION } from './version';
 
@@ -19,6 +20,9 @@ const HELP = `decky-toolkit ${VERSION}: pair with a Steam Deck running the Decky
 Usage: decky-toolkit <command> [options]
 
 Commands:
+  new [dir] [--name <name>] [--author <author>] [--variant <variant>] [--build <tool>] [--template <version>] [--deploy]
+                                       Create a Decky plugin in dir (default: ./<name>) from decky-plugin-template,
+                                       install and build it; --deploy then runs dev on it
   pair [host[:port]] [--name <name>]   Pair this machine with a device (no host: search the local network)
   status [--json]                      Show the paired device and whether it answers
   mcp                                  Run an MCP server over stdio with the device's tools
@@ -31,8 +35,11 @@ Commands:
   forget                               Forget the pairing on this machine
 
 Options:
-  --restart none|plugin|loader         What deploy reloads (default: picked from the plugin)
-  --build auto|always|never            When deploy runs the build script (default auto: when src/ is newer than dist/index.js)
+  --variant frontend|backend|mcp-tool  new: a panel only (default), plus a Python backend, or plus an MCP tool agents can call
+  --build rollup|vite                  new: the build tool (default rollup, the template's own)
+  --template pinned|latest             new: the template commit this version was tested with (default), or the newest one
+  --restart none|plugin|loader         deploy: what it reloads (default: picked from the plugin)
+  --build auto|always|never            deploy: when it runs the build script (default auto: when src/ is newer than dist/index.js)
   -h, --help                           Show this help
   -v, --version                        Show the version
 
@@ -234,6 +241,18 @@ function parse<O extends NonNullable<ParseArgsConfig['options']>>(argv: string[]
 }
 
 const COMMANDS: Record<string, (argv: string[]) => Promise<number>> = {
+  new: async argv => {
+    const { values, positionals } = parse(argv, {
+      name: { type: 'string' }, author: { type: 'string' }, variant: { type: 'string' }, build: { type: 'string' }, template: { type: 'string' },
+      deploy: { type: 'boolean' },
+    }, 1);
+    const created = await cancellable(signal => newPlugin({ dir: positionals[0], ...values }, ask, out, signal));
+    out(describeCreated(created));
+    if (values.deploy) return dev(created.root, true, out, err);
+    const rel = path.relative(process.cwd(), created.root) || '.';
+    out(`Next: cd ${rel.includes(' ') ? JSON.stringify(rel) : rel} && npx decky-toolkit dev`);
+    return 0;
+  },
   pair: argv => {
     const { values, positionals } = parse(argv, { name: { type: 'string' } }, 1);
     return pair(positionals[0], values.name?.trim() || `CLI on ${hostname()}`);
