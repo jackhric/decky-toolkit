@@ -1,8 +1,10 @@
 {
   "name": "@decky-toolkit/client",
   "private": true,
+  "type": "module",
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/*.test.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

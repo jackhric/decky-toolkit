@@ -2,7 +2,7 @@
 // (the same seams the extension smoke uses). Bundled into the harness next to the CLI; its state lives in
 // $FAKE_DEVICE/state.json so the smoke test can script it and read back what the CLI did.
 import { X509Certificate, createHash, createPublicKey } from 'crypto';
-import { readFileSync, writeFileSync } from 'fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'fs';
 import * as path from 'path';
 
 const stateFile = () => path.join(process.env.FAKE_DEVICE, 'state.json');
@@ -172,8 +172,21 @@ function eventStream(s, signal) {
 
 export function installFake(h) {
   hooks = h;
-  const { transportHooks, discoveryHooks, discoveryTimings, pairingTimings } = h;
+  const { transportHooks, discoveryHooks, discoveryTimings, pairingTimings, scaffoldHooks } = h;
   transportHooks.fetch = deviceFetch;
+  // `new` without the network or pnpm: the template from FAKE_TEMPLATE, a build that writes dist/index.js.
+  if (scaffoldHooks && process.env.FAKE_TEMPLATE) {
+    scaffoldHooks.download = async () => readFileSync(process.env.FAKE_TEMPLATE);
+    scaffoldHooks.latestTools = async () => '0.9.0';
+    scaffoldHooks.pnpm = async () => 'pnpm';
+    scaffoldHooks.run = async (cmd, cwd, log) => {
+      log(`$ ${cmd}`);
+      if (cmd.endsWith('run build')) {
+        mkdirSync(path.join(cwd, 'dist'), { recursive: true });
+        writeFileSync(path.join(cwd, 'dist', 'index.js'), 'export default 1;\n');
+      }
+    };
+  }
   pairingTimings.retryMs = 50;
   discoveryTimings.mdnsMs = 100;
   discoveryTimings.probeTimeoutMs = 100;

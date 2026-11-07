@@ -25,6 +25,7 @@ Needs Node.js 20 or newer.
 
 | Command | What it does |
 | --- | --- |
+| `new [dir] [--name <name>] [--author <author>] [--variant frontend\|backend\|mcp-tool] [--build rollup\|vite] [--template pinned\|latest] [--deploy]` | Create a plugin from [decky-plugin-template](https://github.com/SteamDeckHomebrew/decky-plugin-template) in `dir` (default: the name as a folder), install and build it with pnpm (yours, else a pinned one through `npx`). `--variant` adds a Python backend or an MCP tool, `--build vite` swaps rollup for vite, `--template latest` takes the template's newest commit instead of the tested one. `--deploy` then runs `dev` on it. |
 | `pair [host[:port]] [--name <name>]` | Pair this computer with a device. Without a host it searches the local network. |
 | `status [--json]` | Show the paired device, whether it answers, whether it still accepts this computer and whether its Decky Toolkit plugin serves the client API this CLI needs (`deploy` and `dev` refuse it otherwise; update the plugin with Decky's Install Plugin from URL). |
 | `mcp` | Run an MCP server over stdio: the device's tools plus `plugin_deploy` and `device_status`. |
@@ -41,20 +42,25 @@ The package also exports `decky-toolkit/tools` for your plugin's frontend: regis
 connected to the device can call them as `<plugin folder>_<name>`.
 
 ```ts
-// src/tools.ts, imported once from src/index.tsx: import "./tools";
+// src/tools.ts; call registerTools() from definePlugin in src/index.tsx
 import { registerTool } from "decky-toolkit/tools";
 import { callable } from "@decky/api";
 import { z } from "zod";
 
 const resetCache = callable<[appid?: number], number>("reset_cache");
 
-registerTool({
-  name: "reset_cache",
-  description: "Clear cached artwork and reload the library view.",
-  inputSchema: z.object({ appid: z.number().int().optional() }),
-  execute: async ({ appid }) => ({ cleared: await resetCache(appid) }),
-});
+export function registerTools() {
+  registerTool({
+    name: "reset_cache",
+    description: "Clear cached artwork and reload the library view.",
+    inputSchema: z.object({ appid: z.number().int().optional() }),
+    execute: async ({ appid }) => ({ cleared: await resetCache(appid) }),
+  });
+}
 ```
+
+Call it rather than writing `import "./tools"`: the template's `@decky/rollup` tree-shakes with `preset: "smallest"`,
+which drops a module imported only for its side effects.
 
 The input schema (Zod 4.2+, ArkType, Valibot, any Standard Schema with JSON Schema export, or plain JSON Schema) is the
 argument list agents see, the check before `execute` runs, and the type of `input`. Tools go away when the plugin
