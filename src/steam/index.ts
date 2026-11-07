@@ -3,3 +3,4 @@
 export { installTweakApi, restoreAll, setOff } from "./tweak";
 export { SettingsSection, settingsPages, useTransparentHeader } from "./settings";
 export { theme } from "./theme";
+export { showTopBarIcon, TOP_BAR_ICON } from "./topbar";

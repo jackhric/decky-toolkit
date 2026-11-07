@@ -4,7 +4,7 @@
 
 type MainWindow = {
   m_BrowserWindow?: { document?: Document };
-  m_HeaderStore?: { m_nNumTabbedPagesActingAsHeaderBackground: number };
+  m_HeaderStore?: { m_nNumTabbedPagesActingAsHeaderBackground: number; m_iHideHeaderCount: number };
 };
 
 function mainWindow(): MainWindow | undefined {
@@ -14,6 +14,18 @@ function mainWindow(): MainWindow | undefined {
 export function headerStore() {
   const store = mainWindow()?.m_HeaderStore;
   return typeof store?.m_nNumTabbedPagesActingAsHeaderBackground === "number" ? store : undefined;
+}
+
+/** The top bar's hide counter, which it observes: raising and lowering it makes the bar render once. */
+export function headerHideCounter() {
+  const store = mainWindow()?.m_HeaderStore;
+  return typeof store?.m_iHideHeaderCount === "number" ? store : undefined;
+}
+
+/** Decky's frontend state; `setActivePlugin` picks the panel Quick Access shows on its Decky tab. */
+export function deckyState(): { setActivePlugin(name: string): void } | undefined {
+  const state = (window as any).DeckyPluginLoader?.deckyState;
+  return typeof state?.setActivePlugin === "function" ? state : undefined;
 }
 
 export function mainDocument(): Document | undefined {

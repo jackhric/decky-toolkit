@@ -181,7 +181,9 @@ Every change the frontend makes to Steam's own UI lives in `src/steam/` and goes
 internal first, always returns an undo, and leaves Steam alone when something is missing or throws. Each tweak has a
 name and a status (`active`, `skipped`, `failed`, `off`, `idle`). `ui_tweak` lists them, turns one (or `all`) off or
 back on, and saves the choice in `ui_tweaks_off`, so a tweak that is off stays off across reloads; clients use
-`GET/PUT /api/v1/ui/tweaks`. `ui_tweak` `try` runs a patch for up to 300 s and then undoes it, and `ui_react`
+`GET/PUT /api/v1/ui/tweaks`. The tweaks are `top-bar-icon` (the Decky Toolkit mark at the left of Steam's top bar, green
+while a computer is connected, opening the plugin's Quick Access panel; also "Show in top bar" on the settings page) and
+`transparent-header` (the settings page's see-through top bar). `ui_tweak` `try` runs a patch for up to 300 s and then undoes it, and `ui_react`
 shows what to patch and whether a patch is still in place.
 
 ## Client API

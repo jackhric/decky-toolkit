@@ -55,8 +55,9 @@ See README.md for setup and docs/reference.md for the tool list and architecture
 - `src/steam/` — everything the frontend does past `@decky/ui` into Steam's internals (`internals.ts` is the only
   place that reads Steam globals; `tweak.ts` is the named registry that applies and undoes changes, published as
   `window.__deckyToolkitSteam` for `ui_tweak`, with no imports so `tests/frontend/` (`pnpm test`, CI's plugin job)
-  runs it under plain Node; `react.ts` holds the React hooks; `settings.tsx` the settings-page tweaks; `theme.ts` maps
-  Steam's design tokens to names).
+  runs it under plain Node; `react.tsx` holds `useTweak`, the `Guard` error boundary and `patchMemo` (afterPatch on a
+  React.memo plus the fiber update and re-render); `topbar.tsx` the top bar icon (`top-bar-icon`); `settings.tsx` the
+  settings-page tweaks; `theme.ts` maps Steam's design tokens to names).
 - `src/index.tsx` — Quick Access panel (React, `@decky/ui`, `@decky/api`). Built by `pnpm run build` (Vite,
   `vite.config.ts`) into `dist/index.js`.
 - `scripts/test.sh` — Python tests under uv with the loader's Python major (CI runs it). Deploying this repo to
@@ -401,6 +402,21 @@ See README.md for setup and docs/reference.md for the tool list and architecture
   `GamepadUIMainWindowInstance.m_VirtualKeyboardManager.m_bIsVirtualKeyboardShowing.m_currentValue`.
 - The library home can show a game's footage full screen as its background (seen: Chained Together) while nothing runs;
   `screen_capture` alone looks like a running game, hence the `ui_state` line in its result.
+
+## Top bar facts (verified 2026-11-07, Steam client 1792618285, React 19.1.1)
+- Steam's top bar is a `React.memo` export (source contains `quickAccessHeader` and `BShowHeader`) mounted as a
+  SimpleMemo fiber (tag 15) above `#header` in the main window; Quick Access renders it too with `quickAccessHeader`.
+  It returns a context provider whose child's `props.children` is the item list (fragments of icons, each in Steam's
+  ErrorBoundary). `#header`'s first child is the search, a flex-grow field with its magnifier at its right end, so
+  index 0 of that list is the far left of the bar. Inserting there remounts Steam's items once (unkeyed siblings shift).
+- A SimpleMemo fiber renders `fiber.type`, fixed at creation: after patching `memo.type`, set `fiber.type =
+  fiber.alternate.type = memo.type`. `m_HeaderStore.m_iHideHeaderCount++` then `--` in the same tick re-renders the bar
+  once without hiding it. Header items use the `HeaderItem` and `Clickable` classes of the class module that also has
+  `NotificationsIcon`; a DFL `Focusable` with those classes gets gamepad focus between the search field and the left
+  edge (left from the search) and Steam's focus highlight.
+- Other connected clients keep the icon green (any request with a paired certificate in the last 15 s counts, so
+  every running `decky-toolkit mcp` does); the muted state was checked with a `ui_tweak try` that dropped `clients`
+  from `get_status` answers.
 
 ## Pairing
 The server is TLS-only (TLS 1.3, no setting to turn it off) and authenticates clients by certificate;

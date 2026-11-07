@@ -16,7 +16,7 @@ const entries = new Map<string, Entry>();
 const off = new Set<string>();
 const warned = new Set<string>();
 
-function warnOnce(name: string, err: unknown) {
+export function warnOnce(name: string, err: unknown) {
   if (warned.has(name)) return;
   warned.add(name);
   console.warn(`[Decky Toolkit] Steam tweak "${name}" skipped, Steam left as it was:`, err);

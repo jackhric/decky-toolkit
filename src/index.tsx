@@ -21,7 +21,7 @@ import { FaCog, FaPlug, FaUnlink } from "react-icons/fa";
 import { AboutIcon, PairedDevicesIcon, RemoteInputIcon, ServerIcon } from "./icons";
 import { Mark } from "./Mark";
 import { SteamingMark } from "./SteamingMark";
-import { installTweakApi, restoreAll, setOff, SettingsSection, settingsPages, theme, useTransparentHeader } from "./steam";
+import { installTweakApi, restoreAll, setOff, SettingsSection, settingsPages, showTopBarIcon, theme, TOP_BAR_ICON, useTransparentHeader } from "./steam";
 
 type Status = {
   enabled: boolean;
@@ -71,7 +71,9 @@ type PairedClient = {
 
 type InputSettings = { enabled: boolean; backend: "ei" | "uinput" | null; available: boolean; reason: string | null };
 
+const PLUGIN_NAME = "Decky Toolkit";
 const SETTINGS_ROUTE = "/decky-toolkit/settings";
+const STATUS_POLL_MS = 5000;
 const PROJECT_URL = "https://github.com/jackhric/decky-toolkit";
 const INPUT_BACKENDS: Record<string, string> = { ei: "gamescope (libei)", uinput: "Virtual devices (uinput)" };
 const KIND_LABELS: Record<string, string> = { vscode: "VS Code", mcp: "MCP client", other: "Other" };
@@ -86,6 +88,7 @@ const denyPairRequest = callable<[id: string], PairRequest[]>("deny_pair_request
 const listPairedClients = callable<[], PairedClient[]>("list_paired_clients");
 const forgetPairedClient = callable<[fingerprint: string], PairedClient[]>("forget_paired_client");
 const setInputEnabled = callable<[enabled: boolean], InputSettings>("set_input_enabled");
+const setUiTweak = callable<[name: string, enabled: boolean], Status>("set_ui_tweak");
 
 const toast = (body: string) => toaster.toast({ title: "Decky Toolkit", body });
 const toastError = (e: unknown) => toaster.toast({ title: "Decky Toolkit error", body: String(e) });
@@ -140,14 +143,16 @@ function useToolkit() {
     const onRequest = addEventListener<[info: unknown]>("decky_toolkit_pair_request", () => refreshRequests());
     const onRequests = addEventListener<[list: PairRequest[]]>("decky_toolkit_pair_requests", setRequests);
     const onClients = addEventListener<[list: PairedClient[]]>("decky_toolkit_paired_clients", setClients);
+    const onTweaks = addEventListener<[off: string[]]>("decky_toolkit_ui_tweaks", (off) => setStatus((s) => (s ? { ...s, ui_tweaks_off: off } : s)));
     refresh();
-    const id = setInterval(refresh, 5000);
+    const id = setInterval(refresh, STATUS_POLL_MS);
     return () => {
       clearInterval(id);
       removeEventListener("decky_toolkit_input_state", onInput);
       removeEventListener("decky_toolkit_pair_request", onRequest);
       removeEventListener("decky_toolkit_pair_requests", onRequests);
       removeEventListener("decky_toolkit_paired_clients", onClients);
+      removeEventListener("decky_toolkit_ui_tweaks", onTweaks);
     };
   }, []);
 
@@ -223,6 +228,22 @@ function useToolkit() {
         />,
       ),
   };
+}
+
+/** Whether a computer is connected, for the top bar icon; polls like the panel does. */
+function useConnected(): boolean {
+  const [connected, setConnected] = useState(false);
+  useEffect(() => {
+    let live = true;
+    const poll = () => getStatus().then((s) => live && setConnected(!!s.clients?.length), () => {});
+    poll();
+    const id = setInterval(poll, STATUS_POLL_MS);
+    return () => {
+      live = false;
+      clearInterval(id);
+    };
+  }, []);
+  return connected;
 }
 
 const showPairingHelp = () =>
@@ -436,6 +457,15 @@ function SettingsPage() {
           {status ? serverState(status) : "Loading…"}
         </Field>
       </DialogControlsSection>
+      <SettingsSection title="Steam">
+        <ToggleField
+          label="Show in top bar"
+          description="The Decky Toolkit mark at the left of the top bar, green while a computer is connected. Selecting it opens this panel."
+          checked={!!status && !status.ui_tweaks_off?.includes(TOP_BAR_ICON)}
+          disabled={busy || !status}
+          onChange={(v) => run(() => setUiTweak(TOP_BAR_ICON, v))}
+        />
+      </SettingsSection>
       <SettingsSection title="Network">
         <Field label="Address" focusable>
           {status ? `${status.ip}:${status.port}` : "…"}
@@ -540,8 +570,16 @@ function SettingsPage() {
 
 export default definePlugin(() => {
   installTweakApi();
+  let unloaded = false;
   const tweaksOff = addEventListener<[off: string[]]>("decky_toolkit_ui_tweaks", setOff);
-  getStatus().then((s) => setOff(s.ui_tweaks_off ?? []), () => {});
+  // The saved off list first, so a tweak that is off never shows for a moment.
+  getStatus()
+    .then((s) => s.ui_tweaks_off ?? [], () => [])
+    .then((off) => {
+      if (unloaded) return;
+      setOff(off);
+      showTopBarIcon(PLUGIN_NAME, useConnected);
+    });
   const paired = addEventListener<[remote: string, clientName?: string]>("decky_toolkit_paired", (remote, clientName) => {
     toast(`${clientName ?? "Client"} paired from ${remote}`);
   });
@@ -557,7 +595,7 @@ export default definePlugin(() => {
   });
   routerHook.addRoute(SETTINGS_ROUTE, SettingsPage);
   return {
-    name: "Decky Toolkit",
+    name: PLUGIN_NAME,
     titleView: (
       <div className={staticClasses.Title} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flex: 1, padding: 0 }}>
         <div>Decky Toolkit</div>
@@ -576,6 +614,7 @@ export default definePlugin(() => {
     icon: <FaPlug />,
     onDismount() {
       // Decky calls this without a try/catch: Steam is restored first and nothing after it may throw.
+      unloaded = true;
       restoreAll();
       const steps = [
         () => removeEventListener("decky_toolkit_paired", paired),
