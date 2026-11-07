@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/jackhric/decky-toolkit/compare/cli-v0.6.0...cli-v0.6.1) (2026-11-07)
+
+
+### Bug Fixes
+
+* **cli:** read the plugin log by its plugin.json name after a deploy ([#115](https://github.com/jackhric/decky-toolkit/issues/115)) ([db41538](https://github.com/jackhric/decky-toolkit/commit/db415380b90e22e6bb75a46f8d229b4dd7a2e1ee))
+
 ## [0.6.0](https://github.com/jackhric/decky-toolkit/compare/cli-v0.5.0...cli-v0.6.0) (2026-11-07)
 
 
