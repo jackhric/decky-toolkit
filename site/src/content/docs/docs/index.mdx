@@ -1,38 +1,22 @@
 ---
 title: Overview
-description: What Decky Toolkit is and how its pieces fit together.
+description: What Decky Toolkit is and where to start.
 ---
 
-import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+import { LinkCard } from '@astrojs/starlight/components';
 
-Decky Toolkit lets you build, test and deploy SteamOS plugins from VS Code or VSCodium. It has two parts:
+Decky Toolkit lets you build, test and deploy Decky Loader plugins on your SteamOS device from VS Code or VSCodium.
+It has three parts:
 
-- **The Decky Toolkit plugin** runs on your SteamOS device (Steam Deck, SteamOS, Bazzite) under
-  [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader). It starts an HTTP server on port `8765`
-  that also speaks MCP, and shows a small Quick Access panel where you approve pairing requests.
-- **The VS Code extension** connects to that server. It deploys the plugin in your workspace, shows the
-  device's screen, streams logs and gives you a console for the Steam UI.
+- A Decky Loader plugin on the device
+- A VS Code extension that deploys your plugin, shows the device's screen and streams its logs
+- A command line tool that gives coding agents such as Claude Code the device over MCP
 
-Scripts and MCP clients such as Claude Code can use the same server.
+![VS Code with the device's screen open in a tab](../../../assets/docs/vscode-screen.webp)
 
-<LinkCard title="Get started" description="Install the extension and the plugin, pair, and deploy." href="getting-started/" />
-
-## Features
-
-<CardGrid>
-  <Card title="Live reload your plugin" icon="rocket">
-    Save a file and just your plugin reloads on the device, without restarting Decky Loader. [Read more](features/deploy/)
-  </Card>
-  <Card title="Remote control" icon="seti:image">
-    Remotely control and command your device from your editor. [Read more](features/screen/)
-  </Card>
-  <Card title="Logs where you work" icon="document">
-    Loader and plugin logs in output channels. [Read more](features/logs/)
-  </Card>
-  <Card title="Poke the Steam UI" icon="seti:javascript">
-    Evaluate JavaScript in Steam's `SharedJSContext`. [Read more](features/console/)
-  </Card>
-  <Card title="Scriptable" icon="setting">
-    An HTTP API and MCP server for your own tools and agents. [Read more](features/api/)
-  </Card>
-</CardGrid>
+<LinkCard title="Quick start" description="Install, pair and deploy your first plugin." href="getting-started/" />
+<LinkCard title="Use the extension" description="Devices, logs, game files, controllers and the console." href="features/extension/" />
+<LinkCard title="Deploy and live reload" description="Reload your plugin on every save." href="features/deploy/" />
+<LinkCard title="Screen and input" description="See and use the device from your editor." href="features/screen/" />
+<LinkCard title="CLI and MCP" description="Connect Claude Code or any MCP client." href="features/cli/" />
+<LinkCard title="Your plugin's own tools" description="Let agents call into your plugin." href="features/plugin-tools/" />

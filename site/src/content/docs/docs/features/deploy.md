@@ -1,48 +1,54 @@
 ---
-title: Live reload your plugin
-description: Save a file and just your Decky Loader plugin reloads on the device, without restarting Decky Loader.
+title: Deploy and live reload
+description: Deploy your Decky Loader plugin with one key and reload it on every save, without restarting Decky Loader.
 sidebar:
-  order: 1
+  order: 2
 ---
 
-The extension finds Decky plugins in your workspace: every folder with a `plugin.json`, in a workspace
-folder or up to two levels below it. It installs to `~/homebrew/plugins/<folder name>` (the
-`decky-toolkit.pluginDirName` setting overrides the name); a plugin the device already has under the same
-`plugin.json` name is updated where it is. Plugins are expected to follow the
-[decky-plugin-template](https://github.com/SteamDeckHomebrew/decky-plugin-template) layout.
+Open your plugin's folder in VS Code. Any folder with a `plugin.json` works; the
+[decky-plugin-template](https://github.com/SteamDeckHomebrew/decky-plugin-template) layout is expected.
 
-Turn on [deploy on change](#deploy-on-change) and every save reloads your plugin. To deploy on demand, press
-<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd> or click `Deploy <name>` in the status bar.
+## Deploy
 
-## What a deploy does
+Press <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd>, click **Deploy** in the status bar, or click **Plugin → Deploy** in
+the Actions view.
 
-1. **Build, only if needed.** With `decky-toolkit.deploy.build` set to `auto` (the default), `pnpm run build`
-   runs only when a file under `src/` (or `tsconfig.json` / `rollup.config.*` / `vite.config.*`) is newer than
-   `dist/index.js`. `main.py` and `py_modules/` never need a build.
-2. **Stage and zip** what the template ships (`dist`, `plugin.json`, `package.json`, `main.py`, `py_modules`,
-   `defaults`, `assets`, …), without `node_modules`, `__pycache__` and `.git`.
-3. **Upload** to the device, which swaps the plugin directory atomically.
-4. **Reload only this plugin.** Decky restarts its backend and the Steam UI imports the new frontend bundle,
-   with no loader restart. The extension waits until the loader's log says `Loaded <name>`, then reports the time.
+1. The extension builds the plugin if `src/` changed.
+2. It installs the plugin on the device.
+3. It reloads only your plugin. Decky Loader and the Steam UI keep running.
 
-## Reload or full restart
+**Deploy (full restart)** restarts Decky Loader instead. The first deploy of a new plugin always does this.
 
-A normal deploy reloads only your plugin. **Deploy (full restart)** restarts Decky Loader instead, which
-also reloads the Steam UI. Use it when the plugin is not loaded yet; the first deploy
-of a new plugin always restarts the loader.
+Build output and errors go to the **Decky** output channel.
 
-## Deploy on change
+## Live reload
 
-Turn on **Plugin → Auto-deploy on change** (setting `decky-toolkit.deploy.onChange`). The extension
-runs your plugin's `watch` script and deploys on the first change. From then on, each save is pushed and
-the plugin reloads in place, usually within 100 ms of the build:
+Turn on **Plugin → Auto-deploy on change**. The extension runs your plugin's `watch` script and pushes every
+change to the device:
 
-- A frontend change re-imports only the bundle; the backend keeps running.
-- A Python change restarts the backend.
-- A `plugin.json` or `package.json` change deploys again.
+- A frontend change reloads only the frontend; the backend keeps running
+- A Python change restarts the backend
+- A `plugin.json` or `package.json` change deploys again
 
-You stay where you were: the plugin's Quick Access panel, its own page, the selected settings tab and the
-focused control. State inside your components starts fresh, since the bundle is imported again. If the plugin fails to load, the error shows in the **Decky Toolkit** output with the
-line in your source.
+You stay where you were: the plugin's Quick Access panel, its page and the focused control. State inside your
+components starts fresh after each reload.
 
-Outside VS Code, `npx decky-toolkit dev` in your plugin folder does the same until you press Ctrl-C.
+If the plugin fails to load, the error shows in the **Decky** output channel with the line in your `src/` file.
+
+## Other actions
+
+- **Reload backend** restarts your plugin's backend without deploying
+- **Show plugin logs** follows your plugin's log
+- **Install plugin zip…** installs any plugin zip from disk
+
+## Settings
+
+| Setting | What it does |
+| --- | --- |
+| `decky-toolkit.deploy.onChange` | Auto-deploy on change, off by default |
+| `decky-toolkit.deploy.build` | `auto` builds only when needed, or `always` / `never` |
+| `decky-toolkit.deploy.watchBuild` | Run the `watch` script during auto-deploy, on by default |
+| `decky-toolkit.pluginDirName` | Folder name on the device for a first install |
+
+Without VS Code, run `npx -y decky-toolkit dev` in your plugin folder for the same live reload. See
+[CLI and MCP](../cli/).

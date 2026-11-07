@@ -1,46 +1,62 @@
 ---
-title: Get started
-description: Install the extension and the plugin, pair your editor with the device, and deploy.
+title: Quick start
+description: Install the plugin and the extension, pair your editor with your SteamOS device and deploy your plugin.
 ---
 
-You need a SteamOS device running [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) 3.3 or
-newer, and VS Code 1.90+ or VSCodium on your computer.
+You need a SteamOS device with [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) 3.3 or newer,
+and VS Code 1.90+ or VSCodium on your computer. Both must be on the same network.
 
-## 1. Install the extension
+## 1. Install the plugin on the device
 
-Search for **Decky Toolkit** in the Extensions view, or install it from a terminal:
+1. On the device, open Decky's settings and turn on **General → Other → Developer mode**.
+2. Open **Developer → Third-Party Plugins → Install Plugin from URL**.
+3. Enter this address and press **Install**:
+
+   ```text
+   https://jackhric.github.io/decky-toolkit/decky-toolkit.zip
+   ```
+
+4. Confirm the warnings.
+
+Open Quick Access (…) → **Decky Toolkit**. The panel shows the device's address.
+
+## 2. Install the extension
+
+Search for **Decky Toolkit** in the Extensions view, or run:
 
 ```sh
 code --install-extension jackhric.decky-toolkit     # VS Code
 codium --install-extension jackhric.decky-toolkit   # VSCodium
 ```
 
-The extension is on the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=jackhric.decky-toolkit)
-and [Open VSX](https://open-vsx.org/extension/jackhric/decky-toolkit).
+## 3. Find the device
 
-## 2. Install the plugin on your SteamOS device
+Click the **Decky** icon in the Activity Bar. The extension searches your network. A device on the same network
+appears under **On this network**.
 
-1. In Decky's settings, turn on **General → Other → Developer mode**.
-2. Open **Developer → Third-Party Plugins → Install Plugin from URL** and enter:
+On another network, click **Add a device by address…** and enter the address from the device's panel.
 
-   ```text
-   jackhric.github.io/decky-toolkit/decky-toolkit.zip
-   ```
+![The Devices view with a paired device and an empty On this network group](../../../assets/docs/vscode-devices.png)
 
-3. Decky warns about third-party plugins (**Continue** unlocks after a few seconds), then asks you to confirm.
+_A device that is already paired. It is on another network, so it was added by address._
 
-Open Quick Access (…) → **Decky Toolkit**. The panel shows the device's IP address.
+## 4. Pair
 
-## 3. Pair your editor
+1. Click the device. VS Code shows a four-digit code.
+2. On the device, open Quick Access → **Decky Toolkit**.
+3. Check that the code matches and press **Approve**.
 
-1. Click the **Decky** icon in the Activity Bar, then **Add device**, and enter the IP address.
-2. Click the device. The editor shows a four-digit code.
-3. The device shows a toast with the same code. In Quick Access → **Decky Toolkit**, check the code and
-   press **Approve**.
+![The Decky Toolkit panel on the device asking to approve VS Code, with the code](../../../assets/docs/device-approve.webp)
 
-Nothing has to be typed in. A request waits as long as the editor is waiting.
+You only pair once. The extension connects by itself next time.
 
-## 4. Deploy your plugin
+## 5. Deploy your plugin
 
-Open your plugin's folder (any folder with a `plugin.json`) and press <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd>.
-See [Live reload your plugin](../features/deploy/) for what happens.
+Open your plugin's folder (any folder with a `plugin.json`) and press <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd>
+(<kbd>Cmd</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd> on macOS). Your plugin is built if needed, installed and loaded.
+
+## Next
+
+- [Use the extension](../features/extension/): screen, logs, game files, controllers
+- [Deploy and live reload](../features/deploy/): reload your plugin on every save
+- [CLI and MCP](../features/cli/): give a coding agent your device
