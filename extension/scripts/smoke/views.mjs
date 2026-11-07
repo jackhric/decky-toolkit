@@ -71,7 +71,10 @@ await check('package.json: container, activation, commands, menus, version', asy
     for (const [, key] of w.replace(/\/(?:\\.|[^/])+\//g, '/re/').matchAll(/(?:^|&&|\|\||\(|!)\s*([A-Za-z][\w.-]*)/g)) assert.ok(allowedKeys.has(key), `context key ${key} in ${w}`);
   }
   const lostViews = ['decky-toolkit.actions', 'decky-toolkit.plugins', 'decky-toolkit.games', 'decky-toolkit.controllers'];
-  assert.deepEqual([...new Set(pkg.contributes.viewsWelcome.map(w => w.view))], ['decky-toolkit.controllers', ...lostViews.filter(v => !v.endsWith('controllers'))]);
+  assert.deepEqual([...new Set(pkg.contributes.viewsWelcome.map(w => w.view))],
+    ['decky-toolkit.controllers', ...lostViews.filter(v => !v.endsWith('controllers')), 'workbench.explorer.emptyView']);
+  assert.deepEqual(welcomeFor('workbench.explorer.emptyView', new Map()).map(t => t.split('\n').at(-1)), ['[New Decky Plugin](command:decky-toolkit.newPlugin)'],
+    'an empty window offers to create a plugin');
   for (const view of lostViews) {
     for (const link of ['connecting', 'unreachable', 'rejected', 'disconnected']) {
       const shown = welcomeFor(view, new Map([['decky-toolkit.link', link]]));
@@ -207,12 +210,13 @@ await check('welcome view: flat logo, Add a device, plugin requirement, pairing 
   assert.deepEqual(calls.executed.find(([id]) => id === 'workbench.action.openWalkthrough'), ['workbench.action.openWalkthrough', 'jackhric.decky-toolkit#pairing', false]);
 
   const walk = pkg.contributes.walkthroughs.find(w => w.id === 'pairing');
-  assert.deepEqual(walk.steps.map(st => st.id), ['install', 'add', 'approve', 'screen']);
+  assert.deepEqual(walk.steps.map(st => st.id), ['install', 'add', 'approve', 'screen', 'create']);
+  assert.match(walk.steps.at(-1).description, /\(command:decky-toolkit\.newPlugin\)$/);
   for (const st of walk.steps) assert.ok(existsSync(path.join(root, st.media.svg)), st.media.svg);
   assert.match(walk.steps[0].description, /jackhric\.github\.io\/decky-toolkit\/decky-toolkit\.zip/);
   assert.equal(calls.context.get('decky-toolkit.hasDevices'), true, 'a saved device shows the tree instead');
   assert.deepEqual(visibleViews(new Map([['decky-toolkit.hasDevices', false]])), ['decky-toolkit.welcome']);
-  return 'add → decky-toolkit.addDevice, plugin → GitHub, pairing → walkthrough (4 steps); welcome ⇄ tree on decky-toolkit.hasDevices';
+  return 'add → decky-toolkit.addDevice, plugin → GitHub, pairing → walkthrough (5 steps); welcome ⇄ tree on decky-toolkit.hasDevices';
 });
 
 await check('Connect on an unpaired device files a pairing request, waits for approval and connects', async () => {
@@ -280,7 +284,8 @@ await check('connected, no plugin.json: Actions roots Screen / Plugin / Loader /
   assert.equal(screen.description, '30 fps · 19.5 Mbps', 'stats polled because the Actions view is visible');
   assert.match(kids.Screen[1].tooltip, /current frame as a JPEG/);
   assert.equal(plugin.description, 'no plugin.json in workspace');
-  for (const c of kids.Plugin) {
+  assert.equal(kids.Plugin.at(-1).description, undefined, 'New plugin… needs no plugin folder');
+  for (const c of kids.Plugin.slice(0, -1)) {
     assert.equal(c.description, 'needs a plugin folder');
     assert.equal(c.iconPath.color.id, 'disabledForeground');
   }
@@ -289,7 +294,7 @@ await check('connected, no plugin.json: Actions roots Screen / Plugin / Loader /
 });
 
 await check('Plugin group without plugin.json: clicks explain why, no request', async () => {
-  for (const leaf of (await actionsProvider().getChildren((await actionsProvider().getChildren())[1]))) {
+  for (const leaf of (await actionsProvider().getChildren((await actionsProvider().getChildren())[1])).filter(l => l.command.command !== 'decky-toolkit.newPlugin')) {
     fetched.length = 0;
     calls.messages.length = 0;
     await run(leaf.command.command, ...(leaf.command.arguments ?? []));

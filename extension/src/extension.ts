@@ -20,6 +20,7 @@ import {
 import { toggleInput } from './input';
 import { LogManager } from './logs';
 import { navigate, openPluginPanel, simpleNavigate } from './navigation';
+import { newPlugin, resumeNewPlugin } from './newPlugin';
 import { connect, pair } from './pairing';
 import { PluginsTreeProvider } from './pluginsTree';
 import { PreviewViewProvider } from './preview';
@@ -141,6 +142,10 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   };
   const deployer = new DeployController(c, workspacePlugins, deployOut, afterDeviceChange);
   ctx.subscriptions.push(deployer);
+  // Opening a folder usually restarts the extension host; when it does not, the folder change resumes it.
+  const resume = () => void resumeNewPlugin(ctx, c, workspacePlugins, deployer).catch(e => deployOut.appendLine(`Deploying the new plugin failed: ${describeError(e)}`));
+  ctx.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(resume));
+  resume();
 
   const command = (id: string, fn: (arg?: unknown) => Promise<unknown>) =>
     ctx.subscriptions.push(vscode.commands.registerCommand(id, async (arg?: unknown) => {
@@ -205,6 +210,7 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   command('decky-toolkit.gameProtonLog', arg => gameProtonLog(c, gamesTree, arg));
   command('decky-toolkit.openInExplorer', arg => openNodeInExplorer(c, arg));
   command('decky-toolkit.copyDeckyPath', arg => copyDeckyPath(arg));
+  command('decky-toolkit.newPlugin', () => newPlugin(ctx, c, deployOut));
   command('decky-toolkit.deploy', () => deployer.deploy());
   command('decky-toolkit.deployFull', () => deployer.deploy({ full: true }));
   command('decky-toolkit.toggleAutoDeploy', async () => {

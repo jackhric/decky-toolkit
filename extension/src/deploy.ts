@@ -174,6 +174,20 @@ export class DeployController implements vscode.Disposable {
     this.item.show();
   }
 
+  /** The plugin is about to be deployed anyway (a new plugin opened with Open and Deploy). */
+  skipDetectPrompt(): void {
+    this.prompted = true;
+  }
+
+  /** Deploy, then turn on auto-deploy with live sync already running, so the first change reloads in place. */
+  async deployAndSync(p: WorkspacePlugin): Promise<void> {
+    const step = await this.deploy({ plugin: p });
+    // With auto-deploy already on, the deploy started live sync itself.
+    if (!step || (step.confirm && !step.confirm.confirmed) || DeployController.autoDeployEnabled) return;
+    await this.toggleAutoDeploy();
+    await this.startLive(p, step.dir);
+  }
+
   private maybePrompt(): void {
     const p = this.target;
     const device = this.conn.connectedDevice;
@@ -196,9 +210,19 @@ export class DeployController implements vscode.Disposable {
   private armAutoDeploy(): void {
     this.autoSubs.forEach(s => s.dispose());
     this.autoSubs = [];
-    this.dropLive();
     this.stopBuilders();
-    if (!DeployController.autoDeployEnabled) return;
+    if (!DeployController.autoDeployEnabled) {
+      this.dropLive();
+      return;
+    }
+    // A session survives a rescan that left its plugin as it was: the device still has what it synced.
+    for (const [root, sync] of this.live) {
+      const p = this.ws.plugins.find(x => x.root === root);
+      if (!p || JSON.stringify({ ...p, dir: sync.plugin.dir }) !== JSON.stringify(sync.plugin)) {
+        sync.dispose();
+        this.live.delete(root);
+      }
+    }
     const watchBuild = vscode.workspace.getConfiguration('decky-toolkit').get<boolean>('deploy.watchBuild', true);
     for (const p of this.ws.plugins) {
       const w = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(

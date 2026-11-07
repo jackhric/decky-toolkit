@@ -28,7 +28,8 @@ await esbuild.build({
       "export * from './src/controllers'; export * from './src/navigation'; export { DeckyClient, HttpError, eventTimings } from '../packages/client/src/client'; " +
       "export * from './src/games'; export * from './src/remoteFs'; export * from './src/discovery'; export * from '../packages/client/src/transport'; " +
       "export { pairingCode } from './src/pairing'; export { DeviceProxy } from './src/proxy'; export { Connection } from './src/connection'; " +
-      "export * as identityFile from '../packages/client/src/identity';",
+      "export * as identityFile from '../packages/client/src/identity'; export { scaffoldHooks } from '../packages/client/src/scaffold'; " +
+      "export { PENDING_KEY } from './src/newPlugin';",
     resolveDir: root,
     loader: 'ts',
   },
@@ -120,7 +121,7 @@ export const ui = {};
 const resetUi = () => Object.assign(ui, {
   error: m => { calls.unexpectedErrors.push(m); },
   warning: () => undefined, info: () => undefined, quickPick: () => undefined, inputBox: () => undefined, onProgress: () => undefined,
-  saveDialog: () => undefined,
+  saveDialog: () => undefined, openDialog: () => undefined,
 });
 resetUi();
 const say = kind => async (m, ...rest) => {
@@ -145,6 +146,7 @@ export const vscode = {
   QuickPickItemKind: { Separator: -1, Default: 0 },
   ConfigurationTarget: { Global: 1, Workspace: 2 },
   FileSystemError,
+  InputBoxValidationSeverity: { Info: 1, Warning: 2, Error: 3 },
   FileType: { Unknown: 0, File: 1, Directory: 2, SymbolicLink: 64 },
   FileChangeType: { Changed: 1, Created: 2, Deleted: 3 },
   CancellationError: class extends Error {},
@@ -193,7 +195,7 @@ export const vscode = {
     showInformationMessage: say('info'),
     showInputBox: async opts => ui.inputBox(opts),
     showQuickPick: async (items, opts) => ui.quickPick(await items, opts),
-    showOpenDialog: noop,
+    showOpenDialog: async opts => ui.openDialog(opts),
     showSaveDialog: async opts => { calls.saveDialogs.push(opts); return ui.saveDialog(opts); },
     showTextDocument: async (doc, opts) => { calls.docs.push({ doc, opts }); return {}; },
     setStatusBarMessage: m => { calls.statusMessages.push(m); return new Disposable(); },
@@ -783,7 +785,7 @@ const EXPECTED_ACTIONS = {
     ['Open screen panel', 'decky-toolkit.openScreen'], ['Snapshot to file', 'decky-toolkit.snapshot']]],
   Plugin: ['package', 2, [
     ['Deploy', 'decky-toolkit.deploy'], ['Deploy (full restart)', 'decky-toolkit.deployFull'], ['Reload backend', 'decky-toolkit.reloadPlugin'],
-    ['Show plugin logs', 'decky-toolkit.pluginLogs'], ['Auto-deploy on change: Off', 'decky-toolkit.toggleAutoDeploy']]],
+    ['Show plugin logs', 'decky-toolkit.pluginLogs'], ['Auto-deploy on change: Off', 'decky-toolkit.toggleAutoDeploy'], ['New plugin…', 'decky-toolkit.newPlugin']]],
   Loader: ['server', 2, [
     ['Restart loader', 'decky-toolkit.restartLoader'], ['Show loader logs', 'decky-toolkit.loaderLogs'], ['Install plugin zip…', 'decky-toolkit.installZip']]],
   Steam: ['game', 1, [
