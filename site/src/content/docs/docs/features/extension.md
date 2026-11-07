@@ -29,13 +29,22 @@ Once connected, the **Actions** view holds the things you do most.
 ![The Actions view with the Screen, Plugin and Loader groups](../../../../assets/docs/vscode-actions.png)
 
 - **Screen**: **Open screen panel**, **Snapshot to file**
-- **Plugin**: **Deploy**, **Deploy (full restart)**, **Reload backend**, **Show plugin logs**, **Auto-deploy on change**
+- **Plugin**: **Deploy**, **Deploy (full restart)**, **Reload backend**, **Show plugin logs**, **Auto-deploy on change**,
+  **New plugin…**
 - **Loader**: **Restart loader**, **Show loader logs**, **Install plugin zip…**
 - **Steam**: **Navigate to…**, **Open save data…**, **Open plugin panel…**, **Back**, **Quick Access**,
   **Close menus**, **Evaluate JS in Steam UI**, **Toast on device**
 - **MCP**: **Write MCP config for this workspace**, **Copy MCP URL**
 
 The Plugin group works on the plugin open in your workspace. See [Deploy and live reload](../deploy/).
+
+## New plugin
+
+**New plugin…** creates a plugin from the official
+[decky-plugin-template](https://github.com/SteamDeckHomebrew/decky-plugin-template). Pick a name, the author, what it
+has (a panel only, plus a Python backend, or plus an [agent tool](../plugin-tools/)), Rollup or Vite, the template
+version and a folder. The extension builds it and opens it. With a paired device, **Open and Deploy** also installs it
+and turns on **Auto-deploy on change**, so every save reloads it on the device.
 
 ## Screen
 

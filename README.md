@@ -33,6 +33,7 @@
 
 ## Features
 
+- Start a new plugin from the official template, built and deployed in one step
 - Live reload your plugin on save for both frontend and backend
 - Remote screen with sound and keyboard, mouse and gamepad input
 - Decky Loader, plugin and Steam UI logs in VS Code
