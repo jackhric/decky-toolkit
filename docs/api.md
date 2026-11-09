@@ -332,8 +332,8 @@ MCP tools only. `logs_read(source="steam_console", target?, lines=200, level?="i
 `target` `SharedJSContext` (default), `Steam Big Picture Mode` or `all`; `level` a minimum (default `info`, i.e. everything
 but debug); `since` an entry id (newer entries) or an ISO time (naive = device local time); `grep` a case-insensitive
 substring of text or url. `{source, target, status: [{target, connected, buffered, buffered_debug, dropped,
-connected_since, error}], last_id, count, entries}`. `logs_wait(source="steam_console", pattern, ...)` waits for a
-matching entry.
+connected_since, error}], cursor, count, entries}`; `cursor` is the newest entry id, so `since: cursor` returns only
+newer entries. `logs_wait(source="steam_console", pattern, ...)` waits for a matching entry.
 
 ## UI query
 
@@ -449,11 +449,27 @@ Tools mirror the client routes where both exist (`stream_status` ↔ `/stream/st
 without a version bump.
 
 `logs_read` (`source` `loader`: `since`/`until` as for journalctl; `plugin`: `plugin`, `run` (0 newest, 1 previous
-backend run), `file`; `steam_console`: `target`, `level`, `since` (see [Console](#console)); `proton`: `appid`, Proton's
-`~/steam-<appid>.log` plus the matching lines of Steam's `logs/`; every source: `lines`, `grep`, `match`; an argument
-of another source is refused). `logs_wait` (`pattern`, `source` `loader`/`plugin`/`steam_console`, `timeout`, `count`,
-`since_s` to accept lines from the last few seconds): `{source, matched, matches, waited_ms}`, `matches` being log
-lines or, for `steam_console`, console entries.
+backend run), `file`; `steam_console`: `target`, `level`, `since` (see [Console](#console)); `ui`: Steam UI changes (see
+below); `proton`: `appid`, Proton's `~/steam-<appid>.log` plus the matching lines of Steam's `logs/`; every source:
+`lines`, `grep`, `match`; an argument of another source is refused). `logs_wait` (`pattern`, `source`
+`loader`/`plugin`/`steam_console`/`ui`, `timeout`, `count`, `since` a cursor or `since_s` to accept lines from the last
+few seconds): `{source, matched, matches, waited_ms}`, `matches` being log lines or, for `steam_console` and `ui`,
+entries.
+
+Cursors: every `logs_read` source except `proton` returns `cursor`, the position after what it read; `since: cursor`
+(in `logs_read` or `logs_wait`) returns only what was written after it, and `lines: 0` returns just a cursor. The
+values are opaque: the journal's own cursor (`journalctl --after-cursor`), `<file>@<byte offset>` for a plugin log
+(a read on from it continues into the files of later backend runs; a partly written last line waits for the next
+read), the newest entry id for `steam_console`, and one time per page for `ui`.
+
+`ui` (`steam/ui_trace.py`): the first read injects a recorder into SharedJSContext (which also watches the main
+window's document) and the `QuickAccess` and `MainMenu` views; each keeps its last 1000 events in the page, so
+reads pull them and nothing runs in the backend. Entries are `{time, dt_ms, text}`, `text` such as `quick_access
+visible`, `big_picture focus DIV "Library"`, `main_menu window blur`, `side_menu quick_access`, `route /library/home`,
+`quick_access_tab decky`, `panel <plugin>`, `dialog "<title>"`, `keyboard shown`, `app <appid> <name>`. Gamepad
+focus (a `.gpfocus` class added), `visibilitychange` and window focus/blur are DOM events; the store values are
+sampled every 20 ms on the main window's timer. `recording` lists each page's start (a reloaded page starts again
+and first lists its current state) or why it could not be reached.
 
 `plugin_reload` (`plugin` the plugin.json name, `mode` `backend` default or `frontend`): as `POST /plugins/reload`.
 `plugin_install` (`path` on the device or `zip_base64`, plus `restart` as for `POST /plugins/install`).

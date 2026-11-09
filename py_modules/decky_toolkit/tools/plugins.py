@@ -50,11 +50,12 @@ def register(reg: ToolRegistry, events: EventHub) -> None:
 
     @reg.add(
         "plugin_reload",
-        "Reload one plugin in place, without restarting the loader. mode 'backend' (default) restarts its backend "
-        "and waits until the new frontend bundle is loaded; 'frontend' re-imports only dist/index.js (~10 ms, the "
-        "backend keeps running). Reopens the plugin's panel, its route, settings tab and focus if the user was there "
-        "(never over a running game) and returns errors the plugin logged while loading. Reloading Decky Toolkit's "
-        "own backend only schedules it ('scheduled': the connection drops for a few seconds).",
+        "Reload one plugin without restarting the loader or Steam. After a UI-only change use mode 'frontend': it "
+        "loads the new dist/index.js in ~10 ms and the backend keeps running (its state survives). mode 'backend' "
+        "(default) also restarts the backend, then waits for the new UI. Either way the plugin's panel, route, "
+        "settings tab and focused element come back if the user was there (never over a running game), and errors "
+        "the plugin logged while loading are returned. Reloading Decky Toolkit's own backend only schedules it "
+        "('scheduled': the connection drops for a few seconds).",
         {"properties": {"plugin": {"type": "string", "description": "The plugin.json name (plugin_list)"},
                         "mode": {"type": "string", "enum": ["backend", "frontend"], "default": "backend"}},
          "required": ["plugin"]},
