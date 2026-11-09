@@ -232,10 +232,10 @@ export async function startWatchBuild(root: string, onLine: (line: string) => vo
     shell: true,
     detached: process.platform !== 'win32',
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, PATH: `${path.join(root, 'node_modules', '.bin')}${path.delimiter}${process.env.PATH ?? ''}`, FORCE_COLOR: '0' },
+    env: { ...process.env, PATH: `${path.join(root, 'node_modules', '.bin')}${path.delimiter}${process.env.PATH ?? ''}`, FORCE_COLOR: '0', NO_COLOR: '1' },
   });
   const forward = (d: Buffer) => {
-    for (const line of d.toString().replace(/\x1b\[[0-9;]*m/g, '').split(/\r?\n/)) if (line.trim()) onLine(line);
+    for (const line of d.toString().replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').split(/\r?\n/)) if (line.trim()) onLine(line);
   };
   child.stdout?.on('data', forward);
   child.stderr?.on('data', forward);
