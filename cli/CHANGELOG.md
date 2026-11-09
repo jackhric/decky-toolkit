@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/jackhric/decky-toolkit/compare/cli-v0.6.1...cli-v0.7.0) (2026-11-09)
+
+
+### Features
+
+* **cli:** new command creates a plugin from decky-plugin-template ([1bc697e](https://github.com/jackhric/decky-toolkit/commit/1bc697e090afc93d591d7958409fb98b619853c2))
+
 ## [0.6.1](https://github.com/jackhric/decky-toolkit/compare/cli-v0.6.0...cli-v0.6.1) (2026-11-07)
 
 

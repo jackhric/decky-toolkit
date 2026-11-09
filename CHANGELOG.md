@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.0](https://github.com/jackhric/decky-toolkit/compare/plugin-v0.8.0...plugin-v0.9.0) (2026-11-09)
+
+
+### Features
+
+* **cli:** new command creates a plugin from decky-plugin-template ([1bc697e](https://github.com/jackhric/decky-toolkit/commit/1bc697e090afc93d591d7958409fb98b619853c2))
+* log cursors and a ui log source that records Steam UI changes ([b2e7da0](https://github.com/jackhric/decky-toolkit/commit/b2e7da0a72d391a5ad692d6d1e4438c4212f2c21))
+
 ## [0.8.0](https://github.com/jackhric/decky-toolkit/compare/plugin-v0.7.0...plugin-v0.8.0) (2026-11-07)
 
 

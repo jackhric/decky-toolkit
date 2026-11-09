@@ -1,6 +1,6 @@
 {
   "name": "decky-toolkit-plugin",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Decky Loader plugin that hosts the Decky Toolkit device agent: deploy, logs, screen, input and Steam UI control over HTTP and MCP",
   "type": "module",
   "scripts": {
