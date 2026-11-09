@@ -351,7 +351,10 @@ function editPackageJson(raw: string, spec: PluginSpec): string {
 function editTsconfig(raw: string): string {
   try {
     const j = JSON.parse(raw);
-    j.compilerOptions = { ...j.compilerOptions, skipLibCheck: true };
+    // TypeScript 6 (VS Code's own) rejects the template's "node" (node10) as deprecated, so the new project would
+    // open with an error; "bundler" is what a vite/rollup build resolves like anyway.
+    const resolution = String(j.compilerOptions?.moduleResolution ?? '').toLowerCase();
+    j.compilerOptions = { ...j.compilerOptions, skipLibCheck: true, ...(resolution === 'node' || resolution === 'node10' ? { moduleResolution: 'bundler' } : {}) };
     return JSON.stringify(j, null, 2) + '\n';
   } catch {
     return raw;
@@ -415,8 +418,7 @@ export const scaffoldHooks = {
   run: (cmd: string, cwd: string, log: (line: string) => void, signal?: AbortSignal) => runCommand(cmd, cwd, log, signal),
 };
 
-// The first release whose `decky-toolkit/tools` resolves under the template's `"moduleResolution": "node"` is newer;
-// this one at least has the export.
+// The first release with the `decky-toolkit/tools` export (resolved through it under "bundler").
 const TOOLS_FLOOR = '0.6.1';
 
 export function templateRef(version: TemplateVersion): string {
@@ -451,18 +453,22 @@ export async function writeFiles(dir: string, files: Map<string, PluginFile>): P
 
 export class CommandError extends Error {}
 
+const ANSI = /\x1b\[[0-9;?]*[A-Za-z]/g;
+// picocolors (vite, pnpm) turns colour on for any non-empty FORCE_COLOR, "0" included; NO_COLOR wins over it.
+const NO_COLOR_ENV = { FORCE_COLOR: '0', NO_COLOR: '1' };
+
 /** Runs `cmd` through the shell (pnpm.cmd and npx shims on Windows, the user's PATH); `log` gets whole lines. */
 export function runCommand(cmd: string, cwd: string, log: (line: string) => void, signal?: AbortSignal): Promise<void> {
   log(`$ ${cmd}`);
   return new Promise<void>((resolve, reject) => {
-    const child = spawn(cmd, { cwd, shell: true, env: { ...process.env, FORCE_COLOR: '0' }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(cmd, { cwd, shell: true, env: { ...process.env, ...NO_COLOR_ENV }, stdio: ['ignore', 'pipe', 'pipe'] });
     let tail = '', partial = '';
     const onData = (d: Buffer) => {
       const s = d.toString();
       tail = (tail + s).slice(-2000);
       const lines = (partial + s).split('\n');
       partial = lines.pop()!;
-      for (const l of lines) log(l.replace(/\r$/, ''));
+      for (const l of lines) log(l.replace(ANSI, '').replace(/\r$/, ''));
     };
     child.stdout.on('data', onData);
     child.stderr.on('data', onData);
@@ -471,10 +477,10 @@ export function runCommand(cmd: string, cwd: string, log: (line: string) => void
     child.on('error', e => { signal?.removeEventListener('abort', abort); reject(e); });
     child.on('close', code => {
       signal?.removeEventListener('abort', abort);
-      if (partial) log(partial);
+      if (partial) log(partial.replace(ANSI, ''));
       if (signal?.aborted) return reject(signal.reason);
       if (code === 0) return resolve();
-      const lines = tail.split('\n').map(l => l.replace(/\x1b\[[0-9;]*m/g, '').trim()).filter(Boolean);
+      const lines = tail.split('\n').map(l => l.replace(ANSI, '').trim()).filter(Boolean);
       const hint = [...lines].reverse().find(l => /error|ERR_/i.test(l)) ?? lines.at(-1);
       reject(new CommandError(`${cmd} exited with code ${code}${hint ? `: ${hint}` : ''}`));
     });
