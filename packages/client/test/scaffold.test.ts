@@ -136,7 +136,9 @@ test('pluginFiles: renames, flags, dropped folders and the files of each variant
       assert.ok(!('repository' in pkg) && !('bugs' in pkg) && !('homepage' in pkg) && !('test' in pkg.scripts), what);
       assert.equal(pkg.scripts.typecheck, 'tsc --noEmit');
       assert.equal(JSON.parse(text('tsconfig.json')).compilerOptions.skipLibCheck, true);
-      assert.equal(JSON.parse(text('tsconfig.json')).compilerOptions.moduleResolution, 'node', 'the rest of the template config stays');
+      const ts = JSON.parse(text('tsconfig.json')).compilerOptions;
+      assert.equal(ts.moduleResolution, 'bundler', 'TypeScript 6 rejects "node"');
+      assert.equal(ts.strict, true, 'the rest of the template config stays');
       assert.match(text('LICENSE'), /^Copyright \(c\) 2026, Ada\nOriginal Copyright \(c\) 2022-2024, Steam Deck Homebrew$/m);
       assert.match(text('README.md'), /^# Deck's \{Best\} Plugin$/m);
       assert.match(text('README.md'), /commit abc123d/);
