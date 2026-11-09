@@ -30,7 +30,8 @@ See README.md for setup and docs/reference.md for the tool list and architecture
     element queries), `console.py` (background Steam UI console capture), `apps.py` (Steam library/launch via the
     client JS), `perf.py` (the performance overlay level via `SteamClient.System.Perf`), `toast.py` (Decky toasts),
     `plugin_tools.py` (the tools other plugins register from their frontend, synced over one SharedJSContext session),
-    `tweaks.py` (the saved off list of our own Steam UI tweaks and calls into the frontend registry) and `react.py`
+    `tweaks.py` (the saved off list of our own Steam UI tweaks and calls into the frontend registry), `ui_trace.py` (the
+    `ui` log source: a recorder injected into the Steam UI pages, read by pulling) and `react.py`
     (page scripts for `ui_react`: webpack exports by source, fiber trees, `__deckyPatch` chains).
   - `media/`: `capture.py` (gamescope screen stream), `audio.py` (audio stream), `record.py` (recording to MKV).
   - `input/`: remote input (`ei.py` libei over ctypes, `uinput.py`, `keymap.py`, `service.py` owning state, the

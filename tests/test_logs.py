@@ -20,8 +20,14 @@ class FakeJournal:
 
     async def run(self, *argv: str, timeout: float = 20):
         self.argv.append(argv)
-        n = int(argv[argv.index("-n") + 1]) if "-n" in argv else len(self.lines)
-        return self.code, "\n".join(self.lines[-n:] if n else []) + "\n"
+        after = next((int(a.rsplit("=", 1)[1]) for a in argv if a.startswith("--after-cursor=")), -1)
+        rows = self.lines[after + 1:]
+        n = int(argv[argv.index("-n") + 1]) if "-n" in argv else len(rows)
+        rows = rows[-n:] if n else []
+        out = "\n".join(rows) + "\n" if rows else "-- No entries --\n"
+        if "--show-cursor" in argv and rows:
+            out += f"-- cursor: s=fake;i={len(self.lines) - 1}\n"
+        return self.code, out
 
     async def spawn(self, *argv, **_kwargs):
         self.argv.append(argv)
@@ -88,21 +94,70 @@ def test_filter_lines():
 
 def test_read_journal(journal):
     async def go():
-        assert await logs.read_journal(2) == ["Loaded Demo", "stopped in 0.1s"]
-        assert journal.argv[-1][-2:] == ("-n", "2")
+        assert await logs.read_journal(2) == (["Loaded Demo", "stopped in 0.1s"], "s=fake;i=3001")
+        assert journal.argv[-1][-3:] == ("-n", "2", "--show-cursor")
         # Filtered reads look further back than the lines they return.
-        assert await logs.read_journal(1, grep="line 2999") == ["line 2999"]
-        assert journal.argv[-1][-2:] == ("-n", str(logs.JOURNAL_SCAN))
-        assert await logs.read_journal(3, match=r"^line 29\d\d$") == ["line 2997", "line 2998", "line 2999"]
+        assert (await logs.read_journal(1, grep="line 2999"))[0] == ["line 2999"]
+        assert journal.argv[-1][-3:-1] == ("-n", str(logs.JOURNAL_SCAN))
+        assert (await logs.read_journal(3, match=r"^line 29\d\d$"))[0] == ["line 2997", "line 2998", "line 2999"]
         await logs.read_journal(10, since="-1h", until="now")
-        assert journal.argv[-1][-2:] == ("--since=-1h", "--until=now")
-        assert await logs.read_journal(0) == []
+        assert journal.argv[-1][-3:-1] == ("--since=-1h", "--until=now")
+        assert await logs.read_journal(0) == ([], "s=fake;i=3001")
         journal.code = 1
         with pytest.raises(ValueError):
             await logs.read_journal(5, since="yesterdayish")
         with pytest.raises(RuntimeError):
             await logs.read_journal(5)
     asyncio.run(go())
+
+
+def test_journal_cursor_returns_only_newer_lines(journal):
+    async def go():
+        _, mark = await logs.read_journal(0)
+        assert await logs.read_journal(50, since=mark) == ([], mark)
+        assert journal.argv[-1][6] == f"--after-cursor={mark}"
+        journal.lines += ["Loaded Demo (v2)", "noise"]
+        rows, cursor = await logs.read_journal(50, since=mark, grep="loaded")
+        assert rows == ["Loaded Demo (v2)"] and cursor == "s=fake;i=3003"
+        journal.live = ["Loaded Demo (v3)"]
+        hit = await logs.wait_for("loader", "v3", 2, since=cursor)
+        assert hit["matched"] and journal.argv[-1][-2:] == (f"--after-cursor={cursor}", "-f")
+        with pytest.raises(ValueError, match="not a loader cursor"):
+            await logs.wait_for("loader", "x", 1, since="12")
+        with pytest.raises(ValueError, match="not both"):
+            await logs.wait_for("loader", "x", 1, since=cursor, since_s=5)
+    asyncio.run(go())
+
+
+def test_plugin_cursor_reads_on_across_backend_restarts(plugin_logs):
+    mark = logs.read_plugin("demo", 0)["cursor"]
+    assert mark == f"{plugin_logs['new'].name}@{plugin_logs['new'].stat().st_size}"
+    assert logs.read_plugin("demo", 10, since=mark)["lines"] == []
+    with open(plugin_logs["new"], "a") as f:
+        f.write("one\ntwo\npart")
+    out = logs.read_plugin("demo", 10, since=mark)
+    # The line still being written waits for the next read.
+    assert out["lines"] == ["one", "two"]
+    newer = plugin_logs["dir"] / "2026-11-06 03.00.00.log"
+    with open(plugin_logs["new"], "a") as f:
+        f.write("ial\n")
+    newer.write_text("restarted\n")
+    os.utime(newer, (time.time() + 5, time.time() + 5))
+    again = logs.read_plugin("demo", 10, since=out["cursor"])
+    assert again["lines"] == ["partial", "restarted"] and again["cursor"] == f"{newer.name}@10"
+    with pytest.raises(ValueError, match="not a plugin log cursor"):
+        logs.read_plugin("demo", 5, since="17")
+    with pytest.raises(ValueError, match="is gone"):
+        logs.read_plugin("demo", 5, since="old.log@3")
+
+
+def test_wait_for_plugin_since_cursor(plugin_logs):
+    async def go():
+        mark = logs.read_plugin("demo", 0)["cursor"]
+        with open(plugin_logs["new"], "a") as f:
+            f.write("ready between the mark and the wait\n")
+        return await logs.wait_for("plugin", "ready between", 1, since=mark, plugin="demo")
+    assert asyncio.run(go())["matched"]
 
 
 def test_read_plugin(plugin_logs):
