@@ -37,7 +37,8 @@ INSTRUCTIONS = (
     "goes idle when nobody uses it: the screen turns dark or shows a full-screen game picture (not a running game) "
     "and the stream may stop sending frames. Always wake it before testing or judging the screen, with input_key keys "
     "'down' while nobody is at the device, then check ui_state and the screen again. logs_read and logs_wait cover "
-    "every log, device_run runs shell commands, plugin_reload reloads a plugin in place."
+    "every log; source ui records focus, menu and route changes with ms times (use it for focus or flicker bugs "
+    "instead of screenshots). device_run runs shell commands, plugin_reload reloads a plugin in place."
 )
 
 PARSE_ERROR = -32700
