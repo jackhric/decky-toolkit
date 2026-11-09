@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/jackhric/decky-toolkit/compare/extension-v0.12.0...extension-v0.13.0) (2026-11-09)
+
+
+### Features
+
+* **extension:** create a new plugin from the Decky template ([291428b](https://github.com/jackhric/decky-toolkit/commit/291428b5da3dd0482594802c770f0467a81c941d))
+
 ## [0.12.0](https://github.com/jackhric/decky-toolkit/compare/extension-v0.11.0...extension-v0.12.0) (2026-11-07)
 
 
