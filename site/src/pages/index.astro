@@ -6,6 +6,7 @@ import Features from '../components/Features.astro';
 import Footer from '../components/Footer.astro';
 import Hero from '../components/hero/Hero.astro';
 import Seo from '../components/Seo.astro';
+import Statistics from '../components/Statistics.astro';
 
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 const repo = 'https://github.com/jackhric/decky-toolkit';
@@ -22,6 +23,7 @@ const description = 'Build, deploy and live reload Decky Loader plugins on your 
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <Seo title={title} description={description} />
+    <Statistics />
     <link rel="icon" type="image/svg+xml" href={`${base}/favicon.svg`} />
     <meta name="color-scheme" content="light dark" />
   </head>

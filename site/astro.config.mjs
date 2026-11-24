@@ -2,9 +2,12 @@ import sitemap from '@astrojs/sitemap';
 import starlight from '@astrojs/starlight';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'astro/config';
+import { statisticsHead } from './src/statistics.mjs';
 
 const repo = 'https://github.com/jackhric/decky-toolkit';
 const ogImage = 'https://jackhric.github.io/decky-toolkit/og.jpg';
+
+const building = process.argv.includes('build');
 
 export default defineConfig({
   site: 'https://jackhric.github.io',
@@ -22,6 +25,7 @@ export default defineConfig({
       lastUpdated: true,
       customCss: ['./src/styles/docs.css'],
       head: [
+        ...(building ? statisticsHead : []),
         { tag: 'meta', attrs: { property: 'og:image', content: ogImage } },
         { tag: 'meta', attrs: { property: 'og:image:width', content: '1200' } },
         { tag: 'meta', attrs: { property: 'og:image:height', content: '630' } },
