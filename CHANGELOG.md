@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/jackhric/decky-toolkit/compare/plugin-v0.9.0...plugin-v0.9.1) (2026-11-24)
+
+
+### Bug Fixes
+
+* **site:** list each page once in the sitemap ([#135](https://github.com/jackhric/decky-toolkit/issues/135)) ([7ac9bf5](https://github.com/jackhric/decky-toolkit/commit/7ac9bf5f15f36d80618737c91fbb297d372d39f2))
+
 ## [0.9.0](https://github.com/jackhric/decky-toolkit/compare/plugin-v0.8.0...plugin-v0.9.0) (2026-11-09)
 
 
