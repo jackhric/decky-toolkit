@@ -1,0 +1,5 @@
+---
+import { statisticsHead } from '../statistics.mjs';
+---
+
+{import.meta.env.PROD && statisticsHead.map(({ attrs }) => <script is:inline {...attrs}></script>)}
