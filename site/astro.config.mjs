@@ -10,7 +10,8 @@ export default defineConfig({
   site: 'https://jackhric.github.io',
   base: '/decky-toolkit',
   integrations: [
-    sitemap(),
+    // One entry per page: the trailing-slash form only (the bare /decky-toolkit duplicated the home page).
+    sitemap({ filter: page => page.endsWith('/') }),
     starlight({
       title: 'Decky Toolkit',
       description: 'Build, deploy and live reload Decky Loader plugins on your Steam Deck from VS Code or VSCodium.',
